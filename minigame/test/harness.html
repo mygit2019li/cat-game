@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>minigame harness</title>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+  #gameCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+/* wx 浏览器垫片：把小游戏 wx API 映射到 Web 同构能力（仅供本地测试） */
+(function () {
+  const canvasEl = document.getElementById("gameCanvas");
+  let firstCanvas = true;
+  const startCbs = [], endCbs = [];
+  window.wx = {
+    getSystemInfoSync: () => ({
+      windowWidth: innerWidth, windowHeight: innerHeight, pixelRatio: 2,
+      safeArea: { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+    }),
+    /* 右上角胶囊按钮 mock：模拟真机横屏位置（右上角，宽 87 高 32，右距 7 顶距 4） */
+    getMenuButtonBoundingClientRect: () => ({
+      left: innerWidth - 94, top: 4, right: innerWidth - 7, bottom: 36,
+      width: 87, height: 32
+    }),
+    createCanvas: () => { if (firstCanvas) { firstCanvas = false; return canvasEl; } return document.createElement("canvas"); },
+    setKeepScreenOn: () => {},
+    vibrateShort: () => {},
+    getAccountInfoSync: () => ({ miniProgram: { envVersion: "develop" } }),
+    setEnableDebug: () => {},
+    getStorageSync: (k) => localStorage.getItem(k) || "",
+    setStorageSync: (k, v) => localStorage.setItem(k, v),
+    /* 关系链：主域上报成绩 + 开放数据域消息通道（记录到 window 供测试断言） */
+    setUserCloudStorage: () => {},
+    getOpenDataContext: () => ({
+      postMessage: (msg) => { (window.__odcMsgs = window.__odcMsgs || []).push(msg); }
+    }),
+    createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
+    onWindowResize: (cb) => window.addEventListener("resize", cb),
+    onTouchStart: (cb) => startCbs.push(cb),
+    onTouchEnd: (cb) => endCbs.push(cb)
+  };
+  const toTouch = (e) => {
+    const r = canvasEl.getBoundingClientRect();
+    const t = [{ clientX: e.clientX - r.left, clientY: e.clientY - r.top, identifier: 0 }];
+    return { touches: t, changedTouches: t };
+  };
+  document.addEventListener("pointerdown", (e) => startCbs.forEach(f => f(toTouch(e))));
+  document.addEventListener("pointerup", (e) => endCbs.forEach(f => f(toTouch(e))));
+
+  /* 迷你 CommonJS：模块源码由测试脚本注入 window.__MODULES__ */
+  const REG = (window.__MODULES__ = {});
+  const CACHE = {};
+  window.__req__ = (name) => {
+    if (CACHE[name]) return CACHE[name].exports;
+    const src = REG[name];
+    if (src == null) throw new Error("module not found: " + name);
+    const m = { exports: {} };
+    CACHE[name] = m;
+    new Function("module", "exports", "require", src)(m, m.exports, window.__req__);
+    return m.exports;
+  };
+  window.require = window.__req__;
+})();
+</script>
+</body>
+</html>
