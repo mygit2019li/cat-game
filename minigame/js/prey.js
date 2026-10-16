@@ -116,6 +116,11 @@ module.exports = function (G) {
         this.lift = 64;
         return;
       }
+      if (this.type === "butterfly") {
+        this.warpIn();               // 从上/左/右屏外飞入（含首只）
+        this.applyFlapImpulse();     // 带初始动量，入场即飞
+        return;
+      }
       this.x = b.x + rand(0.15, 0.85) * b.w;
       this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
       this.baseY = this.y;
@@ -142,7 +147,10 @@ module.exports = function (G) {
     warpIn() {
       const b = G.bounds(), m = 110, FD = 120;
       const top = b.y + this.def.yMin * b.h, bot = b.y + this.def.yMax * b.h;
-      const sides = this.stage === 3 ? [0, 1, 2, 3] : (Math.random() > 0.5 ? [0, 1] : [1, 0]);
+      const sides = this.stage === 3 ? [0, 1, 2, 3]
+        : this.type === "butterfly"
+          ? (Math.random() > 0.5 ? [2, 0, 1] : [1, 0, 2])   // 蝴蝶：上/左/右三向飞入
+          : (Math.random() > 0.5 ? [0, 1] : [1, 0]);
       for (let attempt = 0; attempt < 4; attempt++) {
         const side = sides[attempt % sides.length];
         if (side === 0)      { this.x = b.x - m; this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h; this.dirX = 1; }

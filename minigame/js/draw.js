@@ -2,7 +2,11 @@
 module.exports = function (G) {
   const D = {};
 
-  /* ---------- 鱼（设计空间 120×72，中心 60,36） ---------- */
+  /* ---------- 鱼（设计空间 120×72，中心 60,36） ----------
+     体型由品种命中盒宽高比推出：k = (h/w) / 0.6（0.6 = 设计空间 72/120）
+       k < 0.85  瘦长：鱼雷体 + 尖吻 + 叉形燕尾（沙丁鱼、小丑鱼）
+       k ≈ 1     常规：椭圆体（锦鲤）
+       k > 1.15  高身：圆背 + 高背鳍（金鱼、神仙鱼） */
   D.fish = (ctx, p, t) => {
     const sp = p.species || {};
     const c = p.speciesColors || sp.variants && sp.variants[0] || sp;
@@ -11,97 +15,151 @@ module.exports = function (G) {
     if (sp.shape === "puffer") return D.puffer(ctx, p, c, t);
     if (sp.shape === "whale")  return D.whale(ctx, p, c, t);
     if (sp.shape === "turtle") return D.turtle(ctx, p, c, t);
-    const wag = Math.sin(t * Math.PI * 2 / Math.max(p.wagDur || 0.5, 0.08) + p.phase) * 0.35;
-    // 尾
+
+    const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    // 体型纵向系数：优先用品种显式 build，否则由命中盒宽高比推出
+    const k = cl(sp.build || (((sp.h || 72) / (sp.w || 120)) / 0.62), 0.5, 1.4);
+    const H = 23 * k;                       // 身体半高
+    const CY = 36, NOSE = 114, TAIL = 24;   // 吻尖 / 尾柄（身体占满设计宽度）
+    const tailK = Math.max(k, 0.86);        // 尾鳍不跟着身体一起压扁
+    const slim = k < 0.88;
+    const wag = Math.sin(t * Math.PI * 2 / Math.max(p.wagDur || 0.5, 0.08) + p.phase) * (slim ? 0.32 : 0.28);
+    const bodyPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(NOSE, CY);
+      ctx.quadraticCurveTo(101, CY - H * 0.7, 64, CY - H);
+      ctx.quadraticCurveTo(40, CY - H * 0.9, TAIL, CY - H * 0.24);    // 背 → 细尾柄
+      ctx.quadraticCurveTo(TAIL - 4, CY, TAIL, CY + H * 0.24);
+      ctx.quadraticCurveTo(40, CY + H * 0.94, 64, CY + H);
+      ctx.quadraticCurveTo(101, CY + H * 0.74, NOSE, CY);
+      ctx.closePath();
+    };
+
+    // 尾鳍：瘦长鱼走叉形燕尾，其余走扇形尾
     ctx.save();
-    ctx.translate(30, 36); ctx.rotate(wag);
+    ctx.translate(TAIL, CY); ctx.rotate(wag); ctx.scale(1, tailK);
     ctx.fillStyle = c.fin;
-    ctx.beginPath(); ctx.moveTo(2, 0); ctx.lineTo(-26, -22); ctx.lineTo(-19, 0); ctx.lineTo(-26, 22); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    if (slim) {
+      ctx.moveTo(4, 0);
+      ctx.lineTo(-23, -20); ctx.quadraticCurveTo(-11, -6, -12, 0);
+      ctx.quadraticCurveTo(-11, 6, -23, 20);
+    } else {
+      ctx.moveTo(3, 0); ctx.lineTo(-22, -20); ctx.lineTo(-15, 0); ctx.lineTo(-22, 20);
+    }
+    ctx.closePath(); ctx.fill();
     ctx.restore();
+
     // 身体
-    ctx.fillStyle = c.body;
-    ctx.beginPath(); ctx.ellipse(64, 36, 42, 24, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = c.body; bodyPath(); ctx.fill();
     // 腹部受光
     ctx.fillStyle = c.belly; ctx.globalAlpha = 0.7;
-    ctx.beginPath(); ctx.ellipse(66, 44, 30, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(70, CY + H * 0.34, 36, H * 0.38, 0, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
     // 斑纹（裁剪到身体）
     if (c.pattern === "spots") {
-      ctx.save();
-      ctx.beginPath(); ctx.ellipse(64, 36, 42, 24, 0, 0, Math.PI * 2); ctx.clip();
+      ctx.save(); bodyPath(); ctx.clip();
       ctx.fillStyle = c.accent; ctx.globalAlpha = 0.85;
-      ctx.beginPath(); ctx.arc(52, 30, 10, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(86, 44, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(40, 46, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(58, CY - H * 0.24, 10 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(96, CY + H * 0.28, 9 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(44, CY + H * 0.4, 7 * k, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     } else if (c.pattern === "stripes") {
-      ctx.save();
-      ctx.beginPath(); ctx.ellipse(64, 36, 42, 24, 0, 0, Math.PI * 2); ctx.clip();
-      ctx.fillStyle = c.accent; ctx.globalAlpha = 0.75;
-      ctx.fillRect(46, 8, 8, 56);
-      ctx.fillRect(66, 8, 8, 56);
+      ctx.save(); bodyPath(); ctx.clip();
+      ctx.fillStyle = c.accent; ctx.globalAlpha = 0.72;
+      const deep = k > 1.1;                            // 高身鱼：多一道更细的竖纹
+      const bw = (deep ? 6 : 8) * Math.min(1, 1 / k);
+      for (let i = 0; i < (deep ? 3 : 2); i++) {
+        ctx.fillRect(46 + i * (deep ? 17 : 22), CY - H - 8, bw, H * 2 + 16);
+      }
       ctx.restore();
     }
-    // 背鳍 / 臀鳍
+    // 背鳍 / 臀鳍 / 胸鳍（高身鱼鳍更高）
+    const dh = H * (0.5 + 0.28 * k);
     ctx.fillStyle = c.fin;
-    ctx.beginPath(); ctx.moveTo(52, 14); ctx.quadraticCurveTo(66, 0, 80, 14); ctx.quadraticCurveTo(66, 18, 52, 14); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(58, 58); ctx.quadraticCurveTo(68, 70, 80, 58); ctx.quadraticCurveTo(68, 61, 58, 58); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(56, CY - H * 0.85);
+    ctx.quadraticCurveTo(72, CY - H - dh, 92, CY - H * 0.72);
+    ctx.quadraticCurveTo(72, CY - H * 0.9, 56, CY - H * 0.85);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(62, CY + H * 0.85);
+    ctx.quadraticCurveTo(76, CY + H + dh * 0.72, 92, CY + H * 0.74);
+    ctx.quadraticCurveTo(76, CY + H * 0.9, 62, CY + H * 0.85);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(80, CY + H * 0.5);
+    ctx.quadraticCurveTo(70, CY + H + dh * 0.8, 54, CY + H + dh * 0.5);
+    ctx.quadraticCurveTo(68, CY + H * 0.72, 72, CY + H * 0.45);
+    ctx.closePath(); ctx.fill();
     // 鳃线
-    ctx.strokeStyle = c.accent; ctx.lineWidth = 3.5; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(70, 33); ctx.quadraticCurveTo(81, 41.5, 70, 50.5); ctx.stroke();
+    ctx.strokeStyle = c.accent; ctx.lineWidth = 3; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(80, CY - H * 0.52);
+    ctx.quadraticCurveTo(89, CY, 80, CY + H * 0.52);
+    ctx.stroke();
     // 眼
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(90, 30, 6.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#17323b"; ctx.beginPath(); ctx.arc(92, 30, 3.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(93.2, 28.6, 1.1, 0, Math.PI * 2); ctx.fill();
+    const er = cl(5 + 1.5 * k, H * 0.3, H * 0.5);
+    const ey = CY - H * 0.34;
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(99, ey, er, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#17323b"; ctx.beginPath(); ctx.arc(100.6, ey, er * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(101.5, ey - er * 0.22, er * 0.18, 0, Math.PI * 2); ctx.fill();
     // 嘴
-    ctx.strokeStyle = c.accent; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(103, 41); ctx.quadraticCurveTo(107, 44, 111, 41); ctx.stroke();
+    ctx.strokeStyle = c.accent; ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(106, CY + H * 0.16);
+    ctx.quadraticCurveTo(110.5, CY + H * 0.34, 113.5, CY + H * 0.16);
+    ctx.stroke();
   };
 
-  /* ---------- 鲨鱼（灰色鱼雷体 + 新月尾 + 大背鳍 + 鳃裂露齿） ---------- */
+  /* ---------- 鲨鱼（瘦长鱼雷体 + 尖吻 + 新月尾 + 高背鳍 + 5 道鳃裂） ---------- */
   D.shark = (ctx, p, c, t) => {
-    const wag = Math.sin(t * Math.PI * 2 / Math.max(p.wagDur || 0.5, 0.08) + p.phase) * 0.26;
-    // 新月形尾鳍
+    const CY = 36, H = 14;                 // 半高 14 → 体高 28（长 ≈ 90，细长比 3.2:1）
+    const wag = Math.sin(t * Math.PI * 2 / Math.max(p.wagDur || 0.5, 0.08) + p.phase) * 0.24;
+    // 新月形尾鳍（上叶长、下叶短）
     ctx.save();
-    ctx.translate(30, 36); ctx.rotate(wag);
+    ctx.translate(26, CY); ctx.rotate(wag);
     ctx.fillStyle = c.fin;
     ctx.beginPath();
-    ctx.moveTo(8, 0); ctx.lineTo(-24, -25); ctx.quadraticCurveTo(-12, -7, -13, 0);
-    ctx.lineTo(-24, 25); ctx.closePath(); ctx.fill();
+    ctx.moveTo(7, 0);
+    ctx.lineTo(-25, -28); ctx.quadraticCurveTo(-11, -8, -12, 0);
+    ctx.lineTo(-22, 22); ctx.closePath(); ctx.fill();
     ctx.restore();
-    // 鱼雷形身体（吻部尖）
+    // 身体：尖吻 + 细尾柄的鱼雷形
     ctx.fillStyle = c.body;
     ctx.beginPath();
-    ctx.moveTo(113, 36);
-    ctx.quadraticCurveTo(96, 17, 64, 17);
-    ctx.quadraticCurveTo(32, 18, 24, 36);
-    ctx.quadraticCurveTo(32, 54, 64, 55);
-    ctx.quadraticCurveTo(96, 55, 113, 36);
+    ctx.moveTo(114, CY);
+    ctx.quadraticCurveTo(99, CY - H * 0.78, 68, CY - H);        // 上吻线 → 背
+    ctx.quadraticCurveTo(42, CY - H * 0.92, 27, CY - H * 0.26); // 背 → 细尾柄
+    ctx.quadraticCurveTo(23, CY, 27, CY + H * 0.26);
+    ctx.quadraticCurveTo(42, CY + H * 0.94, 68, CY + H);
+    ctx.quadraticCurveTo(99, CY + H * 0.86, 114, CY);           // 下吻线（吻端略尖）
     ctx.closePath(); ctx.fill();
-    // 腹部受光
+    // 腹部受光（反荫蔽）
     ctx.fillStyle = c.belly; ctx.globalAlpha = 0.85;
-    ctx.beginPath(); ctx.ellipse(66, 48, 36, 9, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(68, CY + H * 0.62, 34, H * 0.42, 0, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
-    // 大背鳍 + 第二背鳍
+    // 大背鳍（三角）+ 小第二背鳍
     ctx.fillStyle = c.fin;
-    ctx.beginPath(); ctx.moveTo(50, 18); ctx.quadraticCurveTo(60, -4, 82, 16); ctx.closePath(); ctx.fill();
-    ctx.beginPath(); ctx.moveTo(30, 21); ctx.quadraticCurveTo(34, 11, 44, 20); ctx.closePath(); ctx.fill();
-    // 胸鳍
-    ctx.beginPath(); ctx.moveTo(66, 48); ctx.quadraticCurveTo(60, 66, 42, 64); ctx.quadraticCurveTo(54, 55, 58, 46); ctx.closePath(); ctx.fill();
-    // 鳃裂 3 道
-    ctx.strokeStyle = c.accent; ctx.lineWidth = 2.4; ctx.lineCap = "round";
-    for (let i = 0; i < 3; i++) {
-      ctx.beginPath(); ctx.moveTo(76 + i * 7, 28); ctx.quadraticCurveTo(80 + i * 7, 36, 76 + i * 7, 44); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(48, CY - H * 0.86); ctx.quadraticCurveTo(58, CY - H - 26, 84, CY - H * 0.7); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(31, CY - H * 0.76); ctx.quadraticCurveTo(35, CY - H - 10, 45, CY - H * 0.72); ctx.closePath(); ctx.fill();
+    // 后掠胸鳍 + 小臀鳍
+    ctx.beginPath(); ctx.moveTo(70, CY + H * 0.7); ctx.quadraticCurveTo(58, CY + H + 20, 40, CY + H + 12); ctx.quadraticCurveTo(58, CY + H * 0.9, 62, CY + H * 0.5); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(34, CY + H * 0.82); ctx.quadraticCurveTo(38, CY + H + 8, 48, CY + H * 0.8); ctx.closePath(); ctx.fill();
+    // 鳃裂 5 道
+    ctx.strokeStyle = c.accent; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath(); ctx.moveTo(78 + i * 6, CY - H * 0.5); ctx.quadraticCurveTo(81 + i * 6, CY, 78 + i * 6, CY + H * 0.5); ctx.stroke();
     }
     // 眼（小而凶）
-    ctx.fillStyle = "#17323b"; ctx.beginPath(); ctx.arc(98, 30, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(99.4, 28.6, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#17323b"; ctx.beginPath(); ctx.arc(101, CY - H * 0.24, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(102.2, CY - H * 0.36, 1.1, 0, Math.PI * 2); ctx.fill();
     // 微张的嘴 + 一排小白牙
-    ctx.strokeStyle = c.accent; ctx.lineWidth = 2.6;
-    ctx.beginPath(); ctx.moveTo(110, 41); ctx.quadraticCurveTo(101, 48, 90, 46); ctx.stroke();
+    ctx.strokeStyle = c.accent; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(112, CY + H * 0.32); ctx.quadraticCurveTo(104, CY + H * 0.9, 94, CY + H * 0.72); ctx.stroke();
     ctx.fillStyle = "#fff";
-    [[106, 43.6], [102, 45.6], [98, 46.6], [94, 46.7]].forEach(([tx, ty]) => {
-      ctx.beginPath(); ctx.moveTo(tx - 2, ty - 1.4); ctx.lineTo(tx, ty + 3.4); ctx.lineTo(tx + 2, ty - 1.4); ctx.closePath(); ctx.fill();
+    [[108, CY + H * 0.44], [104.5, CY + H * 0.6], [101, CY + H * 0.7], [97.5, CY + H * 0.74]].forEach(([tx, ty]) => {
+      ctx.beginPath(); ctx.moveTo(tx - 1.8, ty - 1.2); ctx.lineTo(tx, ty + 3); ctx.lineTo(tx + 1.8, ty - 1.2); ctx.closePath(); ctx.fill();
     });
   };
 
@@ -448,7 +506,10 @@ module.exports = function (G) {
     const v = p.bflyVar || { fore: "#ffc63e", fore2: "#ffd76a", hind: "#ff9d42", hind2: "#ffb257", body: "#5a4632" };
     // 翅面开合比例：0=合拢 1=全展（模拟绕身体轴的扇翅）——矢量/HD 皮肤共用
     let ws = 1, lower = 1;
-    if (p.state === "RESTING") { ws = 0.12; lower = 0.08; }        // 停花：立翅合拢
+    if (p.state === "RESTING") {                                   // 落花：翅膀微微张开 + 缓慢呼吸
+      const rb = 0.4 + 0.045 * Math.sin(t * 2.2 + (p.phase || 0));
+      ws = rb; lower = rb - 0.05;
+    }
     else if (p.state === "HOVER") ws = 0.3 + 0.7 * Math.abs(Math.sin(t * Math.PI * 2 / 0.18 + p.phase));
     else if (p.state === "GLIDE") ws = 0.92 + 0.08 * Math.sin(t * 6 + p.phase);   // 滑翔：全展微颤
     else if (p.state === "TAKEOFF" || p.state === "STARTLED") ws = 0.2 + 0.8 * Math.abs(Math.sin(t * Math.PI * 2 / 0.12));

@@ -389,7 +389,8 @@ module.exports = function (G) {
     step(fx.scorches, () => {});
     step(fx.petals, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vy += 60 * d; p.rot += 3 * d; });
     step(fx.paws, () => {});
-    step(fx.floats, (p, d) => { p.y -= 34 * d; });
+    /* 飘字：上浮稍快 + 加速淡出（额外 -0.7*dt），缩短猫咪可追逐窗口 */
+    step(fx.floats, (p, d) => { p.y -= 40 * d; p.life -= d * 0.7; });
   };
 
   fx.draw = (ctx) => {
@@ -461,13 +462,14 @@ module.exports = function (G) {
       ctx.restore();
     });
     ctx.globalAlpha = 1;
+    /* 飘字反馈刻意低调：小字号 + 半透明 + 细描边，避免猫咪把"+1"等文字当成猎物追逐 */
     fx.floats.forEach(p => {
-      const a = Math.min(p.life * 1.6, 1);
+      const a = Math.min(p.life * 1.6, 0.62);            // 整体压低不透明度（≤0.62）
       ctx.globalAlpha = a;
       ctx.textAlign = "center";
-      if (p.kind === "big") { ctx.font = "bold 22px sans-serif"; ctx.fillStyle = "#ffd45e"; ctx.strokeStyle = "rgba(40,26,4,.75)"; ctx.lineWidth = 4; ctx.strokeText(p.text, p.x, p.y); }
-      else if (p.kind === "hint") { ctx.font = "14px sans-serif"; ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.strokeStyle = "rgba(8,30,44,.75)"; ctx.lineWidth = 4; ctx.strokeText(p.text, p.x, p.y); }
-      else { ctx.font = "bold 17px sans-serif"; ctx.fillStyle = "#ffffff"; ctx.strokeStyle = "rgba(20,30,40,.7)"; ctx.lineWidth = 3.5; ctx.strokeText(p.text, p.x, p.y); }
+      if (p.kind === "big") { ctx.font = "bold 14px sans-serif"; ctx.fillStyle = "rgba(255,222,140,.85)"; ctx.strokeStyle = "rgba(30,24,10,.3)"; ctx.lineWidth = 2; ctx.strokeText(p.text, p.x, p.y); }
+      else if (p.kind === "hint") { ctx.font = "12px sans-serif"; ctx.fillStyle = "rgba(255,255,255,.78)"; ctx.strokeStyle = "rgba(8,30,44,.4)"; ctx.lineWidth = 2.5; ctx.strokeText(p.text, p.x, p.y); }
+      else { ctx.font = "11px sans-serif"; ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.strokeStyle = "rgba(20,30,40,.28)"; ctx.lineWidth = 2; ctx.strokeText(p.text, p.x, p.y); }
       ctx.fillText(p.text, p.x, p.y);
     });
     ctx.globalAlpha = 1;

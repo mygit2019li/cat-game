@@ -19,6 +19,14 @@
       {
         "value": "test",
         "type": "folder"
+      },
+      {
+        "value": "检查截图",
+        "type": "folder"
+      },
+      {
+        "value": "README.md",
+        "type": "file"
       }
     ],
     "include": []

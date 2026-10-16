@@ -203,7 +203,7 @@ function onHit(x, y, prey) {
   } else {
     G.bubbleBurst(x, y, 5);
     G.playHit(S.combo);
-    G.platform.vibrate();
+    // 命中鱼不再触发震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
   }
   if (S.combo > 0 && S.combo % 5 === 0) {
     G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");

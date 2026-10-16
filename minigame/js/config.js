@@ -144,6 +144,7 @@ module.exports = function (G) {
      speed：游速档位（乘在基础游速上）——乌龟最慢、沙丁鱼最快
      burst：冲刺爆发倍率（默认 3.1）；dartMul：冲刺频率倍率（越小越爱冲刺）
      shape：默认通用鱼形；puffer/shark/ray/whale/turtle 走专属矢量绘制
+     build：通用鱼形的体型纵向系数（1 = 常规；<1 瘦长鱼雷体；>1 高身鱼）——决定造型，不影响命中盒
      与 H5 原型同构，每个品种支持 1~2 组色（随机取一组） */
   G.FISH_SPECIES = [
     { key: "turtle",  name: "乌龟",   speed: 0.5,  w: 118, h: 78, shape: "turtle", burst: 2.4, dartMul: 1.5,
@@ -160,16 +161,16 @@ module.exports = function (G) {
         { body: "#6d8fb0", belly: "#e2edf5", fin: "#56789a", accent: "#3d5a78", pattern: null },
         { body: "#7a8a99", belly: "#eef3f6", fin: "#5d6f80", accent: "#42556a", pattern: null }
       ] },
-    { key: "gold",    name: "金鱼",   speed: 0.7,  w: 110, h: 88,
+    { key: "gold",    name: "金鱼",   speed: 0.7,  w: 110, h: 88, build: 1.2,
       variants: [{ body: "#ff8c42", belly: "#ffcaa2", fin: "#ff6b2e", accent: "#d94f26", pattern: null }] },
-    { key: "angel",   name: "神仙鱼", speed: 0.75, w: 106, h: 90,
+    { key: "angel",   name: "神仙鱼", speed: 0.75, w: 106, h: 90, build: 1.32,
       variants: [{ body: "#ffd94d", belly: "#fff4c8", fin: "#ffb02e", accent: "#3a3428", pattern: "stripes" }] },
-    { key: "koi",     name: "锦鲤",   speed: 0.85, w: 128, h: 76,
+    { key: "koi",     name: "锦鲤",   speed: 0.85, w: 128, h: 76, build: 0.85,
       variants: [
         { body: "#ff9a4d", belly: "#ffe3bd", fin: "#ff7c33", accent: "#e8542f", pattern: "spots" },
         { body: "#f2f5f7", belly: "#ffffff", fin: "#ffd9a8", accent: "#ff6b3d", pattern: "spots" }
       ] },
-    { key: "clown",   name: "小丑鱼", speed: 1.0,  w: 106, h: 62,
+    { key: "clown",   name: "小丑鱼", speed: 1.0,  w: 106, h: 62, build: 0.78,
       variants: [
         { body: "#ff7a3d", belly: "#ffb27e", fin: "#ff6a2a", accent: "#ffffff", pattern: "stripes" }
       ] },
@@ -182,7 +183,7 @@ module.exports = function (G) {
         { body: "#8fa3ad", belly: "#e9eef0", fin: "#6f848f", accent: "#4c5f68", pattern: null },
         { body: "#7d95b5", belly: "#e5edf5", fin: "#617a9b", accent: "#3f5470", pattern: null }
       ] },
-    { key: "sardine", name: "沙丁鱼", speed: 1.45, w: 124, h: 50, burst: 3.6, dartMul: 0.8,
+    { key: "sardine", name: "沙丁鱼", speed: 1.45, w: 124, h: 50, build: 0.55, burst: 3.6, dartMul: 0.8,
       variants: [
         { body: "#9fc4d8", belly: "#eaf6fb", fin: "#7fa8c0", accent: "#4f7d99", pattern: null },
         { body: "#a9d2c9", belly: "#edfaf4", fin: "#84b9ac", accent: "#5d9488", pattern: null }

@@ -34,26 +34,33 @@ function findChrome() {
   await page.evaluate(() => { window.require("./game.js"); });
   await page.waitForTimeout(400);
 
-  // ---- 图鉴 1：10 种鱼并排（各自设计空间 120×72，2x 缩放）----
+  // ---- 图鉴 1：10 种鱼并排（各自设计空间 120×72，按品种实际宽度分配单元格）----
   await page.evaluate(() => {
     const G = window.G;
+    const CELL = G.FISH_SPECIES.map(sp => Math.round((sp.w || 120) * 1.06) + 14);
+    const W = CELL.reduce((a, b) => a + b, 0);
     const cv = document.createElement("canvas");
-    cv.width = 1240; cv.height = 200; cv.id = "fishSheet";
+    cv.width = W; cv.height = 210; cv.id = "fishSheet";
     cv.style.cssText = "position:fixed;inset:0;z-index:99;background:linear-gradient(#bfe6f2,#8fd0e8)";
     document.body.appendChild(cv);
     const c = cv.getContext("2d");
-    c.fillStyle = "#bfe6f2"; c.fillRect(0, 0, 1240, 200);
+    c.fillStyle = "#bfe6f2"; c.fillRect(0, 0, W, 210);
+    let x = 0;
     G.FISH_SPECIES.forEach((sp, i) => {
       const v = sp.variants[0];
+      const cw = CELL[i], cx = x + cw / 2;
       c.save();
-      c.translate(i * 124 + 62, 100);
-      const k = Math.min(112 / sp.w, 72 / sp.h, 1) * 1.5;   // 统一视觉大小
+      c.translate(cx, 100);
+      const k = (sp.w || 120) / 120;                        // 与游戏内一致的视觉缩放
       c.scale(k, k);
       const fake = { species: sp, speciesColors: v, wagDur: 0.5, phase: i * 0.7, state: "FLAP" };
       G.draw.fish(c, fake, 1.3);
       c.restore();
+      c.strokeStyle = "rgba(20,50,70,.12)"; c.lineWidth = 1;
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x, 210); c.stroke();
       c.fillStyle = "#123"; c.font = "13px sans-serif"; c.textAlign = "center";
-      c.fillText(sp.name, i * 124 + 62, 190);
+      c.fillText(sp.name + (sp.build ? " " + sp.build : ""), cx, 200);
+      x += cw;
     });
   });
   await page.waitForTimeout(150);
