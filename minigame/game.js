@@ -18,20 +18,32 @@ G.result = null;
 G.pauseHold = { active: false, t0: 0, progress: 0 };   // HUD 暂停按钮长按状态（600ms 触发）
 let countT = 0, lastInt = -1;
 
-/* ================= 真机调试面板（预览/体验版自动打开 vConsole） ================= */
+/* ================= 真机调试面板（预览/体验版默认关闭 vConsole，需要时把 enableDebug 改为 true） ================= */
 function initDebug() {
   try {
     if (typeof wx !== "undefined" && wx.setEnableDebug) {
       const info = (typeof wx.getAccountInfoSync === "function") ? wx.getAccountInfoSync() : {};
       const env = (info && info.miniProgram && info.miniProgram.envVersion) || "";
       if (env === "develop" || env === "trial") {
-        wx.setEnableDebug({ enableDebug: true });
-        console.log("[catToy] vConsole enabled for " + env);
+        wx.setEnableDebug({ enableDebug: false });
+        console.log("[catToy] vConsole disabled for " + env);
       }
     }
   } catch (e) { console.log("[catToy] setEnableDebug skipped", e && e.message); }
 }
 initDebug();
+
+/* ================= 分享：结算页"分享好友" + 右上角菜单转发 ================= */
+G.shareResult = () => {
+  const R = G.result || {};
+  const score = R.hits || 0;
+  const title = "我得了" + score + "分，邀请好友快来玩！";
+  G.platform.shareApp({ title, query: "from=share" });   // 不传 imageUrl 时默认截取当前画面
+};
+G.platform.initShare(() => ({
+  title: "逗猫触屏玩具：小鱼、蝴蝶、老鼠和激光点，让猫咪玩到停不下来！",
+  query: "from=menu"
+}));
 
 /* ================= 开局 ================= */
 G.startGame = () => {
@@ -71,6 +83,7 @@ function tickSecond() {
     G.uiFX.stageText = G.stageName(st);
     G.uiFX.stagePop = 1.6;
     G.pokeHud();
+    G.topUpPreys();   // 多只蝴蝶/激光：随阶段递增数量（3→5→7）
   }
 }
 
@@ -164,13 +177,15 @@ function onHit(x, y, prey) {
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
   prey.vanish();
-  G.sparkBurst(x, y, prey.def.sparkColor || "#ffd76a", 8);
+  const sparkC = isLaser
+    ? ((G.laserColorSet && G.laserColorSet())[(prey.laserVar && prey.laserVar.key) || "red"] || {}).spark || "#ff8a8a"
+    : (prey.def.sparkColor || "#ffd76a");
+  G.sparkBurst(x, y, sparkC, 8);
   if (!isLaser) G.ripple(x, y, false);
   G.plantsStartle(x, y);
   if (isMouse) {
     G.dustBurst(x, y, 5);
     G.playSqueak(chasing);
-    G.platform.vibrateHeavy();
     // 命中洞口 = 好洞：清空蹲守热度（半径 60，两排洞互不误伤）
     const Sc = G.scene;
     Sc.holes.forEach((h, i) => { if (Math.hypot(x - h.x, y - h.y) < 60) Sc.holeHeat[i] = []; });
@@ -192,18 +207,16 @@ function onHit(x, y, prey) {
       G.pollenBurst(x, y, 7);
       G.playFlutter();
     }
-    G.platform.vibrate();
   } else if (isLaser) {
     G.sparkBurst(x, y, "#ff5252", 8);
     G.scorch(x, y);
     G.playZap();
     if (holding) G.tone("sine", 1760, 0, 0.14, 0.16);
-    G.platform.vibrateHeavy();
     if (holding) S.bonusHits++;
   } else {
     G.bubbleBurst(x, y, 5);
     G.playHit(S.combo);
-    // 命中鱼不再触发震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
+    // 所有目标命中均不触发设备震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
   }
   if (S.combo > 0 && S.combo % 5 === 0) {
     G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");
@@ -255,18 +268,21 @@ G.platform.onTouchStart = (e) => {
   const tp = e.touches && e.touches[0] || e.changedTouches && e.changedTouches[0];
   if (!tp) return;
   const x = tp.clientX, y = tp.clientY;
+  // UI 布局在虚拟手机尺寸空间，按钮命中需换算到同一空间（玩法猎物仍在真实空间）
+  const S = G.platform.S || 1;
+  const vx = x / S, vy = y / S;
   G.ensureAudio();
   if (G.screen === "playing") {
     // 暂停按钮：长按手势（按下开始计时，松手取消；不判 miss 不影响连击）
     const pr = G.ui.pauseRect;
-    if (pr && x >= pr.x && x <= pr.x + pr.w && y >= pr.y && y <= pr.y + pr.h) {
+    if (pr && vx >= pr.x && vx <= pr.x + pr.w && vy >= pr.y && vy <= pr.y + pr.h) {
       G.pauseHold.active = true;
       G.pauseHold.t0 = performance.now();
       G.pauseHold.progress = 0;
       return;
     }
     G.pauseHold.active = false;
-    if (G.hitButton(x, y)) return;
+    if (G.hitButton(vx, vy)) return;
     // 命中测试（后绘制的优先，对齐 DOM 顶层元素语义）
     let hit = null;
     for (let i = G.preys.length - 1; i >= 0; i--) {
@@ -277,7 +293,7 @@ G.platform.onTouchStart = (e) => {
     return;
   }
   if (G.screen === "counting") return;
-  G.hitButton(x, y);   // 其余界面：按钮优先
+  G.hitButton(vx, vy);   // 其余界面：按钮优先
 };
 G.platform.onTouchEnd = () => {
   if (G.pauseHold.active) { G.pauseHold.active = false; G.pauseHold.progress = 0; }   // 未满 600ms：取消，无惩罚
@@ -297,6 +313,16 @@ function drawGameFrame(t) {
 
 /* ================= 主循环 ================= */
 let lastTs = performance.now();
+/* 把 UI 绘制放进 ctx.scale(S) 坐标系：UI 在虚拟手机尺寸布局，整体放大适配大屏。
+   玩法（猎物/场景）不在此变换内，使用真实坐标系绘制。 */
+function uiScaleCtx(fn) {
+  const S = G.platform.S || 1;
+  if (S === 1) { fn(); return; }
+  ctx.save();
+  ctx.scale(S, S);
+  fn();
+  ctx.restore();
+}
 function loop(ts) {
   const dt = Math.min((ts - lastTs) / 1000, 0.05);
   lastTs = ts;
@@ -331,16 +357,17 @@ function loop(ts) {
 
   // 绘制当前界面
   G.ui.buttons.length = 0;
-  if (G.screen === "home") G.ui.drawHome();
-  else if (G.screen === "settings") G.ui.drawSettings();
-  else if (G.screen === "records") G.ui.drawRecords();
-  else if (G.screen === "leaderboard") G.ui.drawLeaderboard();
-  else if (G.screen === "result") G.ui.drawResult();
+  if (G.screen === "home") uiScaleCtx(() => G.ui.drawHome());
+  else if (G.screen === "settings") uiScaleCtx(() => G.ui.drawSettings());
+  else if (G.screen === "records") uiScaleCtx(() => G.ui.drawRecords());
+  else if (G.screen === "leaderboard") uiScaleCtx(() => G.ui.drawLeaderboard());
+  else if (G.screen === "summon") uiScaleCtx(() => G.ui.drawSummon());
+  else if (G.screen === "result") uiScaleCtx(() => G.ui.drawResult());
   else {
     drawGameFrame(t);
-    if (G.screen === "counting") G.ui.drawCountdown(Math.max(countT, 0));
-    else G.ui.drawHud(t, dt);
-    if (G.screen === "paused") G.ui.drawPause();
+    if (G.screen === "counting") uiScaleCtx(() => G.ui.drawCountdown(Math.max(countT, 0)));
+    else uiScaleCtx(() => G.ui.drawHud(t, dt));
+    if (G.screen === "paused") uiScaleCtx(() => G.ui.drawPause());
   }
   requestAnimationFrame(loop);
 }
@@ -351,6 +378,7 @@ G.platform.resizeCb.push(() => {
     G.buildScene(G.config.targetType);
     G.buildPreys();
     G.preys.forEach(p => { if (p.stage) p.stage = 0; });   // 触发下帧重进阶段
+    G.topUpPreys();   // 旋转屏幕等重建于 3 点后，按当前阶段补足
   }
   if (G.screen === "leaderboard") G.ui.showLB();           // 排行榜卡片区域随屏重发
 });

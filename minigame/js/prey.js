@@ -24,24 +24,24 @@ module.exports = function (G) {
   };
 
   class Prey {
-    constructor(type) {
+    constructor(type, forcedSpecies) {
       this.type = type;
       this.def = G.PREY_DEF[type];
       this.baseW = this.def.w; this.baseH = this.def.h;
       this.speciesSpeed = 1;
       if (type === "fish") {
-        this.species = G.FISH_SPECIES[Math.floor(rand(0, G.FISH_SPECIES.length))];
-        this.speciesSpeed = this.species.speed;
-        this.baseW = this.species.w || this.baseW;
-        this.baseH = this.species.h || this.baseH;
-        this.cruiser = Math.random() < (this.species.speed >= 1.2 ? 0.55 : 0.22);
-        const variants = this.species.variants || [{}];
-        this.speciesColors = variants[Math.floor(rand(0, variants.length))];
-        this.speciesBurst = this.species.burst || 3.1;          // 品种冲刺爆发
-        this.dartMul = this.species.dartMul || 1;               // 品种冲刺频率
-        this.speciesScale = (this.species.w || 120) / 120;      // 品种视觉尺寸（命中盒用 baseW）
+        this.pickFishSpecies(forcedSpecies);
       }
       if (type === "laser") {
+        // 加权随机花色：红色为主，翠绿光点更快更小（约 1/4 概率）
+        const lpool = [];
+        G.LASER_VARIANTS.forEach(v => { for (let i = 0; i < (v.w || 1); i++) lpool.push(v); });
+        this.laserVar = lpool[Math.floor(rand(0, lpool.length))];
+        this.speciesSpeed = this.laserVar.speed;                  // 速度倍率（绿色 1.5）
+        if (this.laserVar.size !== 1) {                           // 花色体型差异
+          this.baseW = Math.round(this.baseW * this.laserVar.size);
+          this.baseH = Math.round(this.baseH * this.laserVar.size);
+        }
         this.state = "dart"; this.stateT = 0; this.stateDur = 1.2;
         this.vx = 1; this.vy = 0;
         this.trailAcc = 0; this.lastTrailX = 0; this.lastTrailY = 0;
@@ -64,6 +64,9 @@ module.exports = function (G) {
         this.landInterval = rand(3, 5);
         this.landTarget = null; this.landStartX = 0; this.landStartY = 0;
         this.restDur = 1.2; this.hoverY0 = 0;
+        this.fadeInT = 0;                                  // 屏内淡入计时
+        this.exitCd = rand(7, 11);                         // 主动飞出屏幕的冷却
+        this.exVx = 0; this.exVy = 0;                      // 飞出屏幕的方向速度
       }
       if (type === "mouse") {
         this.mouseVar = G.MOUSE_VARIANTS[Math.floor(rand(0, G.MOUSE_VARIANTS.length))];
@@ -79,12 +82,39 @@ module.exports = function (G) {
       this.phase = rand(0, Math.PI * 2);
       this.adaptiveScale = 1; this.adaptiveSlow = 1;
       this.comboSpeed = 1; this.comboSpeedTarget = 1; this.comboSize = 1;
-      this.sizeMul = G.DIFF[G.config.difficulty].size;
-      this.speedMul = G.DIFF[G.config.difficulty].speed;
+      const D0 = G.DIFF[G.config.difficulty];
+      this.sizeMul = D0.size;
+      this.speedMul = D0.speed * ((D0.typeSpeed || {})[type] || 1);   // 标准/激烈下蝴蝶与老鼠额外提速
       this.applySize();
       this.spawn();
     }
-    applySize() { this.sc = this.sizeMul * this.adaptiveScale * this.comboSize; }
+    /* 抽取鱼品种（forced 指定品种用于开局去重；复活/补点时重抽保证一局内种类丰富） */
+    pickFishSpecies(forced) {
+      this.species = forced || G.FISH_SPECIES[Math.floor(rand(0, G.FISH_SPECIES.length))];
+      this.speciesSpeed = this.species.speed;
+      this.baseW = this.species.w || this.def.w;
+      this.baseH = this.species.h || this.def.h;
+      this.cruiser = Math.random() < (this.species.speed >= 1.2 ? 0.55 : 0.22);
+      const variants = this.species.variants || [{}];
+      this.speciesColors = variants[Math.floor(rand(0, variants.length))];
+      this.speciesBurst = this.species.burst || 3.1;          // 品种冲刺爆发
+      this.dartMul = this.species.dartMul || 1;               // 品种冲刺频率
+      this.speciesScale = (this.species.w || 120) / 120;      // 品种视觉尺寸（命中盒用 baseW）
+    }
+    applySize() {
+      const S = G.platform.S || 1;
+      const isLaser = this.type === "laser";
+      const big = Math.min(1 + (S - 1) * (isLaser ? 0.8 : 0.45), isLaser ? 1.7 : 1.3);
+      // 小屏（S<1.15，典型手机尺寸）紧凑系数：鱼和老鼠略缩小，鱼额外收窄横向比例（sx），
+      // 避免"又大又胖"；iPad 等大屏（S≥1.15）完全不受影响
+      let slim = 1, sx = 1;
+      if (!isLaser && S < 1.15) {
+        if (this.type === "fish") { slim = 0.9; sx = 0.9; }
+        else if (this.type === "mouse") slim = 0.93;
+      }
+      this.sxMul = sx;
+      this.sc = this.sizeMul * this.adaptiveScale * this.comboSize * big * slim;
+    }
 
     spawn() {
       const b = G.bounds();
@@ -96,8 +126,8 @@ module.exports = function (G) {
       this.dartCd = rand(this.def.dartMin, this.def.dartMax) * (this.dartMul || 1);
       this.burstT = 0;
       if (this.type === "laser") {
-        this.x = b.x + rand(0.15, 0.85) * b.w;
-        this.y = b.y + rand(0.12, 0.88) * b.h;
+        const s0 = this.laserSpot();
+        this.x = s0.x; this.y = s0.y;
         this.baseY = this.y;
         this.state = "dart"; this.stateT = 0;
         this.stateDur = rand(this.def.dartMin, this.def.dartMax);
@@ -145,6 +175,7 @@ module.exports = function (G) {
       if (this.stage === 3) this.newWaypoint();
     }
     warpIn() {
+      if (this.type === "butterfly") { this.butterflyEnter(); return; }
       const b = G.bounds(), m = 110, FD = 120;
       const top = b.y + this.def.yMin * b.h, bot = b.y + this.def.yMax * b.h;
       const sides = this.stage === 3 ? [0, 1, 2, 3]
@@ -207,6 +238,7 @@ module.exports = function (G) {
     /* ============ 主分发 ============ */
     update(dt, t) {
       const b = G.bounds();
+      const MS = Math.pow(G.platform.S || 1, 0.5);   // 大屏下按比例略微提速，保持相对运动手感
       this.comboSpeed += ((this.comboSpeedTarget || 1) - this.comboSpeed) * Math.min(1, dt * 6);
       if (this.type === "mouse")   { this.updateMouse(dt, t); return; }
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
@@ -219,22 +251,22 @@ module.exports = function (G) {
       if (this.stage !== G.session.stage) this.enterStage(G.session.stage);
       if (this.vanishT > 0) {
         this.vanishT -= dt;
-        if (this.vanishT <= 0) { this.vanishT = 0; this.warpIn(); }
+        if (this.vanishT <= 0) { this.vanishT = 0; if (this.type === "fish") this.pickFishSpecies(); this.warpIn(); }
       }
       const sp = d.speed * this.speedMul * this.comboSpeed * this.adaptiveSlow * this.speciesSpeed * (this.cruiser ? 1.5 : 1) * this.stageSpeed * (this.burstT > 0 ? (this.speciesBurst || 3.1) : 1);
       if (this.stage === 1) {
-        this.x += this.dirX * sp * dt;
+        this.x += this.dirX * sp * dt * MS;
         this.y = this.baseY + Math.sin(t * 2 + this.phase) * 3;
         this.faceDir = this.dirX;
       } else if (this.stage === 2) {
-        this.x += this.dirX * sp * 0.8 * dt;
+        this.x += this.dirX * sp * 0.8 * dt * MS;
         this.y = this.midY + Math.sin(t * 2.0 + this.phase) * this.vAmp;
         this.faceDir = this.dirX;
       } else {
         let ang = Math.atan2(this.wy - this.y, this.wx - this.x);
         ang += Math.sin(t * d.wobF + this.phase) * d.wobA * (this.cruiser ? 0.3 : 1);
-        this.x += Math.cos(ang) * sp * dt;
-        this.y += Math.sin(ang) * sp * dt;
+        this.x += Math.cos(ang) * sp * dt * MS;
+        this.y += Math.sin(ang) * sp * dt * MS;
         if (Math.abs(Math.cos(ang)) > 0.25) this.faceDir = Math.cos(ang) > 0 ? 1 : -1;
         const dx = this.wx - this.x, dy = this.wy - this.y;
         if (dx * dx + dy * dy < 3600) this.newWaypoint();
@@ -294,11 +326,12 @@ module.exports = function (G) {
       if (this.mState !== this.state) {
         this.mState = this.state; this.mT = 0;
         if (this.state === "hole") {
-          this.holeWait = this.scared ? rand(0.25, 0.4)
-            : G.session.stage === 1 ? rand(0.5, 0.9) : G.session.stage === 2 ? rand(0.4, 0.7) : rand(0.26, 0.48);
+          this.holeWait = this.scared ? rand(0.18, 0.3)
+            : G.session.stage === 1 ? rand(0.36, 0.66) : G.session.stage === 2 ? rand(0.28, 0.5) : rand(0.18, 0.34);
         }
         if (this.state === "peek") {
           this.scared = false;
+          this.peekFirst = Math.random() > 0.5 ? 1 : -1;   // 左右各看一次：先看的方向随机
           const st0 = G.MOUSE_STAGE[G.session.stage];
           const dur0 = st0.peek / Math.sqrt(Math.max(this.comboSpeed || 1, 1));
           this.fakeAt = (st0.fakeP > 0 && Math.random() < st0.fakeP && dur0 > 1.1) ? rand(0.5, dur0 - 0.45) : -1;
@@ -310,9 +343,10 @@ module.exports = function (G) {
         this.fade = 1;
         const st = G.MOUSE_STAGE[stage];
         const peekDur = st.peek / Math.sqrt(Math.max(this.comboSpeed || 1, 1));
-        this.faceDir = Math.sin(this.mT * 5 + this.phase) > 0 ? 1 : -1;
+        // 左右探头各一次即跑：前 45% 看一边、中 45% 看另一边，看完立即进入逃跑判定
+        this.faceDir = this.mT < peekDur * 0.45 ? this.peekFirst : -this.peekFirst;
         this.y = this.hole.y;
-        const rp = Math.min(this.mT / 0.24, 1);
+        const rp = Math.min(this.mT / 0.15, 1);      // 探头更快（0.24s → 0.15s），一冒头就跑
         const eased = 1 - Math.pow(1 - rp, 3);
         let lift = (1 - eased) * 64;
         if (rp >= 1) {
@@ -334,7 +368,7 @@ module.exports = function (G) {
         const dir = this.dartTarget.x >= this.x ? 1 : -1;
         this.faceDir = dir;
         const sp = st.dartSpeed * Math.sqrt(Math.max(this.comboSpeed || 1, 1)) * (this.adaptiveSlow || 1) * (this.mSpeed || 1);
-        this.x += dir * sp * dt;
+        this.x += dir * sp * dt * Math.pow(G.platform.S || 1, 0.5);
         // 跨排逃窜 y 插值（同排退化为定值）
         const totalDx = this.dartTarget.x - this.dartStartX;
         const prog = Math.abs(totalDx) > 1 ? Math.min(1, (this.x - this.dartStartX) / totalDx) : 1;
@@ -396,6 +430,58 @@ module.exports = function (G) {
       this.landStartX = this.x; this.landStartY = this.y;
       this.state = "LANDING"; this.stateT = 0;
     }
+    /* 蝴蝶入场：四向随机（含底部）+ 一定概率在屏内任意位置淡入 */
+    butterflyEnter() {
+      const b = G.bounds(), m = 110, FD = 120;
+      const crowdedAt = (x, y) => preys.some(q => q !== this && Math.hypot(q.x - x, q.y - y) < 90);
+      if (Math.random() < 0.28) {
+        // 屏内淡入：任意位置出现，淡入 0.35s
+        let x = b.x + b.w / 2, y = b.y + b.h / 2;
+        for (let i = 0; i < 6; i++) {
+          const nx = b.x + rand(0.12, 0.88) * b.w, ny = b.y + rand(0.30, 0.66) * b.h;
+          x = nx; y = ny;
+          if (!crowdedAt(nx, ny)) break;
+        }
+        this.x = x; this.y = y;
+        this.faceDir = Math.random() > 0.5 ? 1 : -1;
+        this.fadeInT = 0.35;
+        this.fade = 0;
+        this.baseY = this.y;
+        return;
+      }
+      // 四向飞入：左/右/上/下随机（下方向上飞入也自然）
+      const sides = [0, 1, 2, 3].sort(() => Math.random() - 0.5);
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const side = sides[attempt % sides.length];
+        if (side === 0)      { this.x = b.x - m;     this.y = b.y + rand(0.25, 0.68) * b.h; this.dirX = 1;  this.faceDir = 1; }
+        else if (side === 1) { this.x = b.x + b.w + m; this.y = b.y + rand(0.25, 0.68) * b.h; this.dirX = -1; this.faceDir = -1; }
+        else if (side === 2) { this.x = b.x + rand(0.1, 0.9) * b.w; this.y = b.y - m;      this.faceDir = Math.random() > 0.5 ? 1 : -1; }
+        else                 { this.x = b.x + rand(0.1, 0.9) * b.w; this.y = b.y + b.h + m; this.faceDir = Math.random() > 0.5 ? 1 : -1; }
+        if (!crowdedAt(this.x, this.y)) break;
+      }
+      this.fadeInT = 0;
+      this.baseY = this.y;
+      this.fade = clamp(1 - m / FD, 0, 1);
+      const ex = (G.BFLY_PARAMS[this.stage] || {}).exit || [7, 11];
+      this.exitCd = rand(ex[0], ex[1]);
+    }
+    /* 主动飞出屏幕：朝某个边界外侧直线飞走，边界外渐隐后重新入场 */
+    startExit() {
+      const b = G.bounds();
+      const side = Math.floor(rand(0, 4));
+      let tx, ty;
+      if (side === 0)      { tx = b.x - 200;        ty = this.y + rand(-60, 60); }
+      else if (side === 1) { tx = b.x + b.w + 200;  ty = this.y + rand(-60, 60); }
+      else if (side === 2) { tx = this.x + rand(-60, 60); ty = b.y - 200; }
+      else                 { tx = this.x + rand(-60, 60); ty = b.y + b.h + 200; }
+      const d = Math.max(Math.hypot(tx - this.x, ty - this.y), 1);
+      const sp = rand(150, 210) * this.speedMul * (this.speciesSpeed || 1) * Math.sqrt(G.platform.S || 1);
+      this.exVx = (tx - this.x) / d * sp;
+      this.exVy = (ty - this.y) / d * sp;
+      if (Math.abs(this.exVx) > 8) this.faceDir = this.exVx > 0 ? 1 : -1;
+      this.state = "EXIT"; this.stateT = 0;
+      this.landTarget = null;
+    }
     takeOff() {
       const P = G.BFLY_PARAMS[this.stage] || G.BFLY_PARAMS[2];
       this.state = "TAKEOFF"; this.stateT = 0;
@@ -407,6 +493,16 @@ module.exports = function (G) {
       const b = G.bounds();
       if (this.stage !== G.session.stage) this.enterButterflyStage(G.session.stage);
       const P = G.BFLY_PARAMS[this.stage] || G.BFLY_PARAMS[1];
+      // 飞一段时间后，有概率主动飞出屏幕（之后会从任意位置重新入场）
+      const st0 = this.state;
+      if (st0 === "FLAP" || st0 === "GLIDE" || st0 === "HOVER") {
+        this.exitCd -= dt;
+        if (this.exitCd <= 0) {
+          const ex = P.exit || [7, 11];
+          this.exitCd = rand(ex[0], ex[1]);
+          if (Math.random() < 0.55 && this.state !== "LANDING") { this.startExit(); this.flyT = 0; }
+        }
+      }
       if (this.state === "STARTLED") {
         this.stateT += dt;
         const p = Math.min(this.stateT / 0.4, 1);
@@ -496,17 +592,22 @@ module.exports = function (G) {
         }
       }
       // 物理积分
+      const MS = Math.pow(G.platform.S || 1, 0.5);
       if (this.state === "FLAP" || this.state === "GLIDE") {
         this.flapImpulse *= Math.pow(0.12, dt);
-        if (this.state === "GLIDE") this.vy += 60 * dt;
+        if (this.state === "GLIDE") this.vy += 60 * dt * MS;
         this.vx *= Math.pow(P.drag, dt);
-        this.x += this.vx * this.flapImpulse * dt;
-        this.y += this.vy * dt;
+        this.x += this.vx * this.flapImpulse * dt * MS;
+        this.y += this.vy * dt * MS;
         if (Math.abs(this.vx) > 8) this.faceDir = this.vx > 0 ? 1 : -1;
       } else if (this.state === "HOVER") {
         this.vx *= Math.pow(0.02, dt); this.vy *= Math.pow(0.02, dt);
-        this.x += this.vx * dt;
+        this.x += this.vx * dt * MS;
         this.y = this.hoverY0 + Math.sin(t * 8) * 2;
+      } else if (this.state === "EXIT") {
+        this.x += this.exVx * dt * MS;
+        this.y += this.exVy * dt * MS;              // 直线飞向屏外，带轻微飘摆
+        this.y += Math.sin(t * 5 + this.phase) * 10 * dt * MS;
       }
       // 边界渐隐（落花链路豁免）
       if (this.state !== "LANDING" && this.state !== "RESTING" && this.state !== "TAKEOFF") {
@@ -517,24 +618,53 @@ module.exports = function (G) {
         if (this.y < b.y) past = Math.max(past, b.y - this.y);
         else if (this.y > b.y + b.h) past = Math.max(past, this.y - (b.y + b.h));
         this.fade = clamp(1 - past / FD, 0, 1);
-        if (past >= FD) this.warpIn();
+        if (this.fadeInT > 0) {                       // 屏内淡入：0 → 1
+          this.fadeInT = Math.max(this.fadeInT - dt, 0);
+          this.fade *= 1 - this.fadeInT / 0.35;
+        }
+        if (past >= FD) {
+          this.warpIn();
+          if (this.state === "EXIT") {                // 飞出后重新起飞入场
+            this.state = "FLAP"; this.stateT = 0;
+            this.flapDur = rand(0.16, 0.26);
+            this.applyFlapImpulse();
+          }
+        }
       } else this.fade = 1;
     }
 
     /* ============ 激光：dart ↔ hold ============ */
     laserNewWaypoint() {
       const b = G.bounds(), P = G.LASER_PARAMS[G.session.stage] || G.LASER_PARAMS[1];
-      this.wx = b.x + rand(0.06, 0.94) * b.w;
-      this.wy = b.y + rand(0.06, 0.94) * b.h;
+      this.wx = b.x + rand(0.03, 0.97) * b.w;
+      this.wy = b.y + rand(0.03, 0.97) * b.h;
       const dx = this.wx - this.x, dy = this.wy - this.y, len = Math.hypot(dx, dy) || 1;
       this.vx = dx / len; this.vy = dy / len;
       this.stateDur = rand(P.dart[0], P.dart[1]);
     }
+    /* 激光落点：随机取点并尽量与其他光点保持距离；重试期间保留"离群最远"候选，
+       即使空间拥挤也返回最优解而不是随机凑合。取值范围几乎贴边（0.03~0.97），覆盖全屏 */
+    laserSpot(tries) {
+      const b = G.bounds(), m = Math.pow(G.platform.S || 1, 0.5);
+      const minDist = 150 * m;
+      let best = null, bestD = -1;
+      const T = tries || 24;
+      for (let i = 0; i < T; i++) {
+        const x = b.x + rand(0.03, 0.97) * b.w;
+        const y = b.y + rand(0.03, 0.97) * b.h;
+        let d = Infinity;
+        preys.forEach(q => {
+          if (q !== this && q.type === "laser") d = Math.min(d, Math.hypot(q.x - x, q.y - y));
+        });
+        if (d >= minDist) return { x, y };
+        if (d > bestD) { bestD = d; best = { x, y }; }
+      }
+      return best || { x: b.x + rand(0.03, 0.97) * b.w, y: b.y + rand(0.03, 0.97) * b.h };
+    }
     laserTeleport() {
-      const b = G.bounds();
-      this.x = b.x + rand(0.1, 0.9) * b.w;
-      this.y = b.y + rand(0.1, 0.9) * b.h;
-      G.laserFlash(this.x, this.y);
+      const s0 = this.laserSpot();
+      this.x = s0.x; this.y = s0.y;
+      G.laserFlash(this.x, this.y, this.laserVar && this.laserVar.key);
       this.laserNewWaypoint();
     }
     updateLaser(dt, t) {
@@ -545,8 +675,8 @@ module.exports = function (G) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
           this.vanishT = 0;
-          this.x = b.x + rand(0.15, 0.85) * b.w;
-          this.y = b.y + rand(0.12, 0.88) * b.h;
+          const s0 = this.laserSpot();
+          this.x = s0.x; this.y = s0.y;
           this.state = "dart"; this.stateT = 0;
           this.laserNewWaypoint();
         }
@@ -554,9 +684,10 @@ module.exports = function (G) {
       }
       this.stateT += dt;
       if (this.state === "dart") {
-        const sp = d.speed * this.speedMul * this.comboSpeed * (this.adaptiveSlow || 1);
-        this.x += this.vx * sp * dt;
-        this.y += this.vy * sp * dt;
+        const sp = d.speed * this.speedMul * this.comboSpeed * (this.adaptiveSlow || 1) * (this.speciesSpeed || 1);
+        const MS = Math.pow(G.platform.S || 1, 0.5);
+        this.x += this.vx * sp * dt * MS;
+        this.y += this.vy * sp * dt * MS;
         let bounced = false;
         if (this.x < b.x + 10)            { this.x = b.x + 10;            this.vx = Math.abs(this.vx); bounced = true; }
         else if (this.x > b.x + b.w - 10) { this.x = b.x + b.w - 10;      this.vx = -Math.abs(this.vx); bounced = true; }
@@ -568,7 +699,7 @@ module.exports = function (G) {
         }
         if (P.trail) {
           this.trailAcc += Math.hypot(this.x - this.lastTrailX, this.y - this.lastTrailY);
-          if (this.trailAcc > 22) { this.trailAcc = 0; G.laserTrail(this.x, this.y); }
+          if (this.trailAcc > 22) { this.trailAcc = 0; G.laserTrail(this.x, this.y, this.laserVar && this.laserVar.key); }
         }
         this.lastTrailX = this.x; this.lastTrailY = this.y;
         const near = (this.wx - this.x) * (this.wx - this.x) + (this.wy - this.y) * (this.wy - this.y) < 900;
@@ -599,7 +730,7 @@ module.exports = function (G) {
       const bPad = this.type === "butterfly" ? 1.7 : 1;
       const fMin = this.type === "butterfly" ? 0.25 : 0.4;
       if (this.fade < fMin) return false;
-      const hw = this.baseW * this.sc / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
+      const hw = this.baseW * this.sc * (this.sxMul || 1) / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
       if (Math.abs(x - this.x) > hw || Math.abs(y - this.y) > hh) return false;
       if (this.type === "mouse") return (this.state === "peek" || this.state === "dart") && this.lift < 48;
       if (this.type === "butterfly") return this.state !== "TAKEOFF" && this.state !== "STARTLED";
@@ -636,7 +767,7 @@ module.exports = function (G) {
       } else {
         ctx.translate(this.x, this.y);
         const s = this.sc * vs * (this.speciesScale || 1);
-        ctx.scale(s * (this.def.face ? this.faceDir : 1), s);
+        ctx.scale(s * (this.def.face ? this.faceDir : 1) * (this.sxMul || 1), s);
         ctx.translate(-60, -36);
         G.draw.fish(ctx, this, t);
       }
@@ -653,7 +784,43 @@ module.exports = function (G) {
     if (G.scene.holeOwners) G.scene.holeOwners = G.scene.holeOwners.map(() => null);
     if (G.scene.holeHeat) G.scene.holeHeat = G.scene.holeHeat.map(() => []);
     const n = Number(G.config.preyCount) === 1 ? 1 : 3;
-    for (let i = 0; i < n; i++) preys.push(new Prey(G.config.targetType));
+    if (G.config.targetType === "fish" && n > 1) {
+      // 开局鱼种去重：洗牌后按序取，保证同时在场鱼互不相同
+      const idxs = G.FISH_SPECIES.map((_, i) => i);
+      for (let i = idxs.length - 1; i > 0; i--) {
+        const j = Math.floor(rand(0, i + 1));
+        const tmp = idxs[i]; idxs[i] = idxs[j]; idxs[j] = tmp;
+      }
+      for (let i = 0; i < n; i++) preys.push(new Prey("fish", G.FISH_SPECIES[idxs[i % idxs.length]]));
+    } else {
+      for (let i = 0; i < n; i++) preys.push(new Prey(G.config.targetType));
+    }
   };
   G.clearPreys = () => { preys.length = 0; };
+
+  /* 多只模式：猎物同时在场数量随阶段循序渐进（①3 → ②5 → ③7，上限 7）；单只模式不变。
+     捕鼠按洞口数封顶（至少留 1 个空洞供轮换）。 */
+  G.stageTargetCount = () => {
+    if (Number(G.config.preyCount) === 1) return 0;
+    const base = ({ 1: 3, 2: 5, 3: 7 })[G.session.stage] || 3;
+    if (G.config.targetType === "mouse") {
+      const holeN = (G.scene && G.scene.holes ? G.scene.holes.length : 8);
+      return Math.min(base, Math.max(1, holeN - 1));
+    }
+    return base;
+  };
+  G.topUpPreys = () => {
+    const target = G.stageTargetCount();
+    while (target && preys.length < target) {
+      if (G.config.targetType === "fish") {
+        // 补点时避开已在场品种（10 种 > 上限 7，可全程不重样）
+        const used = {};
+        preys.forEach(p => { if (p.type === "fish" && p.species) used[p.species.key] = 1; });
+        const pool = G.FISH_SPECIES.filter(s => !used[s.key]);
+        preys.push(new Prey("fish", pool.length ? pool[Math.floor(rand(0, pool.length))] : undefined));
+      } else {
+        preys.push(new Prey(G.config.targetType));
+      }
+    }
+  };
 };

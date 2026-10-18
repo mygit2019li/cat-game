@@ -22,6 +22,29 @@ module.exports = function (G) {
   }
   G.ensureAudio = ensureAudio;
   G.tone = tone;
+
+  // 召唤猫咪：循环播放一段轻柔旋律（无需音频文件，纯振荡器合成）
+  let summonTimer = null, summonStep = 0;
+  const SUMMON = [523.25, 659.25, 783.99, 659.25, 587.33, 783.99, 880.0, 783.99, 659.25, 587.33];
+  G.summonPlaying = false;
+  G.startSummonMusic = () => {
+    ensureAudio();
+    if (!actx || !G.config.sound || summonTimer) return;
+    summonStep = 0; G.summonPlaying = true;
+    const stepMs = 280;
+    const playStep = () => {
+      const f = SUMMON[summonStep % SUMMON.length];
+      tone("sine", f, f, 0.22, 0.16);
+      tone("triangle", f * 1.5, f * 1.5, 0.16, 0.04);
+      summonStep++;
+      summonTimer = setTimeout(playStep, stepMs);
+    };
+    playStep();
+  };
+  G.stopSummonMusic = () => {
+    if (summonTimer) { clearTimeout(summonTimer); summonTimer = null; }
+    G.summonPlaying = false;
+  };
   G.playHit = (combo) => {
     const baseF = 480 + Math.min(combo || 0, 10) * 40;
     tone("sine", baseF, 150, 0.16, 0.32); tone("triangle", baseF * 2, 340, 0.1, 0.1);

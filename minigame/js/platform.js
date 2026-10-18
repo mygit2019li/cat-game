@@ -69,6 +69,60 @@ module.exports = function (G) {
     },
     audioCtx() {
       try { return wx.createWebAudioContext(); } catch (e) { return null; }   // 基础库 <2.19 时静默降级
+    },
+    /* 主动拉起转发面板（好友/群聊） */
+    shareApp(opts) {
+      try {
+        if (typeof wx.shareAppMessage === "function") wx.shareAppMessage(opts || {});
+      } catch (e) {}
+    },
+    /* 初始化被动转发：右上角菜单"转发"使用 defaultShare() 返回的内容 */
+    initShare(defaultShare) {
+      try {
+        if (typeof wx.showShareMenu === "function") wx.showShareMenu({ withShareTicket: false });
+        if (typeof wx.onShareAppMessage === "function") {
+          wx.onShareAppMessage(() => {
+            try { return typeof defaultShare === "function" ? defaultShare() : (defaultShare || {}); }
+            catch (e) { return {}; }
+          });
+        }
+      } catch (e) {}
+    },
+    /* 跳转客服会话：小游戏标准接口 wx.openCustomerServiceConversation
+       （需在 mp.weixin.qq.com 后台「客服消息」接入并绑定客服人员，无需 corpId）。
+       低版本基础库降级为企业微信「微信客服」（需 G.SUPPORT.corpId），最后回退指引弹窗。
+       注意：官方要求用户发生过至少一次 touch 事件后才可调用，按钮点击场景天然满足。 */
+    openSupport() {
+      const fallback = () => {
+        try {
+          if (typeof wx.showModal === "function") {
+            wx.showModal({
+              title: "联系客服",
+              content: "当前微信版本较低，暂无法打开客服会话。可点击右上角「···」→「反馈」提交问题，感谢理解。",
+              showCancel: false
+            });
+          }
+        } catch (e) {}
+      };
+      try {
+        if (typeof wx.openCustomerServiceConversation === "function") {
+          wx.openCustomerServiceConversation({
+            sessionFrom: "settings",
+            fail: fallback
+          });
+          return;
+        }
+        const corpId = G.SUPPORT && G.SUPPORT.corpId;
+        if (corpId && typeof wx.openCustomerServiceChat === "function") {
+          wx.openCustomerServiceChat({
+            extInfo: { url: (G.SUPPORT && G.SUPPORT.url) || "" },
+            corpId: corpId,
+            fail: fallback
+          });
+          return;
+        }
+      } catch (e) {}
+      fallback();
     }
   };
 
@@ -77,7 +131,15 @@ module.exports = function (G) {
     canvas.height = P.H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
+  /* 大屏适配：以典型手机(390×844)为基准，按屏幕面积等比推算 UI 缩放因子 S，封顶 2.0。
+     手机 S≈1 不变；iPad 横屏(1024×768)≈1.55，iPad Pro 12.9≈2.0。UI 在「虚拟手机尺寸」布局后被 ctx.scale(S) 放大。 */
+  function computeScale() {
+    const base = 390 * 844;
+    let s = Math.sqrt((P.W * P.H) / base);
+    P.S = Math.max(1, Math.min(2.0, s));
+  }
   applySize();
+  computeScale();
 
   wx.onWindowResize && wx.onWindowResize(() => {
     try {
@@ -86,6 +148,7 @@ module.exports = function (G) {
       P.safe = computeSafe(s);
       P.menu = getMenu();
       applySize();
+      computeScale();
       P.resizeCb.forEach(f => f());
     } catch (e) {}
   });

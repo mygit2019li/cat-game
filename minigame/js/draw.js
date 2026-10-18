@@ -265,6 +265,8 @@ module.exports = function (G) {
   /* ---------- 老鼠（设计空间 120×78，面向右；花色 variants 参数化） ---------- */
   D.mouse = (ctx, p, t) => {
     const v = p.mouseVar || G.MOUSE_VARIANTS[0];
+    // 体型比例：以躯干中心 (60,44) 为轴横向拉长、纵向压扁 → 更瘦长的鼠形（耳/眼轻微椭圆化，观感更灵巧）
+    ctx.save(); ctx.translate(60, 44); ctx.scale(1.08, 0.80); ctx.translate(-60, -44);
     const sniff = Math.sin(t * 9 + p.phase) * 1.4;
     // 尾（锥形曲线，随跑动摆动；环节阴影）
     ctx.strokeStyle = v.tail; ctx.lineWidth = 5; ctx.lineCap = "round";
@@ -331,6 +333,7 @@ module.exports = function (G) {
     ctx.strokeStyle = "rgba(118,98,78,.42)"; ctx.lineWidth = 0.8;
     ctx.beginPath(); ctx.moveTo(84.8, 61.5); ctx.lineTo(84.8, 64.9); ctx.moveTo(87.6, 61.3); ctx.lineTo(87.6, 64.9); ctx.stroke();
     ctx.fillStyle = v.foot; ctx.beginPath(); ctx.ellipse(47, 68, 6, 3.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
   };
 
   /* ---------- 鲸鱼（圆钝巨头 + 横向双叶尾鳍 + 喉腹褶，头端朝右） ---------- */
@@ -546,31 +549,40 @@ module.exports = function (G) {
     ctx.moveTo(64, 34); ctx.quadraticCurveTo(70, 22, 76, 18); ctx.stroke();
   };
 
-  /* ---------- 激光光点（原版红色外观，仅增强亮度） ---------- */
+  /* ---------- 激光光点（皮肤表驱动，大小屏统一色系：经典红/翠绿） ---------- */
+  const LASER_SKIN = {
+    red:   { glow0: "rgba(255,70,70,.8)",  glowMid: "rgba(255,30,30,.28)",  glowEnd: "rgba(255,0,0,0)",
+             coreMid: "#ff7a7a", coreMidPanic: "#ff9a7a", core72: "rgba(255,50,50,.8)", coreEnd: "rgba(255,0,0,0)",
+             hold: "rgba(255,130,130,.7)" },
+    green: { glow0: "rgba(61,220,132,.8)", glowMid: "rgba(35,200,110,.28)", glowEnd: "rgba(30,180,90,0)",
+             coreMid: "#7dffb0", coreMidPanic: "#baffd2", core72: "rgba(61,220,132,.8)", coreEnd: "rgba(30,180,90,0)",
+             hold: "rgba(120,255,170,.7)" }
+  };
   D.laser = (ctx, p, t) => {
     const panic = G.session.combo >= 5;
     const hold = p.state === "hold";
     const pulse = 0.85 + 0.33 * (0.5 + 0.5 * Math.sin(t * (hold ? 7 : 13)));
     let r = (p.sc || 1) * 13 * pulse;
     if (panic) r *= 0.9 + 0.2 * Math.sin(t * 40);
+    const skin = (p.laserVar && LASER_SKIN[p.laserVar.key]) || LASER_SKIN.red;
     // 柔光晕（原版 .5 → 提亮至 .8，半径 2.4 → 3）
     const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 3);
-    glow.addColorStop(0, "rgba(255,70,70,.8)");
-    glow.addColorStop(0.5, "rgba(255,30,30,.28)");
-    glow.addColorStop(1, "rgba(255,0,0,0)");
+    glow.addColorStop(0, skin.glow0);
+    glow.addColorStop(0.5, skin.glowMid);
+    glow.addColorStop(1, skin.glowEnd);
     ctx.fillStyle = glow;
     ctx.beginPath(); ctx.arc(0, 0, r * 3, 0, Math.PI * 2); ctx.fill();
     // 核心光点（白热区扩大：0.32 → 0.5，中段提亮至 .8）
     const core = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
     core.addColorStop(0, "#ffffff");
-    core.addColorStop(0.5, panic ? "#ff9a7a" : "#ff7a7a");
-    core.addColorStop(0.72, "rgba(255,50,50,.8)");
-    core.addColorStop(0.88, "rgba(255,0,0,0)");
+    core.addColorStop(0.5, panic ? skin.coreMidPanic : skin.coreMid);
+    core.addColorStop(0.72, skin.core72);
+    core.addColorStop(0.88, skin.coreEnd);
     ctx.fillStyle = core;
     ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
     // 停留外圈：主要命中窗口的视觉暗示（原版 .4 → .7）
     if (hold) {
-      ctx.strokeStyle = "rgba(255,130,130,.7)";
+      ctx.strokeStyle = skin.hold;
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(0, 0, r * 1.7 + Math.sin(t * 7) * 3, 0, Math.PI * 2); ctx.stroke();
     }
@@ -614,7 +626,9 @@ module.exports = function (G) {
       const fake = { species: goldSp, wagDur: 0.5, phase: 0, state: "FLAP" };
       D.fish(ctx, fake, 1.2);
     } else if (type === "butterfly") {
-      ctx.translate(-60, -52);
+      // HD 贴图落点 y 56..168，内容中心 (60,112)；矢量回退内容中心 (60,53)。分别补偿使图标居中
+      const mslot = BFHD.map && BFHD.map.monarch;
+      ctx.translate(-60, mslot && mslot.nOk && mslot.dOk ? -112 : -53);
       const fake = { state: "GLIDE", flapDur: 0.28, phase: 0 };
       D.butterfly(ctx, fake, 0.3);
     } else if (type === "mouse") {

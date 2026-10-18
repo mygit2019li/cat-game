@@ -7,32 +7,45 @@ module.exports = function (G) {
   /* ================= 布景构建 ================= */
   G.buildScene = (type) => {
     const W = G.platform.W, H = G.platform.H;
-    const S = { type, W, H, floorY: H * 0.68, holes: [], holeOwners: [], holeHeat: [], dark: type === "laser" };
+    const S = { type, W, H, floorY: type === "mouse" ? H * 0.2 : H * 0.68, holes: [], holeOwners: [], holeHeat: [], dark: type === "laser" };
     G.scene = S;
     G.gardenFlowers = [];
 
     if (type === "mouse" || type === "laser") {
-      // 窗户（光柱）
-      S.winW = Math.min(118, W * 0.3); S.winH = S.winW * 1.25;
+      // 窗户（光柱）：捕鼠模式地台全屏化后墙只剩顶部一条，窗户相应缩小
+      const isMouse = type === "mouse";
+      S.winW = Math.min(isMouse ? 84 : 118, W * (isMouse ? 0.2 : 0.3));
+      S.winH = isMouse ? Math.max(34, Math.min(S.floorY - 44, S.winW * 0.9)) : S.winW * 1.25;
       S.winX = W * rand(0.52, 0.62); S.winY = Math.max(30, S.floorY * rand(0.10, 0.2));
-      // 家具（2~3 件，沿墙随机）
+      // 家具：台球桌布局要求四边干净可拦截，捕鼠模式不放家具
       const kinds = ["sofa", "shelf", "plant", "lamp"];
       S.furn = [];
-      const n = Math.floor(rand(2, 3.99));
-      for (let i = 0; i < n; i++) S.furn.push({ kind: kinds[Math.floor(rand(0, kinds.length))], x: rand(0.04, 0.9) * W, s: rand(0.85, 1.1) });
+      const n = isMouse ? 0 : Math.floor(rand(2, 3.99));
+      for (let i = 0; i < n; i++) {
+        const fx = rand(0.04, 0.9) * W;
+        S.furn.push({ kind: kinds[Math.floor(rand(0, kinds.length))], x: fx, s: rand(0.85, 1.1) });
+      }
       S.rugW = W * rand(0.36, 0.46);
       S.rugX = W * rand(0.1, 0.9) - S.rugW / 2;
     }
     if (type === "mouse") {
-      // 两排交错老鼠洞（6~8 个）：后排贴墙脚、前排地板前缘
-      const holeN = Math.floor(rand(6, 8.99));
-      const step = 70 / (holeN - 1);
-      for (let i = 0; i < holeN; i++) {
-        const pct = 15 + step * i + rand(-1.5, 1.5);
-        const row = i % 2;
-        S.holes.push({ x: W * pct / 100, y: S.floorY + 26 + row * 46 });
-      }
-      S.holeOwners = new Array(holeN).fill(null);
+      // 台球桌布局：四条边各 3 个洞（2 角洞 + 1 边中洞，共 8 个）+ 中场 2 个洞，共 10 个
+      // 老鼠从任意洞出现、窜向任意洞，路线横穿台面，猫咪可点击拦截
+      const b = G.bounds();
+      const L = b.x + 0.07 * b.w, R = b.x + 0.93 * b.w;
+      const T = b.y + 0.18 * b.h, B = b.y + 0.86 * b.h, M = b.y + 0.5 * b.h;
+      const CX = b.x + 0.5 * b.w;
+      const pts = [
+        [L, T], [CX, T], [R, T],                        // 上边：左角/中/右角
+        [L, M], [R, M],                                 // 左右边中点
+        [L, B], [CX, B], [R, B],                        // 下边：左角/中/右角
+        [b.x + 0.36 * b.w, M], [b.x + 0.64 * b.w, M]    // 中场两洞
+      ];
+      pts.forEach(pt => S.holes.push({
+        x: pt[0] + rand(-0.012, 0.012) * b.w,
+        y: pt[1] + rand(-0.015, 0.015) * b.h
+      }));
+      S.holeOwners = new Array(S.holes.length).fill(null);
       S.holeHeat = S.holes.map(() => []);
     }
     if (type === "butterfly") {
@@ -362,8 +375,8 @@ module.exports = function (G) {
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
   G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55) }, 80); } fx.sparkColor = color; };
   G.ripple = (x, y, miss) => { if (G.scene.type !== "fish") return; PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss }, 30); };
-  G.laserTrail = (x, y) => PUSH(fx.trails, { x, y, life: 0.4 }, 30);
-  G.laserFlash = (x, y) => PUSH(fx.scorches, { x, y, life: 0.32, flash: true }, 20);
+  G.laserTrail = (x, y, key) => PUSH(fx.trails, { x, y, life: 0.4, key: key || "red" }, 30);
+  G.laserFlash = (x, y, key) => PUSH(fx.scorches, { x, y, life: 0.32, flash: true, key: key || "red" }, 20);
   G.scorch = (x, y) => PUSH(fx.scorches, { x, y, life: 1.05 }, 20);
   G.petalBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.petals, { x, y, vx: rand(-50, 50), vy: rand(-50, 10), rot: rand(0, 6.28), life: rand(0.8, 1.5) }, 40); };
   G.pawPrint = (x, y, dir) => PUSH(fx.paws, { x, y, dir, life: 1 }, 26);
@@ -430,20 +443,23 @@ module.exports = function (G) {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
     });
     fx.trails.forEach(p => {
+      const cs = (G.laserColorSet && G.laserColorSet())[p.key] || G.laserColorSet().red;
       ctx.globalAlpha = Math.max(p.life * 0.8, 0);
-      ctx.fillStyle = "#ff5252";
+      ctx.fillStyle = cs.trail;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4 * p.life, 0, Math.PI * 2); ctx.fill();
     });
     fx.scorches.forEach(p => {
       const a = Math.max(p.life, 0);
+      const cs = (G.laserColorSet && G.laserColorSet())[p.key] || G.laserColorSet().red;
       if (p.flash) {
         ctx.globalAlpha = a * 0.9;
-        ctx.strokeStyle = "#ff7a7a"; ctx.lineWidth = 2.5;
+        ctx.strokeStyle = cs.flash; ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.arc(p.x, p.y, 34 * (1 - a) + 8, 0, Math.PI * 2); ctx.stroke();
       } else {
         ctx.globalAlpha = a * 0.55;
         const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
-        g.addColorStop(0, "#3a0f0a"); g.addColorStop(1, "rgba(58,15,10,0)");
+        g.addColorStop(0, cs.burn[0]);
+        g.addColorStop(1, cs.burn[1]);
         ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, Math.PI * 2); ctx.fill();
       }
     });

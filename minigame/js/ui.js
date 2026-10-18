@@ -5,6 +5,7 @@ module.exports = function (G) {
   const clamp = G.clamp;
   const C = G.COLORS;
   const ui = { buttons: [], hudDimT: 0, stagePop: 0, stageText: "", comboPop: 0, comboShown: 0 };
+  const SHOW_SUMMON = false;   // 召唤猫咪入口暂时隐藏：改 true 可恢复首页入口（页面代码保留）
   G.ui = ui;
   G.uiFX = { stagePop: 0, stageText: "", comboPop: 0 };
 
@@ -28,25 +29,118 @@ module.exports = function (G) {
     ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
     ctx.fillText(str, x, y);
   }
+  // 矢量小图标（与整体 UI 同风格，尺寸/颜色可控，避免 emoji 跨平台渲染不可控）
+  function drawVecIcon(key, cx, cy, s, color) {
+    const r = s / 2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.strokeStyle = color; ctx.fillStyle = color;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    if (key === "gear") {
+      ctx.lineWidth = Math.max(1.5, s * 0.16);
+      ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
+      for (let i = 0; i < 8; i++) {
+        const a = i * Math.PI / 4;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72);
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        ctx.stroke();
+      }
+    } else if (key === "chart") {
+      const bw = s * 0.2;
+      [0.45, 0.72, 1].forEach((hh, i) => {
+        const bx = -r + bw * 0.1 + i * bw * 1.45;
+        const bh2 = s * hh * 0.85;
+        G.rr(ctx, bx, r - bh2, bw, bh2, bw * 0.3); ctx.fill();
+      });
+    } else if (key === "trophy") {
+      ctx.lineWidth = Math.max(1.5, s * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.5, -r * 0.8); ctx.lineTo(r * 0.5, -r * 0.8);
+      ctx.lineTo(r * 0.4, 0);
+      ctx.quadraticCurveTo(0, r * 0.5, -r * 0.4, 0);
+      ctx.closePath(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-r * 0.68, -r * 0.45, r * 0.22, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r * 0.68, -r * 0.45, r * 0.22, -Math.PI * 0.5, Math.PI * 0.5); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, r * 0.45); ctx.lineTo(0, r * 0.7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * 0.38, r * 0.85); ctx.lineTo(r * 0.38, r * 0.85); ctx.stroke();
+    } else if (key === "cat") {
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.15); ctx.lineTo(-r * 0.72, -r * 0.68); ctx.lineTo(-r * 0.05, -r * 0.48); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(r * 0.5, -r * 0.15); ctx.lineTo(r * 0.72, -r * 0.68); ctx.lineTo(r * 0.05, -r * 0.48); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, r * 0.12, r * 0.52, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+  // 召唤猫咪页面的大猫咪插画
+  function drawCat(cx, cy, s) {
+    const c = "#6b7c75";
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.moveTo(-s * 0.5, -s * 0.15); ctx.lineTo(-s * 0.78, -s * 0.75); ctx.lineTo(-s * 0.05, -s * 0.5); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(s * 0.5, -s * 0.15); ctx.lineTo(s * 0.78, -s * 0.75); ctx.lineTo(s * 0.05, -s * 0.5); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, s * 0.05, s * 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(-s * 0.24, s * 0.0, s * 0.1, 0, Math.PI * 2); ctx.arc(s * 0.24, s * 0.0, s * 0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2b2b2b";
+    ctx.beginPath(); ctx.arc(-s * 0.24, s * 0.02, s * 0.05, 0, Math.PI * 2); ctx.arc(s * 0.24, s * 0.02, s * 0.05, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ff9aa2";
+    ctx.beginPath(); ctx.moveTo(0, s * 0.14); ctx.lineTo(-s * 0.07, s * 0.07); ctx.lineTo(s * 0.07, s * 0.07); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,.32)"; ctx.lineWidth = 1.4; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.08, s * 0.13); ctx.lineTo(-s * 0.62, s * 0.09);
+    ctx.moveTo(-s * 0.08, s * 0.18); ctx.lineTo(-s * 0.62, s * 0.25);
+    ctx.moveTo(s * 0.08, s * 0.13); ctx.lineTo(s * 0.62, s * 0.09);
+    ctx.moveTo(s * 0.08, s * 0.18); ctx.lineTo(s * 0.62, s * 0.25);
+    ctx.stroke();
+    ctx.restore();
+  }
   function drawBtn(x, y, w, h, label, opts) {
     const o = opts || {};
     ctx.fillStyle = o.primary ? C.startGrad1 : (o.on ? C.card : C.segBg);
     ctx.strokeStyle = o.primary ? C.teal : (o.on ? C.line : C.line);
     ctx.lineWidth = o.on ? 2 : 1.2;
     G.rr(ctx, x, y, w, h, 14); ctx.fill(); ctx.stroke();
-    text(label, x + w / 2, y + h / 2 + 1, o.primary ? "bold 19px sans-serif" : "16px sans-serif",
-      o.primary ? "#fff" : (o.on ? C.ink : C.ink2));
+    if (o.icon) {
+      const lc = o.primary ? "#fff" : (o.on ? C.ink : C.ink2);
+      const gap = 6;
+      let fsize = o.primary ? 19 : 16;
+      let lf = (o.primary ? "bold " : "") + fsize + "px sans-serif";
+      ctx.font = lf;
+      let tw = ctx.measureText(label).width;
+      let ih = Math.min(15, h * 0.42);
+      let total = ih + gap + tw;
+      const pad = 10;                       // 左右内边距，保证不贴边
+      const avail = w - pad;
+      const scale = total > avail ? avail / total : 1;  // 超宽则整体等比缩小
+      if (scale < 1) {
+        fsize *= scale; ih *= scale;
+        lf = (o.primary ? "bold " : "") + fsize + "px sans-serif";
+        ctx.font = lf; tw = ctx.measureText(label).width;
+        total = ih + gap + tw;
+      }
+      const iconX = x + w / 2 - total / 2;
+      const labelX = iconX + ih + gap;
+      drawVecIcon(o.icon, iconX + ih / 2, y + h / 2, ih, lc);
+      text(label, labelX + tw / 2, y + h / 2 + 1, lf, lc);
+    } else {
+      text(label, x + w / 2, y + h / 2 + 1, o.primary ? "bold 19px sans-serif" : "16px sans-serif",
+        o.primary ? "#fff" : (o.on ? C.ink : C.ink2));
+    }
     btn(x, y, w, h, o.cb);
   }
   ui.panel = panel; ui.text = text; ui.drawBtn = drawBtn;
 
   function layout() {
-    const W = G.platform.W, H = G.platform.H;
-    const safe = G.platform.safe || { top: 0, bottom: 0, left: 0, right: 0 };
+    const S = G.platform.S || 1;
+    // UI 在「虚拟手机尺寸」里布局，外层由 ctx.scale(S) 整体放大，字号/尺寸自动等比适配大屏
+    const W = G.platform.W / S, H = G.platform.H / S;
+    const sr = G.platform.safe || { top: 0, bottom: 0, left: 0, right: 0 };
+    const safe = { top: sr.top / S, bottom: sr.bottom / S, left: sr.left / S, right: sr.right / S };
     const land = W > H;
     const m = land ? 24 : 18;
     const gap = 12;
-    return { W, H, land, m, gap, safe };
+    return { W, H, land, m, gap, safe, S };
   }
 
   /* ================= 首页 ================= */
@@ -83,6 +177,32 @@ module.exports = function (G) {
     lines.forEach((s, i) => text(s, x, y + 8 + i * lineH, (fs || 10) + "px sans-serif", C.ink3, align || "left"));
     ctx.globalAlpha = 1;
     return lines.length * lineH;
+  }
+  /* 横屏底部合规小字：四条合并后按宽度平衡折成两行，字号 10→7 自适应；
+     实在放不下（极窄屏）退回普通多行折行 */
+  function fitTips2(maxW) {
+    const all = TIPS.join("   ");
+    for (let fs = 10; fs >= 7; fs--) {
+      ctx.font = fs + "px sans-serif";
+      const chars = [...all];
+      const total = ctx.measureText(all).width;
+      let acc = 0, split = chars.length;
+      for (let i = 0; i < chars.length; i++) {
+        acc += ctx.measureText(chars[i]).width;
+        if (acc >= total / 2) { split = i + 1; break; }
+      }
+      // 在平衡切点附近找最近的句读（。；空格）断行，避免词语被拦腰截断
+      for (let d = 0; d <= 14; d++) {
+        for (const j of [split - d, split + d]) {
+          if (j > 0 && j < chars.length && "。； ".includes(chars[j - 1])) { split = j; d = 99; break; }
+        }
+      }
+      const l1 = chars.slice(0, split).join(""), l2 = chars.slice(split).join("");
+      if (Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) <= maxW) {
+        return { lines: [l1, l2], fs, lh: fs + 5 };
+      }
+    }
+    return { lines: wrapTips(maxW, 9), fs: 9, lh: 13 };
   }
 
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
@@ -193,50 +313,75 @@ module.exports = function (G) {
       const rightW = availW - leftW - gap * 2;
       const leftX = edgeL, rightX = leftX + leftW + gap * 2;
       const topY = safe.top;
-      // 左侧内容块（标题+圆形开始按钮+设置/记录）垂直居中，并为底部提示小字预留空间
+      // 左侧内容块（标题+圆形开始按钮）偏上放置：剩余空隙只取 30%，其余留在底部，为底部提示小字预留空间
       const titleH = 62, subH = 44;
-      const tight = availH < 420;                     // SE 级小屏收紧间距与提示字号
+      const tight = availH < 420;                     // SE 级小屏收紧间距
       const vgap = tight ? 10 : 16;
-      const tfs = tight ? 9 : 10, tlh = tight ? 12 : 15;
-      const tipsH = wrapTips(leftW - 2, tfs).length * tlh;
-      const orbD = Math.max(96, Math.min(148, Math.floor(availH - tipsH - 26 - titleH - vgap - subH - m)));
-      const blockH = titleH + orbD + vgap + subH;
-      const blockTop = topY + Math.max(m, (availH - blockH - tipsH - 30) / 2);
+      // 底部合规小字：通栏两行（自适应字号），左栏/卡片均不再为其堆叠预留
+      const tip2 = fitTips2(availW);
+      const tipsH = tip2.lines.length * tip2.lh + 10;
+      const orbD = Math.max(96, Math.min(148, Math.floor(availH - tipsH - 26 - titleH - vgap - m)));
+      const blockH = titleH + orbD;
+      const blockTop = topY + Math.max(m, (availH - blockH - tipsH - 30) * 0.3);
       text(G.GAME_NAME, leftX + leftW / 2, blockTop + 16, "bold 28px sans-serif", C.ink);
       text("选一种猎物，开始今天的狩猎吧", leftX + leftW / 2, blockTop + 44, "14px sans-serif", C.ink2);
 
       const orbY = blockTop + titleH + orbD / 2;
       ui.drawStartOrb(leftX + leftW / 2, orbY, orbD, "开始游戏", () => G.startGame());
 
-      const third = (leftW - gap * 2) / 3;
-      const subY = orbY + orbD / 2 + vgap;
-      drawBtn(leftX, subY, third, subH, "设置", { cb: () => { G.screen = "settings"; } });
-      drawBtn(leftX + third + gap, subY, third, subH, "本周记录", { cb: () => { G.screen = "records"; } });
-      drawBtn(leftX + (third + gap) * 2, subY, third, subH, "好友排行", { cb: () => { G.screen = "leaderboard"; ui.showLB(); } });
+      // 适龄/健康忠告/安全/免责提示（底部通栏两行居中）
+      ctx.globalAlpha = 0.75;
+      const tipsTop = H - safe.bottom - tipsH;
+      tip2.lines.forEach((s, i) => text(s, edgeL, tipsTop + 6 + i * tip2.lh, tip2.fs + "px sans-serif", C.ink3, "left"));
+      ctx.globalAlpha = 1;
 
-      // 适龄/健康忠告/安全/免责提示（左栏底部，自动折行）
-      drawTips(leftX + 2, H - safe.bottom - tipsH - 8, leftW - 2, tlh, "left", tfs);
+      // 右侧：单张「模式选择」卡片
+      const headH = 34, rowH = 46, pad = 12;
+      // 底部通栏一行：设置/本周记录/好友排行（召唤猫咪入口按 SHOW_SUMMON 开关）
+      const rowY = tipsTop - rowH - 8;
+      const rowBtns = [
+        { label: "设置", icon: "gear", cb: () => { G.screen = "settings"; } },
+        { label: "本周记录", icon: "chart", cb: () => { G.screen = "records"; } },
+        { label: "好友排行", icon: "trophy", cb: () => { G.screen = "leaderboard"; ui.showLB(); } }
+      ];
+      if (SHOW_SUMMON) rowBtns.push({ label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.screen = "summon"; } });
+      const bwN = (availW - gap * (rowBtns.length - 1)) / rowBtns.length;
+      rowBtns.forEach((b, i) => drawBtn(edgeL + (bwN + gap) * i, rowY, bwN, rowH, b.label, { icon: b.icon, cb: b.cb }));
 
-      // 右侧模式卡：限制最大尺寸并居中
-      const cardMaxW = 210, cardMaxH = 170;
-      const cw = Math.min((rightW - gap) / 2, cardMaxW);
-      const ch = Math.min((availH - m * 2 - gap) / 2, cardMaxH);
+      const cardTop = topY + m;
+      const cardBottomLimit = rowY - m;
+      const gridH = cardBottomLimit - cardTop - headH - pad; // 卡内 2×2 网格区高度
+      const cw = Math.min((rightW - gap) / 2, 148);
+      const ch = Math.max(76, Math.min((gridH - gap) / 2, 112));
       const totalW = cw * 2 + gap;
       const totalH = ch * 2 + gap;
       const gx = rightX + (rightW - totalW) / 2;
-      const gy = topY + m + (availH - m * 2 - totalH) / 2;
+      const cardW = totalW + pad * 2, cardH = headH + totalH + pad;
+      const cardX = gx - pad;
+      // 卡片缩到更紧后，在可用区里垂直居中（不再死盯顶部，避免上方大片留白）
+      const cardY = Math.max(cardTop, cardTop + (cardBottomLimit - cardTop - cardH) / 2);
+      // 卡片容器
+      ctx.fillStyle = "rgba(31,64,58,.08)";
+      G.rr(ctx, cardX + 1, cardY + 4, cardW - 2, cardH - 4, 20); ctx.fill();
+      panel(cardX, cardY, cardW, cardH, C.card, C.line);
+      text("模式选择", cardX + 18, cardY + headH / 2, "bold 16px sans-serif", C.ink, "left");
+      const gy = cardY + headH;
       MODES.forEach((mItem, i) => {
         const x = gx + (i % 2) * (cw + gap), y = gy + Math.floor(i / 2) * (ch + gap);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
+        // 自适应布局：图标占「文字区之上」的剩余空间并随卡高缩放，矮卡不再与文字重叠
+        const iconZone = ch - 42;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
-        ctx.translate(x + cw / 2, y + ch * 0.42);
-        const bob = Math.sin(Date.now() / 500 + i) * 3;
-        G.draw.icon(ctx, mItem.key, 0, bob, mItem.key === "fish" ? 0.62 : mItem.key === "mouse" ? 0.5 : mItem.key === "laser" ? 1.0 : 0.5);
+        ctx.translate(x + cw / 2, y + iconZone / 2);
+        const bob = Math.sin(Date.now() / 500 + i) * 2;
+        G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
-        text(mItem.name, x + cw / 2, y + ch - 36, "bold 16px sans-serif", sel ? C.tealDeep : C.ink);
-        text(mItem.desc, x + cw / 2, y + ch - 18, "11px sans-serif", C.ink3);
+        text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
+        text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
         btn(x, y, cw, ch, () => { G.config.targetType = mItem.key; G.saveConfig(); G.playTick(); });
       });
     } else {
@@ -244,34 +389,51 @@ module.exports = function (G) {
       const availW = edgeR - edgeL, innerH = H - safe.top - safe.bottom;
       text(G.GAME_NAME, W / 2, safe.top + innerH * 0.10, "bold 30px sans-serif", C.ink);
       text("选一种猎物，开始今天的狩猎吧", W / 2, safe.top + innerH * 0.10 + 34, "14px sans-serif", C.ink2);
-      const cw = (availW - 14) / 2, ch = 128, gx = edgeL, gy = safe.top + innerH * 0.16;
+      const cw = (availW - 14) / 2, ch = 88, gx = edgeL, gy = safe.top + innerH * 0.16;
+      // 模式选择卡片容器
+      const cardX = gx - 12, cardY = gy - 36, cardW = availW + 24, cardH = ch * 2 + 14 + 36;
+      ctx.fillStyle = "rgba(31,64,58,.08)";
+      G.rr(ctx, cardX + 1, cardY + 4, cardW - 2, cardH - 4, 20); ctx.fill();
+      panel(cardX, cardY, cardW, cardH, C.card, C.line);
+      text("模式选择", cardX + 18, cardY + 22, "bold 16px sans-serif", C.ink, "left");
+      const gy2 = gy;
       MODES.forEach((mItem, i) => {
-        const x = gx + (i % 2) * (cw + 14), y = gy + Math.floor(i / 2) * (ch + 14);
+        const x = gx + (i % 2) * (cw + 14), y = gy2 + Math.floor(i / 2) * (ch + 14);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
+        const iconZone = ch - 42;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
-        ctx.translate(x + cw / 2, y + 52);
-        const bob = Math.sin(Date.now() / 500 + i) * 3;
-        G.draw.icon(ctx, mItem.key, 0, bob, mItem.key === "fish" ? 0.62 : mItem.key === "mouse" ? 0.5 : mItem.key === "laser" ? 1.0 : 0.5);
+        ctx.translate(x + cw / 2, y + iconZone / 2);
+        const bob = Math.sin(Date.now() / 500 + i) * 2;
+        G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
-        text(mItem.name, x + cw / 2, y + ch - 34, "bold 16px sans-serif", sel ? C.tealDeep : C.ink);
-        text(mItem.desc, x + cw / 2, y + ch - 14, "11px sans-serif", C.ink3);
+        text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
+        text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
         btn(x, y, cw, ch, () => { G.config.targetType = mItem.key; G.saveConfig(); G.playTick(); });
       });
-      const by = gy + 2 * (ch + 14) + 10;
+      // 召唤猫咪入口（暂时隐藏，恢复时改回 SHOW_SUMMON）
+      const cardBottom = cardY + cardH;
+      let afterCard = cardBottom + 12;
+      if (SHOW_SUMMON) {
+        drawBtn(edgeL, afterCard, availW, 46, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.screen = "summon"; } });
+        afterCard += 46 + 14;
+      }
+      const by = afterCard;
       const tipH2 = wrapTips(availW).length * 15;
       const tipsTop2 = H - safe.bottom - tipH2 - 8;
-      const orbD2 = Math.max(96, Math.min(148, Math.floor(tipsTop2 - 14 - by - 56)));
+      const orbD2 = Math.max(96, Math.min(148, Math.floor(tipsTop2 - 14 - by - 84)));
       ui.drawStartOrb(W / 2, by + orbD2 / 2, orbD2, "开始游戏", () => G.startGame());
-      const subY2 = by + orbD2 + 12;
+      const subY2 = by + orbD2 + 40;
       const tw = (availW - 20) / 3;
-      drawBtn(edgeL, subY2, tw, 44, "设置", { cb: () => { G.screen = "settings"; } });
-      drawBtn(edgeL + tw + 10, subY2, tw, 44, "本周记录", { cb: () => { G.screen = "records"; } });
-      drawBtn(edgeL + (tw + 10) * 2, subY2, tw, 44, "好友排行", { cb: () => { G.screen = "leaderboard"; ui.showLB(); } });
+      drawBtn(edgeL, subY2, tw, 44, "设置", { icon: "gear", cb: () => { G.screen = "settings"; } });
+      drawBtn(edgeL + tw + 10, subY2, tw, 44, "本周记录", { icon: "chart", cb: () => { G.screen = "records"; } });
+      drawBtn(edgeL + (tw + 10) * 2, subY2, tw, 44, "好友排行", { icon: "trophy", cb: () => { G.screen = "leaderboard"; ui.showLB(); } });
 
       // 适龄/健康忠告/安全/免责提示（底部居中，自动折行）
-      drawTips(W / 2, tipsTop2, availW, 15, "center");
+      drawTips(edgeL, tipsTop2, availW, 15, "left");
     }
   };
 
@@ -372,17 +534,23 @@ module.exports = function (G) {
       });
     }
 
-    // 底部返回：原型主按钮青绿渐变（横屏限宽居中，避免次要按钮横贯全屏）
+    // 底部一行：联系客服（白卡）+ 返回（青绿渐变主按钮）
     let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
     let bx = land ? safe.left + m : safe.left + 24;
     if (land && bw > 360) { bx = (W - 360) / 2; bw = 360; }
     const by = H - safe.bottom - 75;
-    const bg = ctx.createLinearGradient(bx, by, bx, by + 50);
+    const halfW = (bw - 12) / 2;
+    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+    G.rr(ctx, bx, by, halfW, 50, 14); ctx.fill(); ctx.stroke();
+    text("联系客服", bx + halfW / 2, by + 25, "bold 16px sans-serif", C.ink);
+    btn(bx, by, halfW, 50, () => G.platform.openSupport());
+    const bx2 = bx + halfW + 12;
+    const bg = ctx.createLinearGradient(bx2, by, bx2, by + 50);
     bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
     ctx.fillStyle = bg; ctx.strokeStyle = C.startInner; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx, by, bw, 50, 14); ctx.fill(); ctx.stroke();
-    text("返回", W / 2, by + 25, "bold 18px sans-serif", "#fff");
-    btn(bx, by, bw, 50, () => { G.screen = "home"; });
+    G.rr(ctx, bx2, by, halfW, 50, 14); ctx.fill(); ctx.stroke();
+    text("返回", bx2 + halfW / 2, by + 25, "bold 18px sans-serif", "#fff");
+    btn(bx2, by, halfW, 50, () => { G.screen = "home"; });
   };
 
   /* ================= 记录 ================= */
@@ -466,7 +634,9 @@ module.exports = function (G) {
   }
   ui.showLB = () => {
     const r = lbRect();
-    G.platform.odcPost({ type: "show", x: r.x, y: r.y, w: r.w, h: r.h });
+    const S = G.platform.S || 1;   // ODC 覆盖层用真实坐标，需把虚拟布局换算回真实尺寸
+    G.platform.odcPost({ type: "refresh" });   // 每次进排行榜先拉最新好友成绩，避免显示旧缓存
+    G.platform.odcPost({ type: "show", x: r.x * S, y: r.y * S, w: r.w * S, h: r.h * S });
   };
   ui.hideLB = () => { G.platform.odcPost({ type: "hide" }); };
 
@@ -495,38 +665,92 @@ module.exports = function (G) {
     btn(bx, by, bw, 50, () => { ui.hideLB(); G.screen = "home"; });
   };
 
+  /* ================= 召唤猫咪（播放轻音乐吸引猫） ================= */
+  ui.drawSummon = () => {
+    const { W, H, land, m, safe } = layout();
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    const playing = !!G.summonPlaying;
+
+    // 返回（左上角圆钮，返回即停音乐）
+    const bs = 42, bx = safe.left + 16, by = safe.top + 14;
+    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+    G.rr(ctx, bx, by, bs, bs, 14); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = C.ink2; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(bx + bs * 0.6, by + bs * 0.32); ctx.lineTo(bx + bs * 0.38, by + bs * 0.5); ctx.lineTo(bx + bs * 0.6, by + bs * 0.68);
+    ctx.stroke();
+    btn(bx, by, bs, bs, () => { G.stopSummonMusic(); G.screen = "home"; });
+
+    text("召唤猫咪", W / 2, safe.top + 54, "bold 24px sans-serif", C.ink);
+
+    // 猫咪插画
+    const cs = Math.min(W, H) * 0.2;
+    const catY = H * 0.40;
+    drawCat(W / 2, catY, cs);
+
+    text(playing ? "音乐播放中…用摇篮曲召唤你的猫" : "点击下方按钮，播放吸引猫咪的轻音乐", W / 2, catY + cs * 1.15, "14px sans-serif", C.ink2);
+
+    // 播放/暂停 大圆钮
+    const pr = Math.min(W, H) * 0.11;
+    const py = H * 0.70;
+    ctx.fillStyle = C.teal;
+    ctx.beginPath(); ctx.arc(W / 2, py, pr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    if (playing) {
+      ctx.fillRect(W / 2 - pr * 0.3, py - pr * 0.28, pr * 0.18, pr * 0.56);
+      ctx.fillRect(W / 2 + pr * 0.12, py - pr * 0.28, pr * 0.18, pr * 0.56);
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - pr * 0.16, py - pr * 0.3); ctx.lineTo(W / 2 - pr * 0.16, py + pr * 0.3); ctx.lineTo(W / 2 + pr * 0.32, py);
+      ctx.closePath(); ctx.fill();
+    }
+    btn(W / 2 - pr, py - pr, pr * 2, pr * 2, () => {
+      G.ensureAudio();
+      if (G.summonPlaying) G.stopSummonMusic(); else G.startSummonMusic();
+    });
+  };
+
   /* ================= 游戏内 HUD =================
      顶部信息条：整体更小更贴顶（safe.top+8），减少对游戏区的遮挡；
      连击不再弹跳圆徽，改为条内静态小徽 */
   ui.drawHud = (t, dt) => {
-    const W = G.platform.W, H = G.platform.H, land = W > H;
-    const safe = G.platform.safe || { top: 0, bottom: 0, left: 0, right: 0 };
+    const { W, H, land, safe } = layout();
     const S = G.session;
+    const uiS = G.platform.S || 1;
+    // HUD 缩略系数：大屏时 HUD 元素比整体 UI 少放大一档（真实尺寸 = 设计值 × √S），手机 S=1 不变
+    const ks = 1 / Math.sqrt(uiS);
     ui.hudDimT += dt;
     const dim = ui.hudDimT > 3 ? 0.45 : 1;
     ctx.save();
     ctx.globalAlpha = dim;
     const hx = safe.left, hy = safe.top + 4;
-    const PH2 = 28;   // 统一药丸高度
+    const PH2 = Math.round(28 * ks);   // 统一药丸高度
     const m = String(Math.max(Math.floor(S.remaining / 60), 0)).padStart(2, "0");
     const s = String(Math.max(S.remaining % 60, 0)).padStart(2, "0");
     const urgent = S.remaining <= 10 && S.remaining > 0;
     ctx.fillStyle = urgent ? C.hudUrgent : C.hudBg;
     ctx.strokeStyle = "rgba(255,255,255,.18)";
     ctx.lineWidth = 1.2;
-    // 倒计时（70×28）
-    G.rr(ctx, hx + 10, hy, 70, PH2, 9); ctx.fill(); ctx.stroke();
-    text(m + ":" + s, hx + 45, hy + PH2 / 2 + 1, "bold 15px sans-serif", urgent ? "#ffd7d7" : "#fff");
-    // 捕获数（64×28）
+    // 倒计时药丸（70×28 × ks）
+    const wTime = Math.round(70 * ks);
+    G.rr(ctx, hx + 10, hy, wTime, PH2, Math.round(9 * ks)); ctx.fill(); ctx.stroke();
+    text(m + ":" + s, hx + 10 + wTime / 2, hy + PH2 / 2 + 1, "bold " + Math.round(15 * ks) + "px sans-serif", urgent ? "#ffd7d7" : "#fff");
+    // 捕获数药丸（64×28 × ks）
+    const wHit = Math.round(64 * ks);
+    const xHit = hx + 10 + wTime + 8;
     ctx.fillStyle = C.hitPill;
-    G.rr(ctx, hx + 88, hy, 64, PH2, 9); ctx.fill(); ctx.stroke();
-    text("🐾 " + S.hits, hx + 120, hy + PH2 / 2 + 1, "bold 13px sans-serif", "#fff");
-    // 连击（静态小徽，无弹跳；combo>=2 才显示）
+    G.rr(ctx, xHit, hy, wHit, PH2, Math.round(9 * ks)); ctx.fill(); ctx.stroke();
+    text("🐾 " + S.hits, xHit + wHit / 2, hy + PH2 / 2 + 1, "bold " + Math.round(13 * ks) + "px sans-serif", "#fff");
+    // 连击（静态小徽，无弹跳；combo>=2 才显示，50×28 × ks）
     if (S.combo >= 2) {
       const hot = S.combo >= 5;
+      const wCb = Math.round(50 * ks);
+      const xCb = xHit + wHit + 8;
       ctx.fillStyle = hot ? "rgba(255,107,74,.9)" : C.comboPill;
-      G.rr(ctx, hx + 160, hy, 50, PH2, 9); ctx.fill(); ctx.stroke();
-      text("×" + S.combo, hx + 185, hy + PH2 / 2 + 1, "bold 13px sans-serif", "#fff");
+      G.rr(ctx, xCb, hy, wCb, PH2, Math.round(9 * ks)); ctx.fill(); ctx.stroke();
+      text("×" + S.combo, xCb + wCb / 2, hy + PH2 / 2 + 1, "bold " + Math.round(13 * ks) + "px sans-serif", "#fff");
     }
 
     if (G.uiFX.stagePop > 0) {
@@ -543,16 +767,24 @@ module.exports = function (G) {
 
     // 暂停按钮（36×36）：避开右上角微信胶囊按钮（退出/更多）
     // 横屏 → 胶囊左侧同高；竖屏 → 胶囊下方；无胶囊信息时退回旧位置
+    // 横屏需额外预留胶囊左侧微信「游戏中心/更多游戏」圆形手柄入口的宽度
     ctx.fillStyle = C.pauseBg;
-    const pw2 = 36;
-    const menu = G.platform.menu;
+    const pw2 = Math.round(36 * ks);
+    const menu0 = G.platform.menu;
+    const menu = menu0 && menu0.width > 0
+      ? { left: menu0.left / uiS, top: menu0.top / uiS, width: menu0.width / uiS, height: menu0.height / uiS,
+          right: menu0.right / uiS, bottom: menu0.bottom / uiS }
+      : null;
+    const gcW = menu && menu.width > 0 ? menu.height + 12 : 0;   // 手柄入口占位（约一个胶囊高度）
     let px, py;
     if (menu && menu.width > 0) {
       if (land) {
-        px = menu.left - 16 - pw2;
+        px = menu.left - 16 - pw2 - gcW;
         py = menu.top + (menu.height - pw2) / 2;
-        // 极窄屏：靠太左会撞 HUD 药丸（右端 hx+210 + 16px 间距），退到胶囊下方
-        if (px < hx + 226) { px = W - safe.right - pw2 - 8; py = menu.bottom + 8; }
+        // 大屏 S>1 时按钮比胶囊高，居中补偿可能顶出屏幕，钳制在安全区内
+        py = Math.max(py, safe.top + 6);
+        // 极窄屏：靠太左会撞 HUD 药丸（右端 hx+26+184·ks + 16px 间距），退到胶囊下方
+        if (px < hx + 26 + 184 * ks + 16) { px = W - safe.right - pw2 - 8; py = menu.bottom + 8; }
       } else {
         px = W - safe.right - pw2 - 8;
         py = menu.bottom + 8;
@@ -560,22 +792,24 @@ module.exports = function (G) {
     } else {
       px = W - safe.right - 52; py = hy;
     }
-    G.rr(ctx, px, py, pw2, pw2, 10); ctx.fill(); ctx.stroke();
+    G.rr(ctx, px, py, pw2, pw2, Math.round(10 * ks)); ctx.fill(); ctx.stroke();
     ctx.fillStyle = "#fff";
-    ctx.fillRect(px + 11, py + 10, 4, 16); ctx.fillRect(px + 21, py + 10, 4, 16);
+    const bw = Math.max(3, Math.round(4 * ks)), bh = Math.round(16 * ks);
+    ctx.fillRect(px + Math.round(11 * ks), py + Math.round(10 * ks), bw, bh);
+    ctx.fillRect(px + Math.round(21 * ks), py + Math.round(10 * ks), bw, bh);
     // 长按进度环（600ms）：按住时白环从顶部顺时针填满
     const PH = G.pauseHold || { active: false, progress: 0 };
     if (PH.active && PH.progress > 0) {
-      ctx.strokeStyle = C.teal; ctx.lineWidth = 3.5; ctx.lineCap = "round";
+      ctx.strokeStyle = C.teal; ctx.lineWidth = Math.max(2.5, 3.5 * ks); ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.arc(px + pw2 / 2, py + pw2 / 2, 23, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * PH.progress);
+      ctx.arc(px + pw2 / 2, py + pw2 / 2, pw2 / 2 + 5 * ks, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * PH.progress);
       ctx.stroke();
       ctx.lineCap = "butt";
     }
     // 开局前 5 秒提示长按手势（避免玩家不知道怎么暂停）
     if (S.time < 5 && !PH.active) {
       ctx.globalAlpha = dim * Math.min(1, (5 - S.time) / 2);
-      text("长按暂停", px + pw2 / 2, py + 48, "11px sans-serif", "rgba(255,255,255,.75)");
+      text("长按暂停", px + pw2 / 2, py + pw2 + 12 * ks, Math.round(11 * ks) + "px sans-serif", "rgba(255,255,255,.75)");
       ctx.globalAlpha = dim;
     }
     // 注册区域供 game.js 长按判定（不再走即时点击）
@@ -586,7 +820,7 @@ module.exports = function (G) {
 
   /* ================= 倒计时 ================= */
   ui.drawCountdown = (c) => {
-    const W = G.platform.W, H = G.platform.H;
+    const { W, H } = layout();
     ctx.fillStyle = C.countMask; ctx.fillRect(0, 0, W, H);
     const frac = c - Math.floor(c);
     const sc2 = 0.8 + frac * 0.5;
@@ -600,7 +834,7 @@ module.exports = function (G) {
 
   /* ================= 暂停 ================= */
   ui.drawPause = () => {
-    const W = G.platform.W, H = G.platform.H, land = W > H;
+    const { W, H, land } = layout();
     const safe = G.platform.safe || { top: 0, bottom: 0, left: 0, right: 0 };
     const m = land ? 24 : 18;
     const innerW = W - safe.left - safe.right;
@@ -660,17 +894,21 @@ module.exports = function (G) {
         text(String(c[1]), x + cw / 2, cardY + 54, "bold 26px sans-serif", C.ink);
       });
       if (R.bonusTag) text(R.bonusTag, centerX, cardY + chh + 20, "14px sans-serif", C.amberDeep);
-      const bw = (availW - gap) / 2, by = btnTop;
+      const bw = (availW - gap * 2) / 3, by = btnTop;
       const bg = ctx.createLinearGradient(leftX, by, leftX, by + 46);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
       G.rr(ctx, leftX, by, bw, 46, 14); ctx.fill();
       text("再来一局", leftX + bw / 2, by + 23, "bold 17px sans-serif", "#fff");
       btn(leftX, by, bw, 46, () => G.startGame());
-      ctx.fillStyle = C.card; ctx.strokeStyle = C.line;
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
       G.rr(ctx, leftX + bw + gap, by, bw, 46, 14); ctx.fill(); ctx.stroke();
-      text("返回首页", leftX + bw + gap + bw / 2, by + 23, "bold 17px sans-serif", C.ink);
-      btn(leftX + bw + gap, by, bw, 46, () => { G.screen = "home"; G.clearPreys(); });
+      text("分享好友", leftX + bw + gap + bw / 2, by + 23, "bold 17px sans-serif", C.teal);
+      btn(leftX + bw + gap, by, bw, 46, () => G.shareResult());
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, leftX + (bw + gap) * 2, by, bw, 46, 14); ctx.fill(); ctx.stroke();
+      text("返回首页", leftX + (bw + gap) * 2 + bw / 2, by + 23, "bold 17px sans-serif", C.ink);
+      btn(leftX + (bw + gap) * 2, by, bw, 46, () => { G.screen = "home"; G.clearPreys(); });
     } else {
       text("本局结束", W / 2, safe.top + innerH * 0.09, "16px sans-serif", C.ink3);
       text(R.title || "", W / 2, safe.top + innerH * 0.15, "bold 30px sans-serif", C.ink);
@@ -686,17 +924,21 @@ module.exports = function (G) {
         text(String(c[1]), x + cw / 2, y + 54, "bold 26px sans-serif", C.ink);
       });
       if (R.bonusTag) text(R.bonusTag, W / 2, baseY + 2 * (chh + 12) + 16, "14px sans-serif", C.amberDeep);
-      const by1 = H - safe.bottom - 168, by2 = H - safe.bottom - 104;
+      const by1 = H - safe.bottom - 232, by2 = H - safe.bottom - 168, by3 = H - safe.bottom - 104;
       const bg = ctx.createLinearGradient(edgeL, by1, edgeL, by1 + 54);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
       G.rr(ctx, edgeL, by1, availW, 54, 14); ctx.fill();
       text("再来一局", W / 2, by1 + 27, "bold 18px sans-serif", "#fff");
       btn(edgeL, by1, availW, 54, () => G.startGame());
-      ctx.fillStyle = C.card; ctx.strokeStyle = C.line;
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
       G.rr(ctx, edgeL, by2, availW, 50, 14); ctx.fill(); ctx.stroke();
-      text("返回首页", W / 2, by2 + 25, "bold 17px sans-serif", C.ink);
-      btn(edgeL, by2, availW, 50, () => { G.screen = "home"; G.clearPreys(); });
+      text("分享好友", W / 2, by2 + 25, "bold 17px sans-serif", C.teal);
+      btn(edgeL, by2, availW, 50, () => G.shareResult());
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, edgeL, by3, availW, 50, 14); ctx.fill(); ctx.stroke();
+      text("返回首页", W / 2, by3 + 25, "bold 17px sans-serif", C.ink);
+      btn(edgeL, by3, availW, 50, () => { G.screen = "home"; G.clearPreys(); });
     }
   };
 };

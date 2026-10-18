@@ -48,11 +48,12 @@ module.exports = function (G) {
   };
   /* 蝶式飞行参数（最终调优版：中位 235px/s ≈ 基线 2.08×） */
   G.BFLY_PARAMS = {
-    1: { glide: [0.4, 0.65], impulse: [105, 160], up: [33, 51], hoverChance: 0,    turn: 0.014, drag: 0.7, land: null },
+    1: { glide: [0.4, 0.65], impulse: [105, 160], up: [33, 51], hoverChance: 0,    turn: 0.014, drag: 0.7,
+         land: { interval: () => rand(4, 6), chance: 0.4, dur: () => rand(1.6, 2.6) }, exit: [7, 11] },
     2: { glide: [0.3, 0.55], impulse: [125, 185], up: [38, 60], hoverChance: 0.35, turn: 0.02,  drag: 0.7,
-         land: { interval: () => rand(3, 5), chance: 0.5, dur: () => rand(1.0, 1.8) } },
+         land: { interval: () => rand(3, 5), chance: 0.5, dur: () => rand(1.0, 1.8) }, exit: [6, 10] },
     3: { glide: [0.22, 0.4], impulse: [155, 230], up: [46, 72], hoverChance: 0.3,  turn: 0.04,  drag: 0.7,
-         land: { interval: () => rand(5, 8), chance: 0.3, dur: () => rand(0.6, 1.1) } }
+         land: { interval: () => rand(5, 8), chance: 0.3, dur: () => rand(0.6, 1.1) }, exit: [5, 9] }
   };
   /* 蝴蝶花色 variants：写实淡色系——白色/淡黄为主（w = 出现权重），保留少量真实虎斑蝶橙
      HD 皮肤沿用既有贴图 key（cabbage=白 / sulawesi=黄 / monarch=橙），高饱和蓝绿紫已移除 */
@@ -68,11 +69,11 @@ module.exports = function (G) {
     { key: "monarch", name: "虎斑蝶", size: 1.08, speed: 0.95, w: 1,
       fore: "#f2a052", fore2: "#ffb96a", hind: "#e0882e", hind2: "#ffa244", body: "#4a3520", edge: "#8a5220" }
   ];
-  /* 老鼠三阶段行为表 */
+  /* 老鼠三阶段行为表（台球桌布局：任意洞进出，路线横穿台面供拦截；速度快慢分档） */
   G.MOUSE_STAGE = {
-    1: { peek: 2.2,  dartSpeed: 150, fakeP: 0,    adjacent: true,  dartP: 0.6 },
-    2: { peek: 1.4,  dartSpeed: 235, fakeP: 0.35, adjacent: false, dartP: 0.85 },
-    3: { peek: 0.85, dartSpeed: 330, fakeP: 0.55, adjacent: false, dartP: 1 }
+    1: { peek: 2.2,  dartSpeed: 260, fakeP: 0,    adjacent: false, dartP: 0.6 },
+    2: { peek: 1.4,  dartSpeed: 380, fakeP: 0.35, adjacent: false, dartP: 0.85 },
+    3: { peek: 0.85, dartSpeed: 500, fakeP: 0.55, adjacent: false, dartP: 1 }
   };
   /* 老鼠花色 variants：毛色分层（背→中→腹）/ 耳 / 爪 / 尾 / 眼鼻 + 速度体型差异 */
   G.MOUSE_VARIANTS = [
@@ -107,16 +108,32 @@ module.exports = function (G) {
       paw: "#dcc79c", foot: "#d1ba8d", eye: "#1f170f", eyeRim: "rgba(0,0,0,.26)",
       nose: "#d98a7d", haunch: "rgba(140,110,66,.3)", sheen: "rgba(246,230,196,.6)" }
   ];
-  /* 难度 */
+  /* 激光花色 variants：红色为主（w = 出现权重），翠绿更快更小（约 1/4 概率）；只保留红绿两色 */
+  G.LASER_VARIANTS = [
+    { key: "red",   name: "赤红光点", speed: 1,    size: 1,    w: 3 },
+    { key: "green", name: "翠绿光点", speed: 1.5,  size: 0.8,  w: 1 }
+  ];
+  /* 激光配色：小屏与大屏保持一致（经典红/翠绿）。
+     key 与 LASER_VARIANTS 对应；spark=命中火花 trail=拖尾 flash=瞬移灼痕亮圈 burn=灼痕底色 */
+  G.LASER_COLORS = {
+    red:   { spark: "#ff8a8a", trail: "#ff5252", flash: "#ff7a7a", burn: ["#3a0f0a", "rgba(58,15,10,0)"] },
+    green: { spark: "#4ade80", trail: "#4ade80", flash: "#7dffb0", burn: ["#0a3a1f", "rgba(10,58,31,0)"] }
+  };
+  G.laserColorSet = () => G.LASER_COLORS;
+  /* 难度（typeSpeed：仅对特定猎物的额外速度倍率——标准/激烈下蝴蝶与老鼠再提速） */
   G.DIFF = {
     easy:   { speed: 0.65, size: 1.3 },
-    normal: { speed: 1.0,  size: 1.0 },
-    hard:   { speed: 1.5,  size: 0.85 }
+    normal: { speed: 1.0,  size: 1.0, typeSpeed: { butterfly: 1.2, mouse: 1.2 } },
+    hard:   { speed: 1.5,  size: 0.85, typeSpeed: { butterfly: 1.25, mouse: 1.25 } }
   };
+  /* 客服降级配置：小游戏标准客服会话走 wx.openCustomerServiceConversation（后台「客服消息」接入即可，
+     无需此配置）。仅当用户微信版本过低、不支持标准接口时，才降级为企业微信「微信客服」——
+     那时需要在这里填入企业 ID corpId（url 为客服链接，可选）。 */
+  G.SUPPORT = { corpId: "", url: "" };
   /* 猎物基础定义 */
   G.PREY_DEF = {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
-    mouse:     { w: 104, h: 66, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
+    mouse:     { w: 116, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" }
   };
