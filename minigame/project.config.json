@@ -25,7 +25,23 @@
         "type": "folder"
       },
       {
+        "value": "screenshots",
+        "type": "folder"
+      },
+      {
+        "value": "generated-images",
+        "type": "folder"
+      },
+      {
         "value": "README.md",
+        "type": "file"
+      },
+      {
+        "value": ".workbuddy",
+        "type": "folder"
+      },
+      {
+        "value": ".DS_Store",
         "type": "file"
       }
     ],

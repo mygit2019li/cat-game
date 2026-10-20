@@ -12,16 +12,121 @@ module.exports = function (G) {
     targetType: "fish", preyCount: 3, difficulty: "normal", duration: 180,
     sound: true, vibrate: true, adaptive: true
   };
+  /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
+     直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
+  const TYPES = ["fish", "butterfly", "mouse", "laser"];
+  const DURS = [60, 120, 180, 300];
   function loadConfig() {
     let saved = {};
     try { saved = JSON.parse(G.platform.storage.get("catToyConfig") || "{}") || {}; } catch (e) {}
+    if (typeof saved !== "object" || Array.isArray(saved)) saved = {};
     const c = Object.assign({}, DEFAULTS, saved);
     c.preyCount = Number(c.preyCount) === 1 ? 1 : 3;   // 两档：单只/多只
     c.sound = !!c.sound; c.vibrate = !!c.vibrate; c.adaptive = !!c.adaptive;
+    if (TYPES.indexOf(c.targetType) < 0) c.targetType = DEFAULTS.targetType;
+    const dur = Number(c.duration);
+    c.duration = DURS.indexOf(dur) >= 0 ? dur : DEFAULTS.duration;
     return c;
   }
   G.saveConfig = () => G.platform.storage.set("catToyConfig", JSON.stringify(G.config));
   G.config = loadConfig();
+  G.GAME_TYPES = TYPES; G.GAME_DURS = DURS;
+
+  /* 本局历史的安全读取：存储里可能是对象、null、元素为 null 的数组（旧版本/手动清理所致），
+     原样交给 forEach / slice / unshift 会直接抛错（记录页闪退、结算写不进日志）。 */
+  G.getLogs = () => {
+    let arr = null;
+    try { arr = JSON.parse(G.platform.storage.get("catToyLogs") || "[]"); } catch (e) { arr = null; }
+    if (!Array.isArray(arr)) return [];
+    const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
+    // 同时剔掉空对象 {}：它是合法对象但没有有效字段，会渲染成一行"0 抓 0%"的脏记录
+    return arr.filter(L => L && typeof L === "object" && !Array.isArray(L) && (L.date || L.hits != null))
+      .map(L => ({
+      date: typeof L.date === "string" ? L.date : "-",
+      type: TYPES.indexOf(L.type) >= 0 ? L.type : "fish",
+      dur: num(L.dur) || 180,
+      hits: num(L.hits),
+      touches: num(L.touches),
+      accuracy: num(L.accuracy),
+      combo: num(L.combo),
+      dart: num(L.dart),
+      bonus: num(L.bonus)
+    }));
+  };
+
+  /* ===== 猫档案（累计维度） =====
+     背景：分享图只放单局数据时，用户发过一次就没理由再发——同样的模板每次内容一样。
+     加上累计维度后，同一张模板会随时间自己变化（多玩一天、多抓几只、反应更快），
+     才有"过一周再发一次"的理由。
+     为什么要单独存一份：catToyLogs 只保留最近 50 局，用 logs 累加会算错总数。
+     hpm（每分钟捕获数）用来做"反应速度"的可比指标——不同时长也能横向比较。 */
+  const ARCHIVE_KEY = "catToyArchive";
+  const pad2 = (n) => (n < 10 ? "0" + n : "" + n);
+  const dayKey = (d) => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+
+  G.getArchive = () => {
+    let a = null;
+    try { a = JSON.parse(G.platform.storage.get(ARCHIVE_KEY) || "null"); } catch (e) { a = null; }
+    if (!a || typeof a !== "object" || Array.isArray(a)) a = {};
+    const num = (v) => { const n = Number(v); return isFinite(n) && n > 0 ? n : 0; };
+    const modes = {};
+    TYPES.forEach(k => {
+      const src = (a.modes && a.modes[k]) || {};
+      modes[k] = { g: num(src.g), h: num(src.h) };
+    });
+    const days = Array.isArray(a.days)
+      ? a.days.filter(s => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && s <= dayKey(new Date()))
+      : [];
+    return {
+      games: num(a.games), hits: num(a.hits), touches: num(a.touches),
+      days: days.slice(-400),
+      modes,
+      baseSum: num(a.baseSum), baseN: num(a.baseN),
+      recent: Array.isArray(a.recent) ? a.recent.filter(v => isFinite(Number(v))).map(Number).slice(-5) : [],
+      firstTs: num(a.firstTs), lastTs: num(a.lastTs)
+    };
+  };
+
+  /* 每局结束时累加一次；ent = { type, hits, touches, hpm } */
+  G.recordArchive = (ent) => {
+    const e = ent || {};
+    const a = G.getArchive();
+    const hits = Math.max(0, Number(e.hits) || 0);
+    const hpm = Math.max(0, Number(e.hpm) || 0);
+    const type = TYPES.indexOf(e.type) >= 0 ? e.type : "fish";
+    const key = dayKey(new Date());
+    a.games += 1;
+    a.hits += hits;
+    a.touches += Math.max(0, Number(e.touches) || 0);
+    if (a.days.indexOf(key) < 0) a.days.push(key);
+    if (a.days.length > 400) a.days = a.days.slice(-400);
+    a.modes[type].g += 1; a.modes[type].h += hits;
+    // 前 3 局均值锁死作为"基线"，之后不再变——否则趋势会跟着一起漂，看不出进步
+    if (a.baseN < 3) { a.baseSum += hpm; a.baseN += 1; }
+    a.recent.push(hpm);
+    if (a.recent.length > 5) a.recent = a.recent.slice(-5);
+    if (!a.firstTs) a.firstTs = Date.now();
+    a.lastTs = Date.now();
+    G.platform.storage.set(ARCHIVE_KEY, JSON.stringify(a));
+    return a;
+  };
+
+  /* 派生指标：绘制层直接用，避免每次重算 */
+  G.archiveSummary = () => {
+    const a = G.getArchive();
+    const avg = (arr) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0);
+    let favType = "fish", favG = -1;
+    TYPES.forEach(k => { if (a.modes[k].g > favG) { favG = a.modes[k].g; favType = k; } });
+    const base = a.baseN > 0 ? a.baseSum / a.baseN : 0;
+    const recent = avg(a.recent);
+    return {
+      games: a.games, hits: a.hits, touches: a.touches, days: a.days.length,
+      favType, favGames: Math.max(0, favG),
+      hpmBase: base, hpmRecent: recent,
+      // trend > 0 表示最近比刚开始快
+      trend: (base > 0 && recent > 0) ? (recent - base) / base : 0
+    };
+  };
 
   G.session = {
     running: false, paused: false, counting: false,

@@ -111,9 +111,17 @@ function render() {
   }
   const list = (cache || []).slice().sort((a, b) => bestOf(b) - bestOf(a)).slice(0, 20);
   if (!list.length) {
+    // 空榜不能只写"来抢第一名"——那是等别人来，用户没有可执行动作。
+    // 这里给出唯一能马上做的事：把榜单/测评图发给猫友，下一个人进来榜单就活了。
+    // 按钮由主域画在卡片下方（开放数据域不能直接拉起转发）。
+    const cx2 = x + w / 2, cy2 = y + h / 2;
+    ctx.fillStyle = "#31443f";
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillText("好友里还没有成绩", cx2, cy2 - 22);
     ctx.fillStyle = "#7a918b";
-    ctx.font = "15px sans-serif";
-    ctx.fillText("好友里还没人玩过，来抢占第一名吧！", x + w / 2, y + h / 2);
+    ctx.font = "13px sans-serif";
+    ctx.fillText("点下方「邀猫友比一比」，", cx2, cy2 + 6);
+    ctx.fillText("把测评图发到猫友群，看谁家猫更凶", cx2, cy2 + 26);
     return;
   }
   const top = y + 16;

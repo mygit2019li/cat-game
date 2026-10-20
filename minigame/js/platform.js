@@ -14,10 +14,19 @@ module.exports = function (G) {
 
   function computeSafe(s) {
     const area = s.safeArea || { left: 0, top: 0, right: s.windowWidth, bottom: s.windowHeight };
-    const left = Math.max(0, area.left);
-    const top = Math.max(0, area.top);
-    const right = Math.max(0, s.windowWidth - area.right);
-    const bottom = Math.max(0, s.windowHeight - area.bottom);
+    let left = Math.max(0, area.left);
+    let top = Math.max(0, area.top);
+    let right = Math.max(0, s.windowWidth - area.right);
+    let bottom = Math.max(0, s.windowHeight - area.bottom);
+    /* 安全区合法性校验：部分安卓机在横屏锁定的小游戏里，safeArea 返回的是【竖屏坐标系】的值
+       （right≈竖屏屏宽、top≈状态栏高）。windowWidth=780(横屏) 时算出 safe.right=780-390=390，
+       整个 UI 会被压进屏幕左半边（首页标题/模式卡/按钮全部挤在左侧 45%）。
+       横屏下左右安全区（刘海）物理上不可能超过屏宽 25%、上下不超过屏高 25%，
+       超限的值一律视为脏数据按 0 处理。 */
+    if (left > s.windowWidth * 0.25) left = 0;
+    if (right > s.windowWidth * 0.25) right = 0;
+    if (top > s.windowHeight * 0.25) top = 0;
+    if (bottom > s.windowHeight * 0.25) bottom = 0;
     return { left, top, right, bottom };
   }
   const safe = computeSafe(sys);
@@ -48,6 +57,16 @@ module.exports = function (G) {
         try { wx.setStorageSync(key, val); } catch (e) {}
       }
     },
+    /* 冷启动参数：scene 是微信的场景值（1001 发现栏 / 1005 搜索 / 1007 会话 /
+       1008 群聊 / 1011 扫码 / 1044 分享卡片 …），query 是我们自己拼的 from 参数。
+       埋点靠这两个判断"用户从哪来"。 */
+    launch: (() => {
+      try {
+        const o = (typeof wx.getLaunchOptionsSync === "function") ? wx.getLaunchOptionsSync() : null;
+        return { scene: Number(o && o.scene) || 0, query: (o && o.query) || {} };
+      } catch (e) { return { scene: 0, query: {} }; }
+    })(),
+    showCb: [], hideCb: [],
     vibrate() {
       if (!G.config || G.config.vibrate) { try { wx.vibrateShort({ type: "light" }); } catch (e) {} }
     },
@@ -154,6 +173,25 @@ module.exports = function (G) {
   });
   wx.onTouchStart && wx.onTouchStart(e => { if (P.onTouchStart) P.onTouchStart(e); });
   wx.onTouchEnd && wx.onTouchEnd(e => { if (P.onTouchEnd) P.onTouchEnd(e); });
+  /* 前后台切换钩子：业务侧用来自动暂停、补埋点 */
+  wx.onHide && wx.onHide(() => { P.hideCb.forEach(f => { try { f(); } catch (e) {} }); });
+  wx.onShow && wx.onShow(res => {
+    /* 回前台时重读系统信息：部分安卓机冷启动瞬间横屏尚未生效，safeArea/窗口尺寸是按
+       竖屏算的，等切横屏稳定后才会给对。这里对比变化后再应用，避免每次 onShow 都清屏。 */
+    try {
+      const s = wx.getSystemInfoSync();
+      const ns = computeSafe(s);
+      const changed = s.windowWidth !== P.W || s.windowHeight !== P.H ||
+        ["left", "top", "right", "bottom"].some(k => ns[k] !== P.safe[k]);
+      if (changed) {
+        P.W = s.windowWidth; P.H = s.windowHeight;
+        P.safe = ns; P.menu = getMenu();
+        applySize(); computeScale();
+        P.resizeCb.forEach(f => { try { f(); } catch (e) {} });
+      }
+    } catch (e) {}
+    P.showCb.forEach(f => { try { f(res); } catch (e) {} });
+  });
 
   G.platform = P;
 };

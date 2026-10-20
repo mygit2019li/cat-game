@@ -342,7 +342,7 @@ module.exports = function (G) {
       const rowBtns = [
         { label: "设置", icon: "gear", cb: () => { G.screen = "settings"; } },
         { label: "本周记录", icon: "chart", cb: () => { G.screen = "records"; } },
-        { label: "好友排行", icon: "trophy", cb: () => { G.screen = "leaderboard"; ui.showLB(); } }
+        { label: "好友排行", icon: "trophy", cb: () => { G.screen = "leaderboard"; G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
       ];
       if (SHOW_SUMMON) rowBtns.push({ label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.screen = "summon"; } });
       const bwN = (availW - gap * (rowBtns.length - 1)) / rowBtns.length;
@@ -352,7 +352,9 @@ module.exports = function (G) {
       const cardBottomLimit = rowY - m;
       const gridH = cardBottomLimit - cardTop - headH - pad; // 卡内 2×2 网格区高度
       const cw = Math.min((rightW - gap) / 2, 148);
-      const ch = Math.max(76, Math.min((gridH - gap) / 2, 112));
+      // 卡高下限 60 而不是 76：真机横屏带刘海时（safe.left/right≈44、bottom≈34），高度预算变紧，
+      // 76 保底会让卡片盖住底部按钮行；60 时图标按 0.3 缩放下限刚好不压模式名
+      const ch = Math.min(Math.max((gridH - gap) / 2, 60), 112);
       const totalW = cw * 2 + gap;
       const totalH = ch * 2 + gap;
       const gx = rightX + (rightW - totalW) / 2;
@@ -382,7 +384,10 @@ module.exports = function (G) {
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
-        btn(x, y, cw, ch, () => { G.config.targetType = mItem.key; G.saveConfig(); G.playTick(); });
+        btn(x, y, cw, ch, () => {
+          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
+        });
       });
     } else {
       const edgeL = safe.left + 18, edgeR = W - safe.right - 18;
@@ -412,7 +417,10 @@ module.exports = function (G) {
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
-        btn(x, y, cw, ch, () => { G.config.targetType = mItem.key; G.saveConfig(); G.playTick(); });
+        btn(x, y, cw, ch, () => {
+          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
+        });
       });
       // 召唤猫咪入口（暂时隐藏，恢复时改回 SHOW_SUMMON）
       const cardBottom = cardY + cardH;
@@ -430,7 +438,7 @@ module.exports = function (G) {
       const tw = (availW - 20) / 3;
       drawBtn(edgeL, subY2, tw, 44, "设置", { icon: "gear", cb: () => { G.screen = "settings"; } });
       drawBtn(edgeL + tw + 10, subY2, tw, 44, "本周记录", { icon: "chart", cb: () => { G.screen = "records"; } });
-      drawBtn(edgeL + (tw + 10) * 2, subY2, tw, 44, "好友排行", { icon: "trophy", cb: () => { G.screen = "leaderboard"; ui.showLB(); } });
+      drawBtn(edgeL + (tw + 10) * 2, subY2, tw, 44, "好友排行", { icon: "trophy", cb: () => { G.screen = "leaderboard"; G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } });
 
       // 适龄/健康忠告/安全/免责提示（底部居中，自动折行）
       drawTips(edgeL, tipsTop2, availW, 15, "left");
@@ -560,8 +568,8 @@ module.exports = function (G) {
     g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     text("本周记录", W / 2, safe.top + 54, "bold 24px sans-serif", C.ink);
-    let logs = [];
-    try { logs = JSON.parse(G.platform.storage.get("catToyLogs") || "[]"); } catch (e) {}
+    // 安全读取：历史里若混入 null / 非对象元素，原样 forEach 会抛错（记录页白屏）
+    const logs = G.getLogs();
     if (!logs.length) text("还没有记录，来一局吧！", W / 2, safe.top + H * 0.4, "15px sans-serif", C.ink3);
 
     if (land) {
@@ -626,11 +634,18 @@ module.exports = function (G) {
   function lbRect() {
     const { W, H, land, m, safe } = layout();
     const availW = W - safe.left - safe.right - m * 2;
-    const top = safe.top + 96;
-    const bottom = H - safe.bottom - 130;   // 底部预留两行说明 + 返回按钮
+    const top = safe.top + 92;
+    // 底部让出一行说明 + 两个按钮（邀猫友 / 返回）的位置
+    const bottom = H - safe.bottom - 24 - 46 - 30;
     const w = land ? Math.min(availW * 0.56, 560) : availW - 12;
     const h = Math.max(120, bottom - top);
     return { x: (W - w) / 2, y: top, w, h };
+  }
+  function lbRow() {
+    const { W, H, land, m, safe } = layout();
+    const full = Math.min(W - safe.left - safe.right - m * 2, land ? 520 : W - safe.left - safe.right - 48);
+    const bh = 46, gp = 12;
+    return { bx: (W - full) / 2, by: H - safe.bottom - 24 - bh, bh, full, half: (full - gp) / 2, gp };
   }
   ui.showLB = () => {
     const r = lbRect();
@@ -641,7 +656,7 @@ module.exports = function (G) {
   ui.hideLB = () => { G.platform.odcPost({ type: "hide" }); };
 
   ui.drawLeaderboard = () => {
-    const { W, H, land, m, safe } = layout();
+    const { W, H, m, safe } = layout();
     const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -650,19 +665,24 @@ module.exports = function (G) {
 
     // 卡片区域由开放数据域绘制（覆盖层），此处只画卡外说明
     const r = lbRect();
-    text("玩过本游戏的好友自动进入榜单，无需授权通讯录", W / 2, r.y + r.h + 20, "11px sans-serif", C.ink3);
-    text("你的单局最高捕获数会在结算后自动更新", W / 2, r.y + r.h + 38, "11px sans-serif", C.ink3);
+    const row = lbRow();
+    text("玩过本游戏的好友自动进入榜单，无需授权通讯录", W / 2, r.y + r.h + 18, "11px sans-serif", C.ink3);
 
-    let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
-    let bx = land ? safe.left + m : safe.left + 24;
-    if (land && bw > 360) { bx = (W - 360) / 2; bw = 360; }
-    const by = H - safe.bottom - 75;
-    const bg = ctx.createLinearGradient(bx, by, bx, by + 50);
+    // 左：邀猫友。空榜时这是唯一能让用户「做点什么」的动作——把"等人来"变成"发出邀请"。
+    // 文案必须和开放数据域空榜里的指引一字一致（"点下方「邀猫友比一比」"），否则用户找不到。
+    // 合规说明：不奖励分享、不设解锁条件，只是邀请好友来玩。
+    const bg = ctx.createLinearGradient(row.bx, row.by, row.bx, row.by + row.bh);
     bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
     ctx.fillStyle = bg;
-    G.rr(ctx, bx, by, bw, 50, 14); ctx.fill();
-    text("返回", W / 2, by + 25, "bold 18px sans-serif", "#fff");
-    btn(bx, by, bw, 50, () => { ui.hideLB(); G.screen = "home"; });
+    G.rr(ctx, row.bx, row.by, row.half, row.bh, 14); ctx.fill();
+    text("邀猫友比一比", row.bx + row.half / 2, row.by + row.bh / 2, "bold 17px sans-serif", "#fff");
+    btn(row.bx, row.by, row.half, row.bh, () => G.shareInvite("lb"));
+
+    const rx = row.bx + row.half + row.gp;
+    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+    G.rr(ctx, rx, row.by, row.half, row.bh, 14); ctx.fill(); ctx.stroke();
+    text("返回", rx + row.half / 2, row.by + row.bh / 2, "bold 17px sans-serif", C.ink);
+    btn(rx, row.by, row.half, row.bh, () => { ui.hideLB(); G.screen = "home"; });
   };
 
   /* ================= 召唤猫咪（播放轻音乐吸引猫） ================= */
@@ -863,9 +883,34 @@ module.exports = function (G) {
     const { W, H, land, m, gap, safe } = layout();
     const innerH = H - safe.top - safe.bottom;
     const R = G.result || {};
+    // 模式名：结算页标题要标出这一局选的是哪种玩法
+    const modeName = (MODES.find(md => md.key === G.config.targetType) || {}).name || "";
+    // 背景半透明：下层是当前玩法的场景（由 game.js 在结算时绘制），透出来才能看出是哪个模式。
+    // 蒙版从 .76 降到 .50 一档——之前场景几乎被洗白，截图存图后看不出玩法差异。
+    // 文字可读性不再靠压低透明度，改由「标题区柔光 + 文字白描边」解决，见下。
     const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
+    g.addColorStop(0, "rgba(234,250,244,.50)");
+    g.addColorStop(0.55, "rgba(240,251,247,.54)");
+    g.addColorStop(1, "rgba(253,246,233,.60)");
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 场景暗（暗室模式）时深色文字压不住：补一层极淡的整体提亮，冷色不同步压太重
+    if (G.scene && G.scene.dark) {
+      ctx.fillStyle = "rgba(240,255,250,.26)"; ctx.fillRect(0, 0, W, H);
+    }
+    // 标题区柔光：只在标题周围铺一圈白雾，替代原来"整条顶部白化"——既压得住窗户/台面亮块，
+    // 又不会把整片场景洗掉，所以背景能明显更清晰。
+    const halo = (cx, cy, rx, ry, a) => {
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(1, ry / rx);
+      const rg = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+      rg.addColorStop(0, "rgba(255,255,255," + a + ")");
+      rg.addColorStop(0.5, "rgba(255,255,255," + (a * 0.52).toFixed(3) + ")");
+      rg.addColorStop(0.78, "rgba(255,255,255," + (a * 0.18).toFixed(3) + ")");
+      rg.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.beginPath(); ctx.arc(0, 0, rx, 0, Math.PI * 2);
+      ctx.fillStyle = rg; ctx.fill();
+      ctx.restore();
+    };
     const cells = [
       ["触碰次数", R.touches || 0], ["总捕获", R.hits || 0],
       ["命中率", (R.acc || 0) + "%"], ["最高连击", R.maxCombo || 0]
@@ -876,9 +921,20 @@ module.exports = function (G) {
       const centerX = (edgeL + edgeR) / 2;
       const leftX = centerX - availW / 2;
       const titleTop = safe.top + Math.max(60, Math.min(78, innerH * 0.10));
-      text("本局结束", centerX, titleTop, "16px sans-serif", C.ink3);
+      const modeLabel = modeName ? "本局结束 · " + modeName : "本局结束";
+      // 标题药丸底衬：场景里的窗户/台面亮块会干扰小字，铺一层半透明白底
+      ctx.font = "16px sans-serif";
+      const lw = ctx.measureText(modeLabel).width + 30;
+      ctx.fillStyle = "rgba(255,255,255,.76)";
+      G.rr(ctx, centerX - lw / 2, titleTop - 14, lw, 28, 14); ctx.fill();
+      text(modeLabel, centerX, titleTop, "16px sans-serif", C.ink3);
+      // 标题柔光 + 白描边：蒙版调淡后靠这两层兜住文字可读性
+      halo(centerX, titleTop + 44, Math.min(availW * 0.52, 360), 94, 0.80);
+      ctx.save();
+      ctx.shadowColor = "rgba(255,255,255,.92)"; ctx.shadowBlur = 14;
       text(R.title || "", centerX, titleTop + 34, "bold 30px sans-serif", C.ink);
       text(R.desc || "", centerX, titleTop + 70, "14px sans-serif", C.ink2);
+      ctx.restore();
       // 卡片块在「标题底 ↔ 按钮顶」之间垂直居中：大屏不留大空档
       const chh = 78;
       const btnTop = H - safe.bottom - 64;
@@ -893,29 +949,61 @@ module.exports = function (G) {
         text(c[0], x + cw / 2, cardY + 24, "13px sans-serif", C.ink2);
         text(String(c[1]), x + cw / 2, cardY + 54, "bold 26px sans-serif", C.ink);
       });
-      if (R.bonusTag) text(R.bonusTag, centerX, cardY + chh + 20, "14px sans-serif", C.amberDeep);
-      const bw = (availW - gap * 2) / 3, by = btnTop;
+      if (R.bonusTag) {
+        // 琥珀色小字在浅色场景上偏弱，加一层白描边
+        ctx.save();
+        ctx.shadowColor = "rgba(255,255,255,.95)"; ctx.shadowBlur = 8;
+        text(R.bonusTag, centerX, cardY + chh + 20, "bold 14px sans-serif", C.amberDeep);
+        ctx.restore();
+      }
+      const bw = (availW - gap * 3) / 4, by = btnTop;
       const bg = ctx.createLinearGradient(leftX, by, leftX, by + 46);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
       G.rr(ctx, leftX, by, bw, 46, 14); ctx.fill();
       text("再来一局", leftX + bw / 2, by + 23, "bold 17px sans-serif", "#fff");
       btn(leftX, by, bw, 46, () => G.startGame());
+      // 晒给猫友：分享带「猫咪反应测评图」，而不是"我得了 X 分"
+      const x2 = leftX + bw + gap;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
-      G.rr(ctx, leftX + bw + gap, by, bw, 46, 14); ctx.fill(); ctx.stroke();
-      text("分享好友", leftX + bw + gap + bw / 2, by + 23, "bold 17px sans-serif", C.teal);
-      btn(leftX + bw + gap, by, bw, 46, () => G.shareResult());
+      G.rr(ctx, x2, by, bw, 46, 14); ctx.fill(); ctx.stroke();
+      text("晒给猫友", x2 + bw / 2, by + 23, "bold 17px sans-serif", C.teal);
+      btn(x2, by, bw, 46, () => G.shareResult());
+      // 存成图片：朋友圈发图不受游戏类分享限制
+      const x3 = leftX + (bw + gap) * 2;
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.amber; ctx.lineWidth = 1.4;
+      G.rr(ctx, x3, by, bw, 46, 14); ctx.fill(); ctx.stroke();
+      text("存成图片", x3 + bw / 2, by + 23, "bold 17px sans-serif", C.amberDeep);
+      btn(x3, by, bw, 46, () => G.saveCard());
+      const x4 = leftX + (bw + gap) * 3;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, leftX + (bw + gap) * 2, by, bw, 46, 14); ctx.fill(); ctx.stroke();
-      text("返回首页", leftX + (bw + gap) * 2 + bw / 2, by + 23, "bold 17px sans-serif", C.ink);
-      btn(leftX + (bw + gap) * 2, by, bw, 46, () => { G.screen = "home"; G.clearPreys(); });
+      G.rr(ctx, x4, by, bw, 46, 14); ctx.fill(); ctx.stroke();
+      text("返回首页", x4 + bw / 2, by + 23, "bold 17px sans-serif", C.ink);
+      btn(x4, by, bw, 46, () => { G.screen = "home"; G.clearPreys(); });
     } else {
-      text("本局结束", W / 2, safe.top + innerH * 0.09, "16px sans-serif", C.ink3);
+      const modeLabel = modeName ? "本局结束 · " + modeName : "本局结束";
+      const pTitleY = safe.top + innerH * 0.09;
+      ctx.font = "16px sans-serif";
+      const lw2 = ctx.measureText(modeLabel).width + 30;
+      ctx.fillStyle = "rgba(255,255,255,.76)";
+      G.rr(ctx, W / 2 - lw2 / 2, pTitleY - 14, lw2, 28, 14); ctx.fill();
+      text(modeLabel, W / 2, pTitleY, "16px sans-serif", C.ink3);
+      halo(W / 2, safe.top + innerH * 0.15 + 12, W * 0.66, 108, 0.80);
+      ctx.save();
+      ctx.shadowColor = "rgba(255,255,255,.92)"; ctx.shadowBlur = 14;
       text(R.title || "", W / 2, safe.top + innerH * 0.15, "bold 30px sans-serif", C.ink);
       text(R.desc || "", W / 2, safe.top + innerH * 0.15 + 38, "14px sans-serif", C.ink2);
+      ctx.restore();
       const edgeL = safe.left + 24, availW = W - safe.left - safe.right - 48;
       const cw = (availW - 12) / 2, chh = 78;
-      const baseY = safe.top + innerH * 0.24;
+      // 按钮几何先算出来：数据卡在「标题底 ↔ 按钮顶」之间垂直居中。
+      // 原来固定 innerH*0.24 定位，在 2×2 按钮布局下会留出一大片空白。
+      const bw2 = (availW - 12) / 2, bh2 = 54;
+      const by4 = H - safe.bottom - 26 - bh2;
+      const by1 = by4 - (bh2 + 14);
+      const titleBottom = safe.top + innerH * 0.15 + 30;
+      const blockH = 2 * chh + 12 + (R.bonusTag ? 26 : 0);
+      const baseY = titleBottom + Math.max(20, (by1 - 22 - titleBottom - blockH) / 2);
       cells.forEach((c, i) => {
         const x = edgeL + (i % 2) * (cw + 12), y = baseY + Math.floor(i / 2) * (chh + 12);
         ctx.fillStyle = C.statBg; ctx.strokeStyle = C.statBorder; ctx.lineWidth = 1;
@@ -923,22 +1011,32 @@ module.exports = function (G) {
         text(c[0], x + cw / 2, y + 24, "13px sans-serif", C.ink2);
         text(String(c[1]), x + cw / 2, y + 54, "bold 26px sans-serif", C.ink);
       });
-      if (R.bonusTag) text(R.bonusTag, W / 2, baseY + 2 * (chh + 12) + 16, "14px sans-serif", C.amberDeep);
-      const by1 = H - safe.bottom - 232, by2 = H - safe.bottom - 168, by3 = H - safe.bottom - 104;
-      const bg = ctx.createLinearGradient(edgeL, by1, edgeL, by1 + 54);
+      if (R.bonusTag) {
+        ctx.save();
+        ctx.shadowColor = "rgba(255,255,255,.95)"; ctx.shadowBlur = 8;
+        text(R.bonusTag, W / 2, baseY + 2 * (chh + 12) + 16, "bold 14px sans-serif", C.amberDeep);
+        ctx.restore();
+      }
+      // 四个按钮 2×2 网格：竖屏四段纵排会压到数据卡，网格更省高度、热区也更大
+      const rx = edgeL + bw2 + 12;
+      const bg = ctx.createLinearGradient(edgeL, by1, edgeL, by1 + bh2);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
-      G.rr(ctx, edgeL, by1, availW, 54, 14); ctx.fill();
-      text("再来一局", W / 2, by1 + 27, "bold 18px sans-serif", "#fff");
-      btn(edgeL, by1, availW, 54, () => G.startGame());
+      G.rr(ctx, edgeL, by1, bw2, bh2, 14); ctx.fill();
+      text("再来一局", edgeL + bw2 / 2, by1 + bh2 / 2, "bold 18px sans-serif", "#fff");
+      btn(edgeL, by1, bw2, bh2, () => G.startGame());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
-      G.rr(ctx, edgeL, by2, availW, 50, 14); ctx.fill(); ctx.stroke();
-      text("分享好友", W / 2, by2 + 25, "bold 17px sans-serif", C.teal);
-      btn(edgeL, by2, availW, 50, () => G.shareResult());
+      G.rr(ctx, rx, by1, bw2, bh2, 14); ctx.fill(); ctx.stroke();
+      text("晒给猫友", rx + bw2 / 2, by1 + bh2 / 2, "bold 17px sans-serif", C.teal);
+      btn(rx, by1, bw2, bh2, () => G.shareResult());
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.amber; ctx.lineWidth = 1.4;
+      G.rr(ctx, edgeL, by4, bw2, bh2, 14); ctx.fill(); ctx.stroke();
+      text("存成图片", edgeL + bw2 / 2, by4 + bh2 / 2, "bold 17px sans-serif", C.amberDeep);
+      btn(edgeL, by4, bw2, bh2, () => G.saveCard());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, edgeL, by3, availW, 50, 14); ctx.fill(); ctx.stroke();
-      text("返回首页", W / 2, by3 + 25, "bold 17px sans-serif", C.ink);
-      btn(edgeL, by3, availW, 50, () => { G.screen = "home"; G.clearPreys(); });
+      G.rr(ctx, rx, by4, bw2, bh2, 14); ctx.fill(); ctx.stroke();
+      text("返回首页", rx + bw2 / 2, by4 + bh2 / 2, "bold 17px sans-serif", C.ink);
+      btn(rx, by4, bw2, bh2, () => { G.screen = "home"; G.clearPreys(); });
     }
   };
 };

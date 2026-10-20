@@ -10,6 +10,7 @@ require("./js/draw.js")(G);
 require("./js/scenery.js")(G);
 require("./js/prey.js")(G);
 require("./js/ui.js")(G);
+require("./js/sharecard.js")(G);   // 分享卡片 / 猫咪反应测评图
 
 const ctx = G.platform.ctx;
 const clamp = G.clamp;
@@ -33,15 +34,45 @@ function initDebug() {
 }
 initDebug();
 
-/* ================= 分享：结算页"分享好友" + 右上角菜单转发 ================= */
+/* ================= 分享：结算页"晒给猫友" + 右上角菜单转发 =================
+   传播逻辑：玩的是猫，转发的是铲屎官。所以文案主语必须是「我家猫」，
+   配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。 */
 G.shareResult = () => {
   const R = G.result || {};
-  const score = R.hits || 0;
-  const title = "我得了" + score + "分，邀请好友快来玩！";
-  G.platform.shareApp({ title, query: "from=share" });   // 不传 imageUrl 时默认截取当前画面
+  const hits = Number(R.hits) || 0;
+  const durMin = Math.max(1, Math.round((Number(G.config.duration) || 180) / 60));
+  const title = R.title
+    ? "我家猫 " + durMin + " 分钟抓了 " + hits + " 只，评级「" + R.title + "」"
+    : "给你家猫开个 " + durMin + " 分钟的捕猎场，看它能抓几只";
+  let imageUrl = "";
+  try { imageUrl = G.buildShareCard(); } catch (e) {}
+  // 属性名与 We分析 后台逐字一致（has_img 蛇形命名），写错不会报错、只会丢字段
+  G.track("share_tap", { hits, rated: R.title || "", has_img: imageUrl ? 1 : 0 });
+  G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=share" });
+};
+/* 结算页"存成图片"：存到相册后由用户自己发朋友圈（朋友圈对游戏类分享有限制，相册图不受限） */
+G.saveCard = () => {
+  G.track("save_card", { hits: Number((G.result || {}).hits) || 0 });
+  G.saveShareCard();
+};
+/* 排行榜/首页的「邀猫友比一比」：没有本局结果时用累计档案卡，保证卡片永远有内容。
+   注意合规：这里只是邀请，不设"分享才解锁/复活"之类的奖励门槛。 */
+G.shareInvite = (from) => {
+  const arch = G.archiveSummary ? G.archiveSummary() : { games: 0, hits: 0 };
+  let best = 0;
+  try { best = Number(G.platform.storage.get("catToyBest")) || 0; } catch (e) {}
+  const title = best > 0
+    ? "我家猫单局最高抓了 " + best + " 只，把你家猫也拉来比比"
+    : "给你家猫开个捕猎场，看谁家猫更凶";
+  let imageUrl = "";
+  try { imageUrl = G.buildShareCard(arch.games > 0 ? "archive" : "single"); } catch (e) {}
+  // 参数用 src 不用 from：属性在 We分析 里是全局共享的，app_open 的 from 是数值(0~3)，
+  // 这里传文本 "lb" 会造成同一属性两种类型，后台只会认一种，另一边的数据就被判脏。
+  G.track("invite_tap", { src: from || "lb", best, arch: arch.games, has_img: imageUrl ? 1 : 0 });
+  G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=lb" });
 };
 G.platform.initShare(() => ({
-  title: "逗猫触屏玩具：小鱼、蝴蝶、老鼠和激光点，让猫咪玩到停不下来！",
+  title: "给你家猫开个 3 分钟的捕猎场：小鱼、蝴蝶、老鼠、光点轮着来",
   query: "from=menu"
 }));
 
@@ -62,6 +93,11 @@ G.startGame = () => {
   G.platform.keepScreen(true);
   countT = 3; lastInt = -1;
   G.screen = "counting";
+  G.track("game_start", {
+    mode: G.config.targetType,
+    dur: Number(G.config.duration) || 180,
+    pc: Number(G.config.preyCount) || 3
+  });
 };
 
 function beginPlay() {
@@ -94,9 +130,9 @@ G.endGame = (fromPause) => {
   G.platform.keepScreen(false);
   const totalHits = S.hits + (S.bonusHits || 0);
   const acc = S.touches > 0 ? Math.min(100, Math.round((totalHits / S.touches) * 100)) : 0;
-  // 本地记录（最近 50 局）
-  let logs = [];
-  try { logs = JSON.parse(G.platform.storage.get("catToyLogs") || "[]"); } catch (e) {}
+  // 本地记录（最近 50 局）：走 G.getLogs() 做安全解析——存储里若是对象或含 null 元素，
+  // 直接 unshift/slice 会在结算时抛错，结算页出不来
+  const logs = G.getLogs();
   const d = new Date();
   logs.unshift({
     date: (d.getMonth() + 1) + "/" + d.getDate(),
@@ -116,6 +152,18 @@ G.endGame = (fromPause) => {
   const mins = Math.max((Number(G.config.duration) || 180) / 60, 1 / 60);
   const hpm = totalHits / mins;
   const interacted = S.touches >= 8 && (totalHits >= 5 || S.maxCombo >= 3);
+  // 累计档案（分享图的"猫档案"维度全从这里取）+ 结束埋点。
+  // done=1 是打满时长完赛，done=0 是用户中途"结束本局"；放弃率 = 1 - done1 / game_start。
+  try {
+    G.recordArchive({ type: G.config.targetType, hits: totalHits, touches: S.touches, hpm });
+  } catch (e) {}
+  G.track("game_end", {
+    mode: G.config.targetType,
+    dur: Number(G.config.duration) || 180,
+    hits: totalHits,
+    done: fromPause ? 0 : 1,
+    sec: Math.max(0, Math.round((Number(G.config.duration) || 180) - S.remaining))
+  });
   let title, desc;
   if (hpm >= 18)      { title = "捕猎大师！"; desc = "这个反应速度，堪称专业级猎手。"; }
   else if (hpm >= 9 || (interacted && hpm >= 6)) { title = "矫健猎手"; desc = "扑击精准、节奏稳健，状态很好。"; }
@@ -362,7 +410,16 @@ function loop(ts) {
   else if (G.screen === "records") uiScaleCtx(() => G.ui.drawRecords());
   else if (G.screen === "leaderboard") uiScaleCtx(() => G.ui.drawLeaderboard());
   else if (G.screen === "summon") uiScaleCtx(() => G.ui.drawSummon());
-  else if (G.screen === "result") uiScaleCtx(() => G.ui.drawResult());
+  else if (G.screen === "result") {
+    // 结算页背景沿用当前玩法的场景：截图或存图时，一眼能看出这一局选的是哪种模式
+    if (G.scene && G.scene.type) {
+      G.drawScene(ctx, t);
+      // 暗室模式沿用游戏内的压暗处理，但结算页比游玩时轻一档：.72 会把光柱压没，
+      // 存图后同样看不出是暗室模式，降到 .46 保留窗户光。
+      if (G.scene.dark) { ctx.fillStyle = "rgba(0,0,0,.46)"; ctx.fillRect(0, 0, G.platform.W, G.platform.H); }
+    }
+    uiScaleCtx(() => G.ui.drawResult());
+  }
   else {
     drawGameFrame(t);
     if (G.screen === "counting") uiScaleCtx(() => G.ui.drawCountdown(Math.max(countT, 0)));
@@ -383,4 +440,37 @@ G.platform.resizeCb.push(() => {
   if (G.screen === "leaderboard") G.ui.showLB();           // 排行榜卡片区域随屏重发
 });
 
+/* ================= 埋点：启动来源 / 次日回访 =================
+   后台「数据分析 → 自定义分析」需先建同名事件才能看到数据；未建时 reportAnalytics 静默丢弃，
+   不影响游戏。事件与参数说明见项目根目录《埋点事件说明.md》。 */
+function dayNum(d) {
+  return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+}
+(function trackLaunch() {
+  const fromMap = { share: 1, menu: 2, lb: 3 };
+  const q = (G.platform.launch && G.platform.launch.query) || {};
+  const scene = (G.platform.launch && Number(G.platform.launch.scene)) || 0;
+  const from = fromMap[q.from] || 0;
+  const today = dayNum(new Date());
+  let first = 0;
+  try { first = Number(G.platform.storage.get("catToyFirstDay")) || 0; } catch (e) {}
+  // 存储被清空/写脏时 first 可能是 0 或未来日期，重置为今天
+  if (!(first > 20000 && first <= today)) {
+    first = today;
+    G.platform.storage.set("catToyFirstDay", String(first));
+  }
+  const dayn = today - first;
+  // dayn=0 首日；dayn>=1 即"次日及以后回访"。按 dayn 分组就能算出 D1/D3/D7 留存。
+  G.track("app_open", { scene, from, dayn, ret: dayn > 0 ? 1 : 0 });
+})();
+
+/* 切后台：游玩中切走自动暂停，回来接着玩（否则计时要耗在后台，回来只剩几秒） */
+G.platform.hideCb.push(() => {
+  if (G.screen === "playing" && G.session.running && !G.session.paused) {
+    G.session.paused = true;
+    G.screen = "paused";
+  }
+});
+
 requestAnimationFrame(loop);
+

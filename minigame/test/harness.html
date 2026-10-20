@@ -16,12 +16,15 @@
 (function () {
   const canvasEl = document.getElementById("gameCanvas");
   let firstCanvas = true;
-  const startCbs = [], endCbs = [];
+  const startCbs = [], endCbs = [], showCbs = [], hideCbs = [];
+  /* 测试可注入系统信息（模拟机型怪癖）：window.__sysInfo 覆盖默认值 */
+  window.__sysInfo = null;
+  window.__wxShow = (res) => showCbs.forEach(f => { try { f(res); } catch (e) {} });
   window.wx = {
-    getSystemInfoSync: () => ({
+    getSystemInfoSync: () => window.__sysInfo || {
       windowWidth: innerWidth, windowHeight: innerHeight, pixelRatio: 2,
       safeArea: { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
-    }),
+    },
     /* 右上角胶囊按钮 mock：模拟真机横屏位置（右上角，宽 87 高 32，右距 7 顶距 4） */
     getMenuButtonBoundingClientRect: () => ({
       left: innerWidth - 94, top: 4, right: innerWidth - 7, bottom: 36,
@@ -41,6 +44,8 @@
     }),
     createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
     onWindowResize: (cb) => window.addEventListener("resize", cb),
+    onShow: (cb) => showCbs.push(cb),
+    onHide: (cb) => hideCbs.push(cb),
     onTouchStart: (cb) => startCbs.push(cb),
     onTouchEnd: (cb) => endCbs.push(cb)
   };
