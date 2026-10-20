@@ -214,6 +214,10 @@ module.exports = function (G) {
 
   /* ---------- 河豚（圆身 + 尖刺 + 呼吸鼓胀 + 嘟嘴） ---------- */
   D.puffer = (ctx, p, c, t) => {
+    // 河豚原绘制只占设计空间 69/120（其他鱼都在 110 以上），屏幕上明显小一圈，
+    // 命中盒相对视觉宽出 1.73 倍。这里整体放大到与其他鱼同一填充度，中心保持 (60,36)。
+    ctx.save();
+    ctx.translate(60, 36); ctx.scale(1.55, 1.55); ctx.translate(-60, -36);
     const puff = 1 + 0.045 * Math.sin(t * 2.2 + p.phase);   // 呼吸鼓胀
     const cx = 62, cy = 36, R = 25 * puff;
     // 小扇形尾
@@ -260,6 +264,7 @@ module.exports = function (G) {
     // 嘟嘴（O 形小嘴）
     ctx.strokeStyle = c.accent; ctx.lineWidth = 2.6;
     ctx.beginPath(); ctx.arc(89, 40, 3.2, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
   };
 
   /* ---------- 老鼠（设计空间 120×78，面向右；花色 variants 参数化） ---------- */

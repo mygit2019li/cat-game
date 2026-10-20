@@ -318,6 +318,9 @@ module.exports = function (G) {
           success: () => { try { wx.showToast({ title: "已存到相册", icon: "success" }); } catch (e) {} },
           fail: (err) => {
             const msg = (err && err.errMsg) || "";
+            // errno 104 / "privacy permission is not authorized" = 后台《用户隐私保护指引》
+            // 里「相册（仅写入）」的用途没填，属配置问题而非代码问题；真机调试看这行日志即可区分。
+            console.log("[catToy] saveAlbum fail:", msg);
             if (msg.indexOf("auth") >= 0 || msg.indexOf("deny") >= 0) {
               tip("需要相册权限才能保存。请在右上角「···」→「设置」里打开「保存到相册」。");
             } else if (msg.indexOf("cancel") < 0) {
