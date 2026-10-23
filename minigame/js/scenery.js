@@ -16,8 +16,23 @@ module.exports = function (G) {
       // 整屏格纹地毯：格子边长随屏取，横竖屏都好铺
       S.plaid = { cell: Math.max(64, Math.round(Math.min(W, H) / 4.6)) };
     }
+    if (type === "mouse" && S.mouseBg === "neon") {
+      // 霓虹格毯：更黑更粗的格纹 + 地毯上零星彩色微光点（缓慢呼吸）
+      S.neon = { cell: Math.max(104, Math.round(Math.min(W, H) / 2.5)), dots: [] };
+      const PAL = ["94,240,224", "255,122,192", "255,228,94", "157,140,255", "125,255,154", "255,159,94"];
+      const dn = Math.floor(rand(9, 13.99));
+      for (let i = 0; i < dn; i++) {
+        S.neon.dots.push({
+          x: rand(0.05, 0.95) * W, y: rand(0.1, 0.9) * H,
+          r: rand(2.2, 4.6), rgb: PAL[Math.floor(rand(0, PAL.length))],
+          ph: rand(0, Math.PI * 2), f: rand(0.8, 2.2)
+        });
+      }
+    }
 
-    if ((type === "mouse" || type === "laser") && S.mouseBg !== "plaid") {
+    // 只有 room（或激光暗室）才生成墙/窗/家具/地毯；plaid、neon 是整屏铺满的纯地面背景
+    const roomBg = type === "laser" || S.mouseBg === "room";
+    if ((type === "mouse" || type === "laser") && roomBg) {
       // 窗户（光柱）：捕鼠模式地台全屏化后墙只剩顶部一条，窗户相应缩小
       const isMouse = type === "mouse";
       S.winW = Math.min(isMouse ? 84 : 118, W * (isMouse ? 0.2 : 0.3));
@@ -503,6 +518,7 @@ module.exports = function (G) {
     if (S.type === "fish") drawSea(ctx, t);
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
+    else if (S.type === "mouse" && S.mouseBg === "neon") { drawNeonFloor(ctx, t); drawHoles(ctx); }
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
   };
@@ -543,6 +559,52 @@ module.exports = function (G) {
     ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.3);
     const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
     vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.42)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  /* ============ 霓虹格毯（更黑更粗的格纹 + 彩色微光点） ============
+     对齐参考图：粗格暗毯做底，地毯上散着零星青/粉/黄霓虹反光；
+     老鼠自带柔光（见 prey.js render）、命中撒多彩光点 */
+  function drawNeonFloor(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    const cell = (S.neon && S.neon.cell) || 130;
+    ctx.fillStyle = "#0b100b"; ctx.fillRect(0, 0, W, H);
+    // 织纹（粗格布，斜纹更明显）
+    ctx.strokeStyle = "rgba(190,210,175,.06)"; ctx.lineWidth = 1.1;
+    for (let i = -H; i < W + H; i += 9) {
+      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
+    }
+    // 交替格（深橄榄 vs 纯黑，明暗要看得出来，否则整片糊黑）
+    for (let ix = 0, gx = 0; gx < W; ix++, gx += cell) {
+      for (let iy = 0, gy = 0; gy < H; iy++, gy += cell) {
+        ctx.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.34)" : "rgba(118,132,92,.17)";
+        ctx.fillRect(gx, gy, cell, cell);
+      }
+    }
+    // 格线（更粗）
+    ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 2.2;
+    for (let x = 0; x <= W; x += cell) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y <= H; y += cell) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    // 彩色微光点：呼吸 + 轻微漂移（地毯上的霓虹反光）
+    (S.neon ? S.neon.dots : []).forEach(d => {
+      const a = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(t * d.f + d.ph));
+      const dx = d.x + Math.sin(t * d.f * 0.5 + d.ph) * 6;
+      const dy = d.y + Math.cos(t * d.f * 0.4 + d.ph * 1.4) * 4;
+      const rg = ctx.createRadialGradient(dx, dy, 0, dx, dy, d.r * 4.4);
+      rg.addColorStop(0, "rgba(" + d.rgb + "," + (a * 0.85).toFixed(2) + ")");
+      rg.addColorStop(0.4, "rgba(" + d.rgb + "," + (a * 0.3).toFixed(2) + ")");
+      rg.addColorStop(1, "rgba(" + d.rgb + ",0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(dx, dy, d.r * 4.4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(" + d.rgb + "," + a.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(dx, dy, d.r, 0, Math.PI * 2); ctx.fill();
+    });
+    // 顶部压暗（HUD 可读）+ 暗角
+    const tg = ctx.createLinearGradient(0, 0, 0, H * 0.3);
+    tg.addColorStop(0, "rgba(0,0,0,.6)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.3);
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.45)");
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
@@ -602,7 +664,7 @@ module.exports = function (G) {
   G.dustBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.dust, { x, y, vx: rand(-55, 55), vy: rand(-60, -8), r: rand(3, 7), life: rand(0.4, 0.8) }, 60); };
   G.pollenBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.pollen, { x: x + rand(-12, 12), y: y + rand(-12, 12), vx: rand(-24, 24), vy: rand(-34, -6), r: rand(1.5, 3.4), life: rand(0.7, 1.4) }, 80); };
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
-  G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55) }, 80); } fx.sparkColor = color; };
+  G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55), c: color }, 90); } fx.sparkColor = color; };
   /* 夸张光爆（暗夜萤光专用）：发光碎点四溅 + 双层冲击环 + 闪白 + 大光波 */
   G.splashBurst = (x, y, big) => {
     const n = big ? 26 : 16;
@@ -737,7 +799,7 @@ module.exports = function (G) {
     ctx.globalAlpha = 1;
     fx.sparks.forEach(p => {
       ctx.globalAlpha = Math.max(p.life * 1.8, 0);
-      ctx.fillStyle = fx.sparkColor || "#ffd76a";
+      ctx.fillStyle = p.c || fx.sparkColor || "#ffd76a";   // 逐粒子颜色（多彩爆发靠它）
       ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2); ctx.fill();
     });
     ctx.globalAlpha = 1;

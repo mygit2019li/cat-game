@@ -839,8 +839,18 @@ module.exports = function (G) {
       if (this.type === "mouse") {
         // 裁剪到猎物包围盒（模拟 overflow:hidden 的洞口钻出效果）
         const hw = this.baseW * this.sc / 2, hh = this.baseH * this.sc / 2;
-        ctx.beginPath(); ctx.rect(this.x - hw, this.y - hh, hw * 2, hh * 2); ctx.clip();
-        ctx.translate(this.x, this.y + this.lift * this.sc);
+        ctx.translate(this.x, this.y);
+        // 霓虹格毯：老鼠自带柔光（参考图的"发光白鼠"）；必须先于裁剪，否则光晕被裁成方块
+        if (G.scene && G.scene.mouseBg === "neon") {
+          const gr = ctx.createRadialGradient(0, -6 * this.sc, 0, 0, -6 * this.sc, 50 * this.sc);
+          gr.addColorStop(0, "rgba(255,248,240,.42)");
+          gr.addColorStop(0.45, "rgba(255,226,236,.14)");
+          gr.addColorStop(1, "rgba(255,200,220,0)");
+          ctx.fillStyle = gr;
+          ctx.beginPath(); ctx.arc(0, -6 * this.sc, 50 * this.sc, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.beginPath(); ctx.rect(-hw, -hh + this.lift * this.sc, hw * 2, hh * 2); ctx.clip();
+        ctx.translate(0, this.lift * this.sc);
         const s = this.sc;
         ctx.scale(s * (this.def.face ? this.faceDir : 1), s);
         ctx.translate(-60, -39);

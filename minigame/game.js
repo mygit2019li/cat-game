@@ -332,6 +332,10 @@ function onHit(x, y, prey) {
   if (isMouse) {
     G.dustBurst(x, y, 5);
     G.playSqueak(chasing);
+    // 霓虹格毯：命中撒多彩光点（参考图的彩虹颗粒）
+    if (G.scene && G.scene.mouseBg === "neon") {
+      ["#5ef0e0", "#ff7ac0", "#ffe45e", "#9d8cff"].forEach(c => G.sparkBurst(x, y, c, 3));
+    }
     // 命中洞口 = 好洞：清空蹲守热度（半径 60，两排洞互不误伤）
     const Sc = G.scene;
     Sc.holes.forEach((h, i) => { if (Math.hypot(x - h.x, y - h.y) < 60) Sc.holeHeat[i] = []; });

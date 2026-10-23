@@ -456,7 +456,31 @@ module.exports = function (G) {
   function drawBgPreview(c, key, x, y, w, h) {
     c.save();
     G.rr(c, x, y, w, h, 12); c.clip();
-    if (key === "plaid") {
+    if (key === "neon") {
+      // 霓虹格毯：更黑 + 更大格 + 几个彩色微光点
+      c.fillStyle = "#0b100b"; c.fillRect(x, y, w, h);
+      c.strokeStyle = "rgba(190,210,175,.12)"; c.lineWidth = 1;
+      for (let i = -h; i < w + h; i += 7) { c.beginPath(); c.moveTo(x + i, y); c.lineTo(x + i + h, y + h); c.stroke(); }
+      const nc = Math.max(34, Math.round(w / 4));
+      for (let ix = 0, gx = x; gx < x + w; ix++, gx += nc) {
+        for (let iy = 0, gy = y; gy < y + h; iy++, gy += nc) {
+          c.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.34)" : "rgba(118,132,92,.18)";
+          c.fillRect(gx, gy, nc, nc);
+        }
+      }
+      c.strokeStyle = "rgba(0,0,0,.55)"; c.lineWidth = 1.8;
+      for (let gx = x; gx <= x + w; gx += nc) { c.beginPath(); c.moveTo(gx, y); c.lineTo(gx, y + h); c.stroke(); }
+      for (let gy = y; gy <= y + h; gy += nc) { c.beginPath(); c.moveTo(x, gy); c.lineTo(x + w, gy); c.stroke(); }
+      const dots = [[0.2, 0.34, "94,240,224"], [0.63, 0.26, "255,122,192"], [0.38, 0.72, "255,228,94"], [0.8, 0.62, "157,140,255"]];
+      dots.forEach(d => {
+        const dx = x + w * d[0], dy = y + h * d[1];
+        const rg = c.createRadialGradient(dx, dy, 0, dx, dy, 16);
+        rg.addColorStop(0, "rgba(" + d[2] + ",.55)"); rg.addColorStop(1, "rgba(" + d[2] + ",0)");
+        c.fillStyle = rg; c.beginPath(); c.arc(dx, dy, 16, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "rgba(" + d[2] + ",.95)";
+        c.beginPath(); c.arc(dx, dy, 3, 0, Math.PI * 2); c.fill();
+      });
+    } else if (key === "plaid") {
       c.fillStyle = "#0f1410"; c.fillRect(x, y, w, h);
       c.strokeStyle = "rgba(178,206,178,.10)"; c.lineWidth = 1;
       for (let i = -h; i < w + h; i += 8) { c.beginPath(); c.moveTo(x + i, y); c.lineTo(x + i + h, y + h); c.stroke(); }

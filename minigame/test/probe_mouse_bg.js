@@ -1,7 +1,7 @@
 /* probe_mouse_bg.js — 验证「捕鼠背景选择」：
-   ① 背景表/默认值  ② 点开始弹选择层  ③ 左右滑动切换 + 边界阻尼
-   ④ 确认后落库并开局  ⑤ plaid 布景（格纹/洞仍在）  ⑥ 单背景玩法不弹层
-   ⑦ 一屏约 1.5 张卡  ⑧ 真渲染截图
+   ① 背景表/默认值（3 套：room/plaid/neon）  ② 点开始弹选择层  ③ 左右滑动 + 边界阻尼
+   ④ 确认后落库并开局  ⑤ neon 布景（粗格/彩点/洞仍在）  ⑥ neon 命中撒彩点
+   ⑦ plaid / room 布景可切回  ⑧ 单背景玩法不弹层  ⑨ 一屏约 1.5 张卡  ⑩ 真渲染截图
    用法：NODE_PATH=<npm> node test/probe_mouse_bg.js
 */
 const fs = require("fs");
@@ -67,20 +67,19 @@ function check(name, ok, extra) {
       fishBgs: (G.bgsFor("fish") || []).length
     };
   });
-  check("捕鼠有 2 套背景（room/plaid）", cfg.bgs.length === 2 && cfg.bgs.indexOf("plaid") >= 0, JSON.stringify(cfg));
+  check("捕鼠有 3 套背景（room/plaid/neon）", cfg.bgs.length === 3 && cfg.bgs.indexOf("neon") >= 0, JSON.stringify(cfg));
   check("默认背景 room 且已落库", cfg.cur === "room" && cfg.stored === "room", JSON.stringify(cfg));
   check("单背景玩法（fish）背景表为空", cfg.fishBgs === 0, JSON.stringify(cfg));
 
-  // 2) 点开始 → 弹出选择层（不直接开局）
+  // 2) 点开始 → 弹出选择层
   const open = await page.evaluate(() => {
     const G = window.G;
-    G.screen = "home";
-    G.requestStart();
-    return { screen: G.screen, idx: G.bgPick && G.bgPick.idx, off: G.bgPick && G.bgPick.off };
+    G.screen = "home"; G.requestStart();
+    return { screen: G.screen, idx: G.bgPick && G.bgPick.idx };
   });
   check("点开始弹出背景选择层", open.screen === "bgpick" && open.idx === 0, JSON.stringify(open));
 
-  // 3) 布局：一屏约 1.5 张卡 + 截图（第一张）
+  // 3) 布局：一屏约 1.5 张卡
   await page.waitForTimeout(200);
   const layoutInfo = await page.evaluate(() => {
     const G = window.G, W = G.platform.W;
@@ -90,23 +89,35 @@ function check(name, ok, extra) {
   check("选择层注册了自己的按钮（开始/关闭）", layoutInfo.buttons === 2, JSON.stringify(layoutInfo));
   await page.screenshot({ path: path.join(OUT, "bgpick_room.png") });
 
-  // 4) 左滑切换到第二张（走真实触摸路由）
-  const swipe = await page.evaluate(() => {
+  // 4) 左滑两次 → 第 3 张（走真实触摸路由）
+  const swipe1 = await page.evaluate(() => {
     const G = window.G, S = G.platform.S || 1;
     const y = G.platform.H * 0.5;
     G.platform.onTouchStart({ touches: [{ clientX: 600 * S, clientY: y }] });
     G.platform.onTouchMove({ touches: [{ clientX: 330 * S, clientY: y }] });
     const midOff = G.bgPick.off;
     G.platform.onTouchEnd({});
-    return { idx: G.bgPick.idx, midOff, off: G.bgPick.off, cw: G.bgPick.cw };
+    return { idx: G.bgPick.idx, midOff, off: G.bgPick.off };
   });
-  check("左滑切到第二张背景", swipe.idx === 1, JSON.stringify(swipe));
-  check("拖动期间跟手（off 为负）", swipe.midOff < -100, JSON.stringify(swipe));
-  check("松手吸附回位（off 归零）", swipe.off === 0, JSON.stringify(swipe));
-  await page.waitForTimeout(150);
+  check("左滑切到第 2 张", swipe1.idx === 1, JSON.stringify(swipe1));
+  check("拖动期间跟手（off 为负）", swipe1.midOff < -100, JSON.stringify(swipe1));
+  check("松手吸附回位（off 归零）", swipe1.off === 0, JSON.stringify(swipe1));
+  await page.waitForTimeout(120);
   await page.screenshot({ path: path.join(OUT, "bgpick_plaid.png") });
 
-  // 5) 边界阻尼：末张继续左滑不出界
+  const swipe2 = await page.evaluate(() => {
+    const G = window.G, S = G.platform.S || 1;
+    const y = G.platform.H * 0.5;
+    G.platform.onTouchStart({ touches: [{ clientX: 600 * S, clientY: y }] });
+    G.platform.onTouchMove({ touches: [{ clientX: 330 * S, clientY: y }] });
+    G.platform.onTouchEnd({});
+    return { idx: G.bgPick.idx };
+  });
+  check("再左滑切到第 3 张（霓虹格毯）", swipe2.idx === 2, JSON.stringify(swipe2));
+  await page.waitForTimeout(120);
+  await page.screenshot({ path: path.join(OUT, "bgpick_neon.png") });
+
+  // 5) 边界阻尼：末张继续左滑不越界
   const edge = await page.evaluate(() => {
     const G = window.G, S = G.platform.S || 1;
     const y = G.platform.H * 0.5;
@@ -116,7 +127,7 @@ function check(name, ok, extra) {
     G.platform.onTouchEnd({});
     return { idx: G.bgPick.idx, off };
   });
-  check("末张继续左滑不越界（idx 停在 1）", edge.idx === 1, JSON.stringify(edge));
+  check("末张继续左滑不越界（idx 停在 2）", edge.idx === 2, JSON.stringify(edge));
   check("越界拖动有阻尼（位移小于手指）", edge.off > -600, JSON.stringify(edge));
 
   // 6) 确认 → 落库 + 开局
@@ -130,56 +141,86 @@ function check(name, ok, extra) {
       screen: G.screen, pickNull: G.bgPick === null
     };
   });
-  check("确认后写回 config 并持久化", confirm.bg === "plaid" && confirm.stored === "plaid", JSON.stringify(confirm));
+  check("确认后写回 config 并持久化（neon）", confirm.bg === "neon" && confirm.stored === "neon", JSON.stringify(confirm));
   check("确认后关闭弹层并进入游戏流程", confirm.pickNull && (confirm.screen === "counting" || confirm.screen === "playing"), JSON.stringify(confirm));
 
-  // 7) plaid 布景：格纹 + 洞仍在（玩法不能瘸）
-  const scene = await page.evaluate(() => {
+  // 7) neon 布景：粗格 + 彩点 + 洞仍在
+  const neon = await page.evaluate(() => {
     const G = window.G;
+    G.config.bg_mouse = "neon"; G.saveConfig();
     G.buildScene("mouse");
     const S = G.scene;
     return {
-      mouseBg: S.mouseBg, plaid: !!S.plaid, cell: S.plaid && S.plaid.cell,
-      holes: S.holes.length, win: S.winW, rug: S.rugW, dark: !!S.dark
+      mouseBg: S.mouseBg, cell: S.neon && S.neon.cell, dots: (S.neon && S.neon.dots || []).length,
+      holes: S.holes.length, win: S.winW, rug: S.rugW, dark: !!S.dark,
+      plaidCell: Math.max(64, Math.round(Math.min(S.W, S.H) / 4.6))
     };
   });
-  check("plaid 布景生效（格纹参数已生成）", scene.mouseBg === "plaid" && scene.plaid && scene.cell >= 78, JSON.stringify(scene));
-  check("格纹背景仍保留 10 个洞口", scene.holes === 10, JSON.stringify(scene));
-  check("格纹背景不再生成窗/地毯（整屏铺满）", !scene.win && !scene.rug, JSON.stringify(scene));
+  check("neon 布景生效（粗格 + 彩点）", neon.mouseBg === "neon" && neon.cell >= 104 && neon.dots >= 9, JSON.stringify(neon));
+  check("霓虹格比普通格纹更粗（cell 更大）", neon.cell > neon.plaidCell, JSON.stringify(neon));
+  check("霓虹背景仍保留 10 个洞口", neon.holes === 10, JSON.stringify(neon));
+  check("霓虹背景不生成窗/地毯（整屏铺满）", !neon.win && !neon.rug, JSON.stringify(neon));
 
-  // 8) 真渲染：格纹地毯 + 老鼠 + 洞
-  const play = await page.evaluate(() => {
+  // 8) neon 真渲染 + 截图
+  await page.evaluate(() => {
     const G = window.G;
     G.session.remaining = 999;
     G.screen = "playing"; G.session.running = true; G.session.counting = false; G.session.paused = false;
     G.ui.buttons = [];
-    return { preys: G.preys.length, holes: G.scene.holes.length };
   });
+  await page.waitForTimeout(600);
+  await page.screenshot({ path: path.join(OUT, "mouse_neon.png") });
+
+  // 9) neon 命中撒彩点（逐粒子颜色）
+  const hit = await page.evaluate(() => {
+    const G = window.G;
+    G.ui.buttons = [];
+    G.session.running = true; G.session.paused = false; G.session.counting = false;
+    let p = null;
+    for (const q of G.preys) if (q.hittable(q.x, q.y)) { p = q; break; }
+    if (!p) p = G.preys[0];
+    p.fade = 1; p.vanishT = 0; p.lift = 0;
+    const n0 = G.fx.sparks.length;
+    const cols = new Set();
+    G.platform.onTouchStart({ touches: [{ clientX: p.x, clientY: p.y }] });
+    G.fx.sparks.slice(n0).forEach(s => { if (s.c) cols.add(s.c); });
+    return { hits: G.session.hits, added: G.fx.sparks.length - n0, colors: Array.from(cols) };
+  });
+  check("霓虹命中撒出彩色光点（≥12 颗 / ≥3 色）", hit.added >= 12 && hit.colors.length >= 3, JSON.stringify(hit));
+
+  // 10) 切回 plaid：细格布景
+  const plaid = await page.evaluate(() => {
+    const G = window.G;
+    G.config.bg_mouse = "plaid"; G.saveConfig();
+    G.buildScene("mouse");
+    const S = G.scene;
+    return { mouseBg: S.mouseBg, plaid: !!S.plaid, cell: S.plaid && S.plaid.cell, neon: !!S.neon, holes: S.holes.length };
+  });
+  check("切到 plaid 布景（细格，无彩点）", plaid.mouseBg === "plaid" && plaid.plaid && !plaid.neon && plaid.holes === 10, JSON.stringify(plaid));
+  await page.evaluate(() => { window.G.screen = "playing"; window.G.session.remaining = 999; window.G.ui.buttons = []; });
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(OUT, "mouse_plaid.png") });
-  check("格纹场景能正常运行（老鼠已生成）", play.preys >= 1, JSON.stringify(play));
 
-  // 9) 切回 room：布景还原
+  // 11) 切回 room：室内布景
   const back = await page.evaluate(() => {
     const G = window.G;
     G.config.bg_mouse = "room"; G.saveConfig();
     G.buildScene("mouse");
     const S = G.scene;
-    return { mouseBg: S.mouseBg, plaid: !!S.plaid, win: S.winW > 0, rug: S.rugW > 0, holes: S.holes.length };
+    return { mouseBg: S.mouseBg, win: S.winW > 0, rug: S.rugW > 0, holes: S.holes.length };
   });
   check("切回 room 还原室内布景（窗/地毯/洞）", back.mouseBg === "room" && back.win && back.rug && back.holes === 10, JSON.stringify(back));
 
-  // 10) 单背景玩法不弹层
+  // 12) 单背景玩法不弹层
   const fish = await page.evaluate(() => {
     const G = window.G;
     G.config.targetType = "fish"; G.saveConfig();
-    G.screen = "home";
-    G.requestStart();
+    G.screen = "home"; G.requestStart();
     return { screen: G.screen, pick: !!G.bgPick };
   });
   check("单背景玩法点开始直接开局（不弹层）", !fish.pick && fish.screen !== "bgpick", JSON.stringify(fish));
 
-  // 11) 关闭按钮回到首页
+  // 13) 关闭弹层回首页
   const close = await page.evaluate(() => {
     const G = window.G;
     G.config.targetType = "mouse"; G.saveConfig();

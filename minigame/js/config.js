@@ -25,7 +25,8 @@ module.exports = function (G) {
   G.TYPE_BGS = {
     mouse: [
       { key: "room",  name: "室内房间", desc: "木地板 · 窗光 · 地毯" },
-      { key: "plaid", name: "格子地毯", desc: "深色格纹 · 荧光猎场" }
+      { key: "plaid", name: "格子地毯", desc: "深色格纹 · 荧光猎场" },
+      { key: "neon",  name: "霓虹格毯", desc: "粗格暗纹 · 彩色光点" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
