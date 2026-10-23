@@ -10,8 +10,14 @@ module.exports = function (G) {
     const S = { type, W, H, floorY: type === "mouse" ? H * 0.2 : H * 0.68, holes: [], holeOwners: [], holeHeat: [], dark: type === "laser" };
     G.scene = S;
     G.gardenFlowers = [];
+    // 捕鼠可选背景：room（室内房间，默认）/ plaid（深色格纹地毯）
+    S.mouseBg = type === "mouse" ? G.currentBg() : "default";
+    if (type === "mouse" && S.mouseBg === "plaid") {
+      // 整屏格纹地毯：格子边长随屏取，横竖屏都好铺
+      S.plaid = { cell: Math.max(64, Math.round(Math.min(W, H) / 4.6)) };
+    }
 
-    if (type === "mouse" || type === "laser") {
+    if ((type === "mouse" || type === "laser") && S.mouseBg !== "plaid") {
       // 窗户（光柱）：捕鼠模式地台全屏化后墙只剩顶部一条，窗户相应缩小
       const isMouse = type === "mouse";
       S.winW = Math.min(isMouse ? 84 : 118, W * (isMouse ? 0.2 : 0.3));
@@ -75,6 +81,9 @@ module.exports = function (G) {
       });
     }
     if (type === "fish") {
+      // 海域主题装饰（珊瑚/荧光/浮冰/水草，由 G.seaThemeNow() 决定）
+      const th = G.seaThemeNow();
+      S.theme = th;
       // 沙床轮廓
       S.sandPts = [];
       const seg = 8;
@@ -86,14 +95,90 @@ module.exports = function (G) {
         const w = rand(30, 88);
         S.stones.push({ x: rand(4, Math.max(W - w - 8, 8)), y: H - rand(10, 26) - 14, w, h: w * rand(0.55, 0.75), rot: rand(-8, 8) * Math.PI / 180, tone: rand(0, 1) });
       }
-      // 水草（每丛 2~3 叶）
+      // 水草（每丛 2~3 叶；水草森林主题加密加高）
       S.plants = [];
-      const pn = Math.floor(rand(4, 6.99));
+      const kelp = th.decor === "kelp";
+      const pn = Math.floor(rand(kelp ? 7 : 4, kelp ? 10.99 : 6.99));
       for (let i = 0; i < pn; i++) {
         const blades = [];
-        const bn = Math.floor(rand(2, 3.99));
-        for (let j = 0; j < bn; j++) blades.push({ w: rand(13, 24), h: rand(52, 120), ph: rand(0, Math.PI * 2), f: rand(0.7, 1.3) });
+        const bn = Math.floor(rand(kelp ? 3 : 2, kelp ? 5.99 : 3.99));
+        for (let j = 0; j < bn; j++) blades.push({ w: rand(13, 24), h: rand(kelp ? 90 : 52, kelp ? 200 : 120), ph: rand(0, Math.PI * 2), f: rand(0.7, 1.3) });
         S.plants.push({ x: rand(3, Math.max(W - 44, 8)) + 20, y: H - rand(12, 30) - 16, blades, startle: 0 });
+      }
+      // 主题专属装饰
+      S.decor = [];
+      if (th.decor === "coral") {
+        // 珊瑚丛：分枝剪影，粉/橙/紫三色
+        const cols = ["#e86a8a", "#f2955c", "#b06fd0", "#e88a6a"];
+        const cn = Math.floor(rand(3, 5.99));
+        for (let i = 0; i < cn; i++) {
+          S.decor.push({ kind: "coral", x: rand(6, W - 60), y: H - rand(8, 22), s: rand(0.7, 1.25), c: cols[Math.floor(rand(0, cols.length))] });
+        }
+      } else if (th.decor === "glow") {
+        // 荧光珊瑚 + 发光泡泡口：深海发光点
+        const cn = Math.floor(rand(4, 7.99));
+        for (let i = 0; i < cn; i++) {
+          S.decor.push({ kind: "glow", x: rand(10, W - 20), y: H * rand(0.45, 0.92), r: rand(7, 18), ph: rand(0, Math.PI * 2), c: ["#7fe7ff", "#57e0c8", "#9d8cff"][Math.floor(rand(0, 3))] });
+        }
+      } else if (th.decor === "ice") {
+        // 浮冰：上层漂浮冰排 + 底部冰岩
+        const cn = Math.floor(rand(3, 5.99));
+        for (let i = 0; i < cn; i++) {
+          const w2 = rand(70, 150);
+          S.decor.push({ kind: "ice", x: rand(4, Math.max(W - w2 - 8, 8)), y: i % 2 ? H * rand(0.1, 0.22) : H - rand(6, 18), w: w2, h: w2 * rand(0.22, 0.34), drift: rand(-4, 4), ph: rand(0, Math.PI * 2) });
+        }
+      } else if (th.decor === "kelp") {
+        // 沉木 + 贝壳：水草森林底床点缀
+        const cn = Math.floor(rand(3, 5.99));
+        for (let i = 0; i < cn; i++) {
+          S.decor.push({
+            kind: i % 2 ? "shell" : "wood",
+            x: rand(8, W - 60), y: H - rand(6, 20),
+            s: rand(0.7, 1.2), rot: rand(-20, 20) * Math.PI / 180
+          });
+        }
+      }
+    }
+    if (type === "pool") {
+      // Peppy Cat 石板墙（对齐官方游玩背景：深棕灰不规则石块 + 深缝，衬托发光猎物）
+      S.stones = [];
+      const cell = Math.max(88, Math.round(Math.min(W, H) / 4.0));   // 石块基准边长
+      const cols = Math.ceil(W / cell) + 1, rows = Math.ceil(H / cell) + 1;
+      const jx = cell * 0.30;                                        // 格点抖动 → 石块不规则
+      // 共享抖动格点：相邻石块共用顶点，拼合无缝
+      const P = [];
+      for (let i = 0; i <= cols; i++) {
+        P[i] = [];
+        for (let j = 0; j <= rows; j++) {
+          const edgeX = (i === 0 || i === cols), edgeY = (j === 0 || j === rows);
+          P[i][j] = {
+            x: i * cell + (edgeX ? 0 : rand(-jx, jx)),
+            y: j * cell + (edgeY ? 0 : rand(-jx, jx))
+          };
+        }
+      }
+      const SWATCH = [
+        ["#4c423c", "#5a4f47"], ["#443b36", "#51463f"], ["#544941", "#63564c"],
+        ["#3e3631", "#4a413b"], ["#4f453e", "#5d5148"], ["#463d37", "#54483f"]
+      ];
+      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        const a = P[i][j], b = P[i + 1][j], c = P[i + 1][j + 1], d = P[i][j + 1];
+        const cx = (a.x + b.x + c.x + d.x) / 4, cy = (a.y + b.y + c.y + d.y) / 4;
+        const ins = rand(0.055, 0.105);                     // 向心内缩 → 石块之间留深缝
+        const pts = [a, b, c, d].map(p => ({ x: p.x + (cx - p.x) * ins, y: p.y + (cy - p.y) * ins }));
+        // 石块内部的碎石裂线（1~2 条短折线，只做质感）
+        const cracks = [];
+        const cn3 = Math.floor(rand(0, 2.99));
+        for (let k = 0; k < cn3; k++) {
+          const e1 = pts[k % 4], e2 = pts[(k + 2) % 4];
+          const mx = (e1.x + e2.x) / 2 + rand(-8, 8), my = (e1.y + e2.y) / 2 + rand(-8, 8);
+          cracks.push([e1.x + (cx - e1.x) * 0.25, e1.y + (cy - e1.y) * 0.25, mx, my]);
+        }
+        const sw = SWATCH[Math.floor(rand(0, SWATCH.length))];
+        S.stones.push({
+          pts, cracks, c: sw[0], c2: sw[1],
+          hi: "rgba(255,255,255," + rand(0.03, 0.075).toFixed(3) + ")"   // 受光边
+        });
       }
     }
   };
@@ -251,39 +336,103 @@ module.exports = function (G) {
 
   function drawSea(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
-    // 背景：原型 radial-gradient(130% 110% at 50% 0%, #1b7f8f 0%, #10556a 52%, #0b3a4c 100%)
+    const th = S.theme || G.seaThemeNow();
+    // 背景：主题渐变（珊瑚海=原型色，深海/冰海/水草各自换色系）
     const g = ctx.createRadialGradient(W / 2, 0, 0, W / 2, 0, Math.max(W, H) * 1.1);
-    g.addColorStop(0, "#1b7f8f"); g.addColorStop(0.52, "#10556a"); g.addColorStop(1, "#0b3a4c");
+    g.addColorStop(0, th.bg[0]); g.addColorStop(0.52, th.bg[1]); g.addColorStop(1, th.bg[2]);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 光柱
+    // 光柱（深海调暗、冰海偏冷白）
+    const rayA = th.key === "abyss" ? 0.05 : th.key === "ice" ? 0.13 : 0.10;
+    const rayC = th.key === "ice" ? "220,240,255" : "180,240,255";
     for (let i = 0; i < 3; i++) {
       const lx = W * (0.18 + i * 0.3) + Math.sin(t * 0.3 + i) * 14;
       const lg = ctx.createLinearGradient(lx, 0, lx + 60, H);
-      lg.addColorStop(0, "rgba(180,240,255,.10)"); lg.addColorStop(1, "rgba(180,240,255,0)");
+      lg.addColorStop(0, "rgba(" + rayC + "," + rayA + ")"); lg.addColorStop(1, "rgba(" + rayC + ",0)");
       ctx.fillStyle = lg;
       ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx + 56, 0); ctx.lineTo(lx + 130, H); ctx.lineTo(lx + 30, H); ctx.closePath(); ctx.fill();
     }
     // 沙床
-    ctx.fillStyle = "#43635e";
+    ctx.fillStyle = th.sand;
     ctx.beginPath(); ctx.moveTo(0, H - 14 + S.sandPts[0]);
     const seg = S.sandPts.length - 1, stepX = W / seg;
     for (let i = 1; i <= seg; i++) ctx.quadraticCurveTo(stepX * (i - 0.5), H - 14 + (S.sandPts[i - 1] + S.sandPts[i]) / 2 - 4, stepX * i, H - 14 + S.sandPts[i]);
     ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = "rgba(91,128,110,.45)";
+    ctx.fillStyle = "rgba(255,255,255,.12)";
     ctx.beginPath(); ctx.moveTo(0, H - 17 + S.sandPts[0]);
     for (let i = 1; i <= seg; i++) ctx.quadraticCurveTo(stepX * (i - 0.5), H - 17 + (S.sandPts[i - 1] + S.sandPts[i]) / 2 - 4, stepX * i, H - 17 + S.sandPts[i]);
     ctx.lineTo(W, H - 30); ctx.lineTo(0, H - 30); ctx.closePath(); ctx.fill();
-    // 石头
+    // 石头（冰海偏白、深海偏暗）
     S.stones.forEach(s => {
       ctx.save(); ctx.translate(s.x + s.w / 2, s.y + s.h / 2); ctx.rotate(s.rot);
-      ctx.fillStyle = s.tone > 0.5 ? "#3f5c55" : "#4a6b60";
+      ctx.fillStyle = th.key === "ice" ? (s.tone > 0.5 ? "#cfe2ec" : "#b8d2e0")
+        : th.key === "abyss" ? (s.tone > 0.5 ? "#1c3446" : "#24425a")
+        : (s.tone > 0.5 ? "#3f5c55" : "#4a6b60");
       ctx.beginPath(); ctx.ellipse(0, 0, s.w / 2, s.h / 2, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "rgba(255,255,255,.08)";
       ctx.beginPath(); ctx.ellipse(-s.w * 0.12, -s.h * 0.18, s.w * 0.3, s.h * 0.24, -0.3, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     });
-    // 水草（受惊加剧摇摆）
-    const cols = ["#1c6157", "#154b46", "#0f3c3e", "#1f7160"];
+    // 主题装饰：珊瑚丛 / 荧光点 / 浮冰
+    (S.decor || []).forEach(d => {
+      if (d.kind === "coral") {
+        // 分枝珊瑚：主干 + 3~4 根分枝
+        ctx.save(); ctx.translate(d.x, d.y); ctx.scale(d.s, d.s);
+        ctx.fillStyle = d.c; ctx.strokeStyle = d.c; ctx.lineWidth = 7; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -46); ctx.stroke();
+        [[-16, -60], [14, -66], [-10, -84], [12, -90]].forEach(pt => {
+          ctx.beginPath(); ctx.moveTo(0, -30); ctx.quadraticCurveTo(pt[0] * 0.5, pt[1] * 0.8, pt[0], pt[1]); ctx.stroke();
+        });
+        ctx.restore();
+      } else if (d.kind === "glow") {
+        // 荧光球：呼吸发光（深海）
+        const a = 0.35 + 0.3 * Math.sin(t * 1.4 + d.ph);
+        const rg = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r * 2.2);
+        rg.addColorStop(0, d.c); rg.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = a; ctx.fillStyle = rg;
+        ctx.beginPath(); ctx.arc(d.x, d.y, d.r * 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = Math.min(1, a + 0.35); ctx.fillStyle = d.c;
+        ctx.beginPath(); ctx.arc(d.x, d.y, d.r * 0.55, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      } else if (d.kind === "ice") {
+        // 浮冰排：缓慢漂移 + 白蓝渐变
+        const dx = Math.sin(t * 0.35 + d.ph) * 6 + d.drift * t * 0.15;
+        ctx.save(); ctx.translate(d.x + dx, d.y);
+        const ig = ctx.createLinearGradient(0, -d.h / 2, 0, d.h / 2);
+        ig.addColorStop(0, "rgba(240,250,255,.95)"); ig.addColorStop(1, "rgba(170,205,225,.85)");
+        ctx.fillStyle = ig;
+        G.rr(ctx, -d.w / 2, -d.h / 2, d.w, d.h, d.h * 0.42); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.5)";
+        G.rr(ctx, -d.w * 0.32, -d.h * 0.34, d.w * 0.5, d.h * 0.3, d.h * 0.15); ctx.fill();
+        ctx.restore();
+      } else if (d.kind === "wood") {
+        // 沉木：斜卧的深褐圆木
+        ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot); ctx.scale(d.s, d.s);
+        const wg = ctx.createLinearGradient(0, -10, 0, 12);
+        wg.addColorStop(0, "#6b4a2e"); wg.addColorStop(1, "#4a3018");
+        ctx.fillStyle = wg;
+        G.rr(ctx, -40, -9, 80, 18, 9); ctx.fill();
+        ctx.fillStyle = "rgba(255,220,180,.14)";
+        G.rr(ctx, -32, -6, 50, 5, 3); ctx.fill();
+        ctx.restore();
+      } else if (d.kind === "shell") {
+        // 贝壳：扇形双色
+        ctx.save(); ctx.translate(d.x, d.y); ctx.rotate(d.rot); ctx.scale(d.s, d.s);
+        ctx.fillStyle = "#e8d5b8";
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 14, Math.PI, 0); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = "rgba(180,120,80,.35)";
+        for (let k = -2; k <= 2; k++) {
+          ctx.beginPath(); ctx.moveTo(0, 0);
+          ctx.lineTo(Math.cos(Math.PI + (k + 2.5) / 5 * Math.PI) * 14, Math.sin(Math.PI + (k + 2.5) / 5 * Math.PI) * 14);
+          ctx.lineWidth = 1.4; ctx.strokeStyle = "rgba(180,120,80,.35)"; ctx.stroke();
+        }
+        ctx.restore();
+      }
+    });
+    // 水草（受惊加剧摇摆；水草森林更绿更深）
+    const cols = th.key === "kelp" ? ["#2f8f5e", "#276f4c", "#1d5a3e", "#38a56c"]
+      : th.key === "abyss" ? ["#123c4e", "#0f3242", "#0c2a3a", "#16485c"]
+      : th.key === "ice" ? ["#6f9fb8", "#5d8aa4", "#4e778f", "#7fb0c8"]
+      : ["#1c6157", "#154b46", "#0f3c3e", "#1f7160"];
     S.plants.forEach((p, pi) => {
       if (p.startle > 0) p.startle = Math.max(0, p.startle - 0.016);
       p.blades.forEach((b, bi) => {
@@ -353,18 +502,98 @@ module.exports = function (G) {
     if (!S || !S.type) return;
     if (S.type === "fish") drawSea(ctx, t);
     else if (S.type === "butterfly") drawGarden(ctx, t);
-    else {
-      drawRoomBody(ctx, t);
-      // 老鼠洞（后排先画，前排盖上面）
-      S.holes.forEach((h, i) => { if (i % 2 === 0) G.draw.hole(ctx, h.x, h.y); });
-      S.holes.forEach((h, i) => { if (i % 2 === 1) G.draw.hole(ctx, h.x, h.y); });
-    }
+    else if (S.type === "pool") drawPool(ctx, t);
+    else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
+    else { drawRoomBody(ctx, t); drawHoles(ctx); }
   };
+  /* 老鼠洞（后排先画，前排盖上面；两个背景共用） */
+  function drawHoles(ctx) {
+    const S = G.scene;
+    S.holes.forEach((h, i) => { if (i % 2 === 0) G.draw.hole(ctx, h.x, h.y); });
+    S.holes.forEach((h, i) => { if (i % 2 === 1) G.draw.hole(ctx, h.x, h.y); });
+  }
+
+  /* ============ 深色格纹地毯（Peppy Cat 式斜纹格布底） ============
+     整屏铺满：墨绿黑底 + 45° 织纹 + 棋盘明暗格 + 格线，顶部压暗保证 HUD 可读。
+     暗底让棕色老鼠与洞口边缘仍然清晰，同时给"萤光猎场"的观感 */
+  function drawPlaidFloor(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    const cell = (S.plaid && S.plaid.cell) || 110;
+    // 底色（墨绿黑）
+    ctx.fillStyle = "#0f1410"; ctx.fillRect(0, 0, W, H);
+    // 织纹：45° 细斜线（布纹感）
+    ctx.strokeStyle = "rgba(178,206,178,.045)"; ctx.lineWidth = 1;
+    for (let i = -H; i < W + H; i += 11) {
+      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
+    }
+    // 棋盘明暗格
+    for (let ix = 0, gx = 0; gx < W; ix++, gx += cell) {
+      for (let iy = 0, gy = 0; gy < H; iy++, gy += cell) {
+        ctx.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.34)" : "rgba(150,180,140,.05)";
+        ctx.fillRect(gx, gy, cell, cell);
+      }
+    }
+    // 格线
+    ctx.strokeStyle = "rgba(0,0,0,.45)"; ctx.lineWidth = 1.6;
+    for (let x = 0; x <= W; x += cell) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (let y = 0; y <= H; y += cell) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    // 顶部压暗（HUD 区可读）+ 四周暗角
+    const tg = ctx.createLinearGradient(0, 0, 0, H * 0.3);
+    tg.addColorStop(0, "rgba(0,0,0,.55)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.3);
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.42)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  /* ============ 暗夜萤光（Peppy Cat 石板墙） ============
+     对齐官方游玩背景：深棕灰不规则石块 + 深缝 + 微弱受光边，整体压暗，
+     最大程度衬托发光猎物（黄绿 glow 在暗底上跳出来） */
+  function drawPool(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    // 石缝底色（深棕黑）
+    ctx.fillStyle = "#1b1613"; ctx.fillRect(0, 0, W, H);
+    const stones = S.stones || [];
+    stones.forEach(s => {
+      const p = s.pts, n = p.length;
+      const path = (arr, rad) => {
+        ctx.beginPath();
+        ctx.moveTo((arr[0].x + arr[n - 1].x) / 2, (arr[0].y + arr[n - 1].y) / 2);
+        for (let i = 0; i < n; i++) {
+          const cur = arr[i], nxt = arr[(i + 1) % n];
+          ctx.arcTo(cur.x, cur.y, (cur.x + nxt.x) / 2, (cur.y + nxt.y) / 2, rad);
+        }
+        ctx.closePath();
+      };
+      // 石块主体（圆角多边形，圆角取石块尺度的 12%）
+      const w0 = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
+      path(p, Math.max(8, w0 * 0.10));
+      ctx.fillStyle = s.c; ctx.fill();
+      // 受光面：向心内缩的亮一档多边形，偏左上 2px（模拟石面明暗）
+      const cx = p.reduce((a, q) => a + q.x, 0) / n, cy = p.reduce((a, q) => a + q.y, 0) / n;
+      const inner = p.map(q => ({ x: q.x + (cx - q.x) * 0.17 - 2, y: q.y + (cy - q.y) * 0.17 - 2 }));
+      path(inner, Math.max(6, w0 * 0.08));
+      ctx.fillStyle = s.c2; ctx.fill();
+      // 边缘受光细线
+      path(p, Math.max(8, w0 * 0.10));
+      ctx.strokeStyle = s.hi; ctx.lineWidth = 1.6; ctx.stroke();
+      // 碎石裂线
+      if (s.cracks && s.cracks.length) {
+        ctx.strokeStyle = "rgba(0,0,0,.30)"; ctx.lineWidth = 1.3;
+        s.cracks.forEach(k => { ctx.beginPath(); ctx.moveTo(k[0], k[1]); ctx.lineTo(k[2], k[3]); ctx.stroke(); });
+      }
+    });
+    // 全局暗角：四周压暗，中心留亮（让猎物所在的中部更醒目）
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, Math.min(W, H) * 0.18, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.46)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
 
   /* ================= 粒子特效 ================= */
   const fx = {
     bubbles: [], dust: [], pollen: [], scales: [], sparks: [], ripples: [],
-    trails: [], scorches: [], petals: [], paws: [], floats: [], ambientT: 0
+    trails: [], scorches: [], petals: [], paws: [], floats: [], ambientT: 0,
+    droplets: [], shockwaves: [], flash: 0
   };
   G.fx = fx;
   const PUSH = (arr, o, cap) => { arr.push(o); if (arr.length > cap) arr.splice(0, arr.length - cap); };
@@ -374,7 +603,36 @@ module.exports = function (G) {
   G.pollenBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.pollen, { x: x + rand(-12, 12), y: y + rand(-12, 12), vx: rand(-24, 24), vy: rand(-34, -6), r: rand(1.5, 3.4), life: rand(0.7, 1.4) }, 80); };
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
   G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55) }, 80); } fx.sparkColor = color; };
-  G.ripple = (x, y, miss) => { if (G.scene.type !== "fish") return; PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss }, 30); };
+  /* 夸张光爆（暗夜萤光专用）：发光碎点四溅 + 双层冲击环 + 闪白 + 大光波 */
+  G.splashBurst = (x, y, big) => {
+    const n = big ? 26 : 16;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(140, big ? 520 : 360);
+      const up = rand(90, big ? 300 : 210);                 // 垂直上抛分量（假 3D 迸溅）
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - up,
+        r: rand(2.2, big ? 7.5 : 5.5), life: rand(0.55, 1.05)
+      }, 90);
+    }
+    // 双层冲击环（外环快、内环慢）
+    PUSH(fx.shockwaves, { x, y, r: 10, life: 1, speed: big ? 560 : 420, w: big ? 7 : 5, color: "rgba(255,248,190,.95)" }, 12);
+    PUSH(fx.shockwaves, { x, y, r: 6, life: 1, speed: big ? 330 : 250, w: big ? 4.5 : 3.5, color: "rgba(160,244,190,.9)" }, 12);
+    // 命中点爆闪（半径快速外扩的实心光斑）
+    PUSH(fx.shockwaves, { x, y, r: 4, life: 1, speed: 240, w: 22, color: "rgba(240,255,150,.95)", glow: true }, 12);
+    fx.flash = Math.max(fx.flash, big ? 0.26 : 0.16);       // 全屏闪白（短暂，峰值压低护眼）
+    // 大光波
+    PUSH(fx.ripples, { x, y, r: 8, life: 1, miss: false, color: "rgba(226,255,140,.95)", big: true }, 30);
+    PUSH(fx.ripples, { x, y, r: 20, life: 0.85, miss: false, color: "rgba(255,255,255,.8)", big: true }, 30);
+    G.sparkBurst(x, y, "#f4ffa8", big ? 12 : 8);
+  };
+  G.ripple = (x, y, miss) => {
+    if (G.scene.type !== "fish" && G.scene.type !== "pool") return;
+    const th = G.seaThemeNow();
+    const col = G.scene.type === "pool"
+      ? (miss ? null : "rgba(226,255,150,.9)")
+      : (miss ? null : (th && th.ripple));
+    PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss, color: col }, 30);
+  };
   G.laserTrail = (x, y, key) => PUSH(fx.trails, { x, y, life: 0.4, key: key || "red" }, 30);
   G.laserFlash = (x, y, key) => PUSH(fx.scorches, { x, y, life: 0.32, flash: true, key: key || "red" }, 20);
   G.scorch = (x, y) => PUSH(fx.scorches, { x, y, life: 1.05 }, 20);
@@ -383,21 +641,63 @@ module.exports = function (G) {
   G.floatText = (x, y, text, kind) => PUSH(fx.floats, { x, y, text, kind: kind || "", life: 1 }, 20);
 
   fx.update = (dt, t) => {
-    // 海底环境气泡
+    // 海底环境粒子：按海域主题分流——气泡 / 荧光浮游 / 雪絮 / 孢子
     if (G.scene.type === "fish" && G.session.running) {
       fx.ambientT += dt;
-      if (fx.ambientT > 1.2) {
+      const th = G.seaThemeNow();
+      const amb = (th && th.amb) || "bubble";
+      const interval = amb === "snow" ? 0.35 : amb === "plankton" ? 0.7 : 1.2;
+      if (fx.ambientT > interval) {
         fx.ambientT = 0;
-        PUSH(fx.bubbles, { x: rand(10, G.platform.W - 10), y: G.platform.H + 8, r: rand(2.5, 6), vy: rand(-46, -22), vx: 0, life: rand(3, 5), ambient: true }, 60);
+        const W = G.platform.W, H = G.platform.H;
+        if (amb === "plankton") {
+          // 荧光浮游：全屏缓漂的小光点（深海）
+          PUSH(fx.pollen, {
+            x: rand(0, W), y: rand(H * 0.15, H * 0.95), vx: rand(-6, 6), vy: rand(-9, -2),
+            r: rand(1.2, 2.8), life: rand(4, 7), ambient: true, glow: ["#7fe7ff", "#57e0c8", "#9d8cff"][Math.floor(rand(0, 3))]
+          }, 90);
+        } else if (amb === "snow") {
+          // 雪絮：自上而下飘落（冰海）
+          PUSH(fx.dust, {
+            x: rand(0, W), y: -8, vx: rand(-10, 10), vy: rand(26, 48),
+            r: rand(1.6, 3.6), life: rand(5, 8), ambient: true, snow: true
+          }, 90);
+        } else if (amb === "spore") {
+          // 孢子：从水草丛向上飘的绿色小点（水草森林）
+          PUSH(fx.pollen, {
+            x: rand(0, W), y: H * rand(0.75, 1), vx: rand(-8, 8), vy: rand(-16, -6),
+            r: rand(1.4, 3), life: rand(3.5, 6), ambient: true, glow: "#b8f08a"
+          }, 90);
+        } else {
+          // 气泡（珊瑚海，原行为）
+          PUSH(fx.bubbles, { x: rand(10, W - 10), y: H + 8, r: rand(2.5, 6), vy: rand(-46, -22), vx: 0, life: rand(3, 5), ambient: true }, 60);
+        }
       }
     }
     const step = (arr, fn) => { for (let i = arr.length - 1; i >= 0; i--) { const p = arr[i]; p.life -= dt; if (fn(p, dt) === false || p.life <= 0) arr.splice(i, 1); } };
     step(fx.bubbles, (p, d) => { p.y += p.vy * d; p.x += Math.sin(t * 3 + p.y * 0.05) * 0.5 + (p.vx || 0) * d; if (p.ambient && p.y < G.platform.H * 0.15) return false; });
-    step(fx.dust, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vy += 120 * d; });
-    step(fx.pollen, (p, d) => { p.x += p.vx * d + Math.sin(t * 2 + p.y) * 0.4; p.y += p.vy * d; });
+    step(fx.dust, (p, d) => {
+      if (p.snow) { p.x += p.vx * d + Math.sin(t * 1.4 + p.y * 0.03) * 0.6; p.y += p.vy * d; if (p.y > G.platform.H + 8) return false; return; }
+      p.x += p.vx * d; p.y += p.vy * d; p.vy += 120 * d;
+    });
+    step(fx.pollen, (p, d) => {
+      p.x += p.vx * d + Math.sin(t * 2 + p.y) * 0.4; p.y += p.vy * d;
+      if (p.ambient && (p.y < -10 || p.y > G.platform.H + 10)) return false;
+    });
     step(fx.scales, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vx *= 0.96; });
     step(fx.sparks, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vx *= 0.9; p.vy = p.vy * 0.9 + 300 * d; });
-    step(fx.ripples, (p, d) => { p.r += 90 * d; });
+    step(fx.ripples, (p, d) => { p.r += (p.big ? 160 : 90) * d; });
+    /* 水珠：抛物线上抛 + 重力回落，落点再补一圈小涟漪 */
+    step(fx.droplets, (p, d) => {
+      p.x += p.vx * d; p.y += p.vy * d;
+      p.vy += 560 * d; p.vx *= 0.995;
+      if (p.y > G.platform.H - 4 && p.vy > 0) return false;
+    });
+    step(fx.shockwaves, (p, d) => {
+      p.r += p.speed * d;
+      p.w = Math.max(0.6, p.w - d * (p.glow ? 30 : 10));
+    });
+    if (fx.flash > 0) fx.flash = Math.max(0, fx.flash - dt * 3.2);   // 闪白 ~0.3s 衰减完
     step(fx.trails, () => {});
     step(fx.scorches, () => {});
     step(fx.petals, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vy += 60 * d; p.rot += 3 * d; });
@@ -416,13 +716,17 @@ module.exports = function (G) {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     });
     fx.dust.forEach(p => {
-      ctx.globalAlpha = Math.min(p.life * 1.4, 0.5);
-      ctx.fillStyle = "#c9b28c";
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1.4 - p.life * 0.5), 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = p.snow ? Math.min(p.life * 0.5, 0.8) : Math.min(p.life * 1.4, 0.5);
+      ctx.fillStyle = p.snow ? "#ffffff" : "#c9b28c";
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (p.snow ? 1 : (1.4 - p.life * 0.5)), 0, Math.PI * 2); ctx.fill();
     });
     fx.pollen.forEach(p => {
       ctx.globalAlpha = Math.min(p.life, 0.9);
-      ctx.fillStyle = "#ffe27a";
+      ctx.fillStyle = p.glow || "#ffe27a";
+      if (p.glow) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = Math.min(p.life, 0.95);
+      }
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
     });
     fx.scales.forEach(p => {
@@ -439,9 +743,37 @@ module.exports = function (G) {
     ctx.globalAlpha = 1;
     fx.ripples.forEach(p => {
       ctx.globalAlpha = Math.max(p.life * (p.miss ? 0.3 : 0.85), 0);
-      ctx.strokeStyle = "rgba(255,255,255," + (p.miss ? 0.3 : 0.85) + ")"; ctx.lineWidth = p.miss ? 2 : 3;
+      const col = p.miss ? "rgba(255,255,255,.3)" : (p.color || "rgba(255,255,255,.85)");
+      ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
     });
+    /* 光爆碎点：黄绿发光小球（暗底上高亮） */
+    fx.droplets.forEach(p => {
+      const a = Math.min(p.life * 1.5, 0.95);
+      ctx.globalAlpha = a;
+      const rg = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 0, p.x, p.y, p.r);
+      rg.addColorStop(0, "#ffffff");
+      rg.addColorStop(0.5, "#f2ff9c");
+      rg.addColorStop(1, "rgba(150,240,130,.5)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+    });
+    /* 冲击环：glow=true 时光斑实心扩散，否则空心环 */
+    fx.shockwaves.forEach(p => {
+      const a = Math.max(p.life, 0);
+      ctx.globalAlpha = a * (p.glow ? 0.55 : 0.9);
+      if (p.glow) {
+        const rg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
+        rg.addColorStop(0, p.color);
+        rg.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = rg;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      } else {
+        ctx.strokeStyle = p.color; ctx.lineWidth = p.w;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+      }
+    });
+    ctx.globalAlpha = 1;
     fx.trails.forEach(p => {
       const cs = (G.laserColorSet && G.laserColorSet())[p.key] || G.laserColorSet().red;
       ctx.globalAlpha = Math.max(p.life * 0.8, 0);
@@ -489,6 +821,17 @@ module.exports = function (G) {
       ctx.fillText(p.text, p.x, p.y);
     });
     ctx.globalAlpha = 1;
+    /* 命中闪白：全屏罩一层（drawGameFrame 在 UI 之前调 fx.draw，
+       所以闪白只盖玩法层、不盖 HUD/结算按钮，亮度峰值已被 splashBurst 压低） */
+    if (fx.flash > 0) {
+      ctx.globalAlpha = Math.min(fx.flash, 0.3);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, G.platform.W, G.platform.H);
+      ctx.globalAlpha = 1;
+    }
   };
-  fx.clear = () => { Object.keys(fx).forEach(k => { if (Array.isArray(fx[k])) fx[k].length = 0; }); };
+  fx.clear = () => {
+    Object.keys(fx).forEach(k => { if (Array.isArray(fx[k])) fx[k].length = 0; });
+    fx.flash = 0;
+  };
 };

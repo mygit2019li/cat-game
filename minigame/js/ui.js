@@ -148,7 +148,8 @@ module.exports = function (G) {
     { key: "fish",      name: "深海捕鱼", desc: "三条小鱼随波游动" },
     { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
     { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
-    { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" }
+    { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
+    { key: "pool",      name: "暗夜萤光", desc: "发光小兽在石板上乱窜" }
   ];
   /* 首页常驻小字：适龄提示(12周岁) / 健康游戏忠告(标准原文) / 安全提示 / 免责声明（自动按宽度折行）
      文案依据：《网络游戏适龄提示》团体标准 + 新闻出版署《健康游戏忠告》标准原文，逐字使用 */
@@ -327,7 +328,7 @@ module.exports = function (G) {
       text("选一种猎物，开始今天的狩猎吧", leftX + leftW / 2, blockTop + 44, "14px sans-serif", C.ink2);
 
       const orbY = blockTop + titleH + orbD / 2;
-      ui.drawStartOrb(leftX + leftW / 2, orbY, orbD, "开始游戏", () => G.startGame());
+      ui.drawStartOrb(leftX + leftW / 2, orbY, orbD, "开始游戏", () => G.requestStart());
 
       // 适龄/健康忠告/安全/免责提示（底部通栏两行居中）
       ctx.globalAlpha = 0.75;
@@ -350,13 +351,16 @@ module.exports = function (G) {
 
       const cardTop = topY + m;
       const cardBottomLimit = rowY - m;
-      const gridH = cardBottomLimit - cardTop - headH - pad; // 卡内 2×2 网格区高度
-      const cw = Math.min((rightW - gap) / 2, 148);
+      const gridH = cardBottomLimit - cardTop - headH - pad; // 卡内网格区高度
+      // 5 个模式时改 3 列×2 行（保持 2 行不动垂直空间，避免横屏矮屏卡片区压到按钮行）
+      const cols = MODES.length > 4 ? 3 : 2;
+      const rows = Math.ceil(MODES.length / cols);
+      const cw = Math.min((rightW - gap * (cols - 1)) / cols, 148);
       // 卡高下限 60 而不是 76：真机横屏带刘海时（safe.left/right≈44、bottom≈34），高度预算变紧，
       // 76 保底会让卡片盖住底部按钮行；60 时图标按 0.3 缩放下限刚好不压模式名
-      const ch = Math.min(Math.max((gridH - gap) / 2, 60), 112);
-      const totalW = cw * 2 + gap;
-      const totalH = ch * 2 + gap;
+      const ch = Math.min(Math.max((gridH - gap * (rows - 1)) / rows, 60), 112);
+      const totalW = cw * cols + gap * (cols - 1);
+      const totalH = ch * rows + gap * (rows - 1);
       const gx = rightX + (rightW - totalW) / 2;
       const cardW = totalW + pad * 2, cardH = headH + totalH + pad;
       const cardX = gx - pad;
@@ -369,13 +373,13 @@ module.exports = function (G) {
       text("模式选择", cardX + 18, cardY + headH / 2, "bold 16px sans-serif", C.ink, "left");
       const gy = cardY + headH;
       MODES.forEach((mItem, i) => {
-        const x = gx + (i % 2) * (cw + gap), y = gy + Math.floor(i / 2) * (ch + gap);
+        const x = gx + (i % cols) * (cw + gap), y = gy + Math.floor(i / cols) * (ch + gap);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
         // 自适应布局：图标占「文字区之上」的剩余空间并随卡高缩放，矮卡不再与文字重叠
         const iconZone = ch - 42;
-        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
         const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
@@ -394,21 +398,23 @@ module.exports = function (G) {
       const availW = edgeR - edgeL, innerH = H - safe.top - safe.bottom;
       text(G.GAME_NAME, W / 2, safe.top + innerH * 0.10, "bold 30px sans-serif", C.ink);
       text("选一种猎物，开始今天的狩猎吧", W / 2, safe.top + innerH * 0.10 + 34, "14px sans-serif", C.ink2);
-      const cw = (availW - 14) / 2, ch = 88, gx = edgeL, gy = safe.top + innerH * 0.16;
+      const colsP = MODES.length > 4 ? 3 : 2;
+      const rowsP = Math.ceil(MODES.length / colsP);
+      const cw = (availW - 14 * (colsP - 1)) / colsP, ch = 88, gx = edgeL, gy = safe.top + innerH * 0.16;
       // 模式选择卡片容器
-      const cardX = gx - 12, cardY = gy - 36, cardW = availW + 24, cardH = ch * 2 + 14 + 36;
+      const cardX = gx - 12, cardY = gy - 36, cardW = availW + 24, cardH = ch * rowsP + 14 * (rowsP - 1) + 36;
       ctx.fillStyle = "rgba(31,64,58,.08)";
       G.rr(ctx, cardX + 1, cardY + 4, cardW - 2, cardH - 4, 20); ctx.fill();
       panel(cardX, cardY, cardW, cardH, C.card, C.line);
       text("模式选择", cardX + 18, cardY + 22, "bold 16px sans-serif", C.ink, "left");
       const gy2 = gy;
       MODES.forEach((mItem, i) => {
-        const x = gx + (i % 2) * (cw + 14), y = gy2 + Math.floor(i / 2) * (ch + 14);
+        const x = gx + (i % colsP) * (cw + 14), y = gy2 + Math.floor(i / colsP) * (ch + 14);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
         const iconZone = ch - 42;
-        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
         const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
@@ -433,7 +439,7 @@ module.exports = function (G) {
       const tipH2 = wrapTips(availW).length * 15;
       const tipsTop2 = H - safe.bottom - tipH2 - 8;
       const orbD2 = Math.max(96, Math.min(148, Math.floor(tipsTop2 - 14 - by - 84)));
-      ui.drawStartOrb(W / 2, by + orbD2 / 2, orbD2, "开始游戏", () => G.startGame());
+      ui.drawStartOrb(W / 2, by + orbD2 / 2, orbD2, "开始游戏", () => G.requestStart());
       const subY2 = by + orbD2 + 40;
       const tw = (availW - 20) / 3;
       drawBtn(edgeL, subY2, tw, 44, "设置", { icon: "gear", cb: () => { G.screen = "settings"; } });
@@ -446,12 +452,135 @@ module.exports = function (G) {
   };
 
   /* ================= 设置 ================= */
+  /* 背景缩略预览：不复用 drawScene（依赖全局 scene 状态），各背景单独画一张小图 */
+  function drawBgPreview(c, key, x, y, w, h) {
+    c.save();
+    G.rr(c, x, y, w, h, 12); c.clip();
+    if (key === "plaid") {
+      c.fillStyle = "#0f1410"; c.fillRect(x, y, w, h);
+      c.strokeStyle = "rgba(178,206,178,.10)"; c.lineWidth = 1;
+      for (let i = -h; i < w + h; i += 8) { c.beginPath(); c.moveTo(x + i, y); c.lineTo(x + i + h, y + h); c.stroke(); }
+      const cell = Math.max(26, Math.round(w / 5));
+      for (let ix = 0, gx = x; gx < x + w; ix++, gx += cell) {
+        for (let iy = 0, gy = y; gy < y + h; iy++, gy += cell) {
+          c.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.35)" : "rgba(150,180,140,.07)";
+          c.fillRect(gx, gy, cell, cell);
+        }
+      }
+      // 荧光小点（示意猎物）
+      const fx2 = x + w * 0.68, fy2 = y + h * 0.42;
+      const rg = c.createRadialGradient(fx2, fy2, 0, fx2, fy2, 20);
+      rg.addColorStop(0, "rgba(226,255,130,.45)"); rg.addColorStop(1, "rgba(226,255,130,0)");
+      c.fillStyle = rg; c.beginPath(); c.arc(fx2, fy2, 20, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "rgba(240,255,150,.95)";
+      c.beginPath(); c.arc(fx2, fy2, 5, 0, Math.PI * 2); c.fill();
+    } else {
+      // 室内：墙 + 地板木纹 + 窗光 + 两个洞口
+      c.fillStyle = "#554b40"; c.fillRect(x, y, w, h * 0.42);
+      c.fillStyle = "#7a6a58"; c.fillRect(x, y + h * 0.42, w, h * 0.58);
+      c.strokeStyle = "rgba(0,0,0,.16)"; c.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        const yy = y + h * 0.42 + (h * 0.58 / 5) * i;
+        c.beginPath(); c.moveTo(x, yy); c.lineTo(x + w, yy); c.stroke();
+      }
+      c.fillStyle = "rgba(205,232,255,.5)";
+      c.fillRect(x + w * 0.62, y + h * 0.1, w * 0.24, h * 0.23);
+      c.fillStyle = "#2b211a";
+      [0.28, 0.62].forEach(f => {
+        c.beginPath(); c.ellipse(x + w * f, y + h * 0.78, w * 0.095, h * 0.065, 0, 0, Math.PI * 2); c.fill();
+      });
+    }
+    c.restore();
+  }
+
+  /* ================= 背景选择层（左右滑动，一屏约 1.5 张卡） =================
+     卡片本身不注册按钮（走拖动判定），弹层开头清空按钮表，避免命中首页残留按钮。 */
+  ui.drawBgPick = () => {
+    const { W, H, safe } = layout();
+    const P = G.bgPick;
+    if (!P) return;
+    const list = G.bgsFor(G.config.targetType);
+    ui.buttons.length = 0;                                  // 弹层独占按钮表
+
+    // 实底渐变（不叠首页：首页大标题会和"选择背景"叠字，底部合规小字也会透出来）
+    const bgG = ctx.createLinearGradient(0, 0, W, H);
+    bgG.addColorStop(0, C.homeBg1); bgG.addColorStop(0.55, C.homeBg2); bgG.addColorStop(1, C.homeBg3);
+    ctx.fillStyle = bgG; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(6,22,20,.55)"; ctx.fillRect(0, 0, W, H);
+
+    const CW = Math.round(W * 0.64);                        // 卡宽 ≈ 0.64 屏 → 露出一半下一张
+    const CH = Math.min(Math.round(H * 0.44), Math.round(CW * 0.6));
+    const gap = Math.round(W * 0.035);
+    const pad = Math.round(W * 0.05);
+    const step = CW + gap;
+    P.cw = CW; P.gap = gap;
+    // 整块（标题 + 卡片 + 指示点 + 按钮）垂直居中，避免横屏压到首页 UI、竖屏顶在上面
+    const bh = 44;
+    const blockH = 30 + CH + 24 + 16 + bh;
+    const top = Math.max(safe.top + 16, Math.round((H - blockH) / 2));
+    const cardY = top + 30;
+
+    text("选择背景", pad, cardY - 18, "bold 17px sans-serif", "#fff", "left");
+    text("左右滑动切换", pad + 78, cardY - 17, "11px sans-serif", "rgba(255,255,255,.7)", "left");
+
+    // 画廊：裁到屏幕内，滑出的卡不画到屏幕外
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, cardY - 6, W, CH + 12); ctx.clip();
+    const baseX = pad - P.idx * step + (P.off || 0);
+    list.forEach((b, i) => {
+      const x = baseX + i * step;
+      if (x > W || x + CW < 0) return;
+      const active = i === P.idx;
+      panel(x, cardY, CW, CH, active ? "#fbfaf7" : "rgba(250,249,245,.86)", active ? C.teal : "rgba(255,255,255,.5)");
+      if (active) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, cardY, CW, CH, 16); ctx.stroke(); }
+      const pvH = Math.round(CH * 0.64);
+      drawBgPreview(ctx, b.key, x + 10, cardY + 10, CW - 20, pvH - 10);
+      text(b.name, x + CW / 2, cardY + pvH + 16, "bold 15px sans-serif", active ? C.tealDeep : C.ink);
+      text(b.desc, x + CW / 2, cardY + pvH + 34, "10.5px sans-serif", C.ink3);
+    });
+    ctx.restore();
+
+    // 指示点
+    const dotY = cardY + CH + 14;
+    list.forEach((b, i) => {
+      const dx = W / 2 + (i - (list.length - 1) / 2) * 16;
+      ctx.fillStyle = i === P.idx ? C.teal : "rgba(255,255,255,.35)";
+      ctx.beginPath(); ctx.arc(dx, dotY, i === P.idx ? 4 : 3, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // 开始按钮（宽条按钮，比圆形开始球更适配方屏；紧随指示点，整块居中）
+    const bw = Math.min(Math.round(W * 0.42), 260);
+    const bx = (W - bw) / 2, by = Math.min(dotY + 16, H - safe.bottom - bh - 12);
+    ctx.fillStyle = C.tealDeep;
+    G.rr(ctx, bx, by, bw, bh, bh / 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1.4;
+    G.rr(ctx, bx + 3, by + 3, bw - 6, bh - 6, (bh - 6) / 2); ctx.stroke();
+    text("开始游戏", W / 2, by + bh / 2, "bold 16px sans-serif", "#fff");
+    btn(bx, by, bw, bh, () => G.confirmBgPick());
+
+    // 关闭（右上角 ×）
+    const cs = 30, cx = W - safe.right - cs - 10, cy = safe.top + 8;
+    ctx.fillStyle = "rgba(255,255,255,.16)";
+    ctx.beginPath(); ctx.arc(cx + cs / 2, cy + cs / 2, cs / 2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx + cs * 0.34, cy + cs * 0.34); ctx.lineTo(cx + cs * 0.66, cy + cs * 0.66);
+    ctx.moveTo(cx + cs * 0.66, cy + cs * 0.34); ctx.lineTo(cx + cs * 0.34, cy + cs * 0.66);
+    ctx.stroke();
+    btn(cx, cy, cs, cs, () => G.closeBgPick());
+  };
+
   ui.drawSettings = () => {
     const { W, H, land, m, gap, safe } = layout();
     const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    text("设置", W / 2, safe.top + 54, "bold 24px sans-serif", C.ink);
+    // 标题左上角横排一行（原居中两行占 84px 顶部，会把卡片挤成紧凑档、按钮压到底边）
+    const titleFont = "bold 22px sans-serif";
+    text("设置", safe.left + m, safe.top + 28, titleFont, C.ink, "left");
+    ctx.font = titleFont;
+    const titleW = ctx.measureText("设置").width;
+    text("逗猫偏好，一次设好", safe.left + m + titleW + 12, safe.top + 29, "13px sans-serif", C.ink3, "left");
 
     // 分组：对局（青绿点）/ 体验（琥珀点）
     const groups = [
@@ -461,7 +590,7 @@ module.exports = function (G) {
     groups[0].rows.push(
       { label: "猎物数量", options: [{ label: "单只", val: 1 }, { label: "多只", val: 3 }], cur: G.config.preyCount, cb: v => { G.config.preyCount = v; } },
       { label: "难度", options: [{ label: "悠闲", val: "easy" }, { label: "标准", val: "normal" }, { label: "激烈", val: "hard" }], cur: G.config.difficulty, cb: v => { G.config.difficulty = v; } },
-      { label: "时长", options: [{ label: "1 分钟", val: 60 }, { label: "3 分钟", val: 180 }, { label: "5 分钟", val: 300 }], cur: G.config.duration, cb: v => { G.config.duration = v; } }
+      { label: "时长", options: [{ label: "1 分钟", val: 60 }, { label: "3 分钟", val: 180 }, { label: "5 分钟", val: 300 }, { label: "∞ 无限", val: 0 }], cur: G.config.infinite ? 0 : G.config.duration, cb: v => { if (v === 0) G.config.infinite = true; else { G.config.infinite = false; G.config.duration = v; } } }
     );
     groups[1].rows.push(
       { label: "音效", options: [{ label: "关", val: false }, { label: "开", val: true }], cur: G.config.sound, cb: v => { G.config.sound = v; } },
@@ -469,43 +598,62 @@ module.exports = function (G) {
       { label: "自适应辅助", options: [{ label: "关", val: false }, { label: "开", val: true }], cur: G.config.adaptive, cb: v => { G.config.adaptive = v; } }
     );
 
-    // 分组卡片：阴影 + 白卡 + 圆点标题 + 分隔线
+    // 分组卡片：柔和阴影 + 白卡 + 圆点标题 + 分隔线
     function card(x, y, w, h, dot, title, compact) {
-      ctx.fillStyle = "rgba(31,64,58,.08)";
-      G.rr(ctx, x + 1, y + 4, w - 2, h - 4, 20); ctx.fill();
-      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, x, y, w, h, 20); ctx.fill(); ctx.stroke();
+      // 柔和投影（绘制后重置，避免污染后续绘制）
+      ctx.save();
+      ctx.shadowColor = "rgba(20,49,58,.12)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 8;
+      ctx.fillStyle = C.card;
+      G.rr(ctx, x, y, w, h, 22); ctx.fill();
+      ctx.restore();
+      // 描边：G.rr 内部会 fill，须显式给白底，否则被 restore 后遗留的 fillStyle（如文字色）覆盖
+      ctx.fillStyle = C.card;
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, x, y, w, h, 22); ctx.stroke();
       const headY = y + (compact ? 21 : 24);
+      // 圆点 + 外圈微光
+      ctx.save(); ctx.globalAlpha = .18;
+      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 22, headY, 9, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
       ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 22, headY, 5, 0, Math.PI * 2); ctx.fill();
-      text(title, x + 36, headY, "bold 16px sans-serif", C.ink, "left");
-      ctx.strokeStyle = "rgba(0,0,0,.06)"; ctx.lineWidth = 1;
+      text(title, x + 38, headY, "bold 16px sans-serif", C.ink, "left");
+      ctx.strokeStyle = "rgba(0,0,0,.05)"; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x + 16, y + (compact ? 38 : 42)); ctx.lineTo(x + w - 16, y + (compact ? 38 : 42)); ctx.stroke();
     }
-    // 分段选择器：选中=白底+青绿描边+加粗深青；未选中=灰底浅字
+    // 分段选择器：选中=青绿渐变填充+白字（像"按下"的按钮）；未选中=极淡灰+深青灰字
     function seg(x, y, wTotal, h, r) {
       const ow = (wTotal - (r.options.length - 1) * 8) / r.options.length;
       r.options.forEach((op, idx) => {
         const on = op.val === r.cur;
         const ox = x + idx * (ow + 8);
-        ctx.fillStyle = on ? C.card : C.segBg;
-        ctx.strokeStyle = on ? C.teal : "transparent";
-        ctx.lineWidth = on ? 2 : 0;
-        G.rr(ctx, ox, y, ow, h, 12); ctx.fill(); ctx.stroke();
-        text(op.label, ox + ow / 2, y + h / 2, on ? "bold 15px sans-serif" : "15px sans-serif", on ? C.tealDeep : C.ink2);
+        if (on) {
+          const grad = ctx.createLinearGradient(ox, y, ox, y + h);
+          grad.addColorStop(0, C.startGrad0); grad.addColorStop(1, C.startGrad1);
+          ctx.fillStyle = grad;
+        } else {
+          ctx.fillStyle = C.segBg;
+        }
+        ctx.strokeStyle = "transparent"; ctx.lineWidth = 0;
+        G.rr(ctx, ox, y, ow, h, 12); ctx.fill();
+        if (on) { ctx.strokeStyle = C.startGrad1; ctx.lineWidth = 1.2; ctx.stroke(); }
+        text(op.label, ox + ow / 2, y + h / 2, on ? "bold 15px sans-serif" : "15px sans-serif", on ? "#fff" : C.ink2);
         btn(ox, y, ow, h, () => { r.cb(op.val); G.saveConfig(); G.playTick(); });
       });
     }
 
-    const contentTop = safe.top + 84;
-    const bottomLimit = H - safe.bottom - 92;
+    // 标题收到左上角后顶部只需留 52px；底部预留加大到 104px，让返回等按钮不贴屏幕底边
+    const contentTop = safe.top + 52;
+    const bottomLimit = H - safe.bottom - 104;
     const availCH = bottomLimit - contentTop;
     const btnH = 34;
 
     if (land) {
       // 双卡并排，行内布局：label 左 + 选项右；空间不足时切换紧凑档
-      const fits = availCH >= 198;
-      const headerH = fits ? 44 : 40, stride = fits ? 48 : 44, padB = fits ? 14 : 12;
-      const cardH = headerH + 10 + 2 * stride + btnH + padB;
+      // 阈值 = 完整档实际卡高 190（旧值 180 会算出放不下的卡、压到功能行）
+      const fits = availCH >= 190;
+      const headerH = fits ? 42 : 38, stride = fits ? 46 : 42, padB = fits ? 12 : 9;
+      const rowH = fits ? 34 : 32;   // 选项行高（空间不足时略压，给底部功能行让位）
+      const cardH = headerH + 10 + 2 * stride + rowH + padB;
       const edgeL = safe.left + m, edgeR = W - safe.right - m;
       const availW = edgeR - edgeL;
       let cardW = Math.min((availW - gap) / 2, 440);
@@ -517,8 +665,8 @@ module.exports = function (G) {
         const labelW = Math.min(96, cardW * 0.28);
         grp.rows.forEach((r, ri) => {
           const ry = cardTop + headerH + 10 + ri * stride;
-          text(r.label, x + 16, ry + btnH / 2, "15px sans-serif", C.ink2, "left");
-          seg(x + 16 + labelW, ry, cardW - 32 - labelW, btnH, r);
+          text(r.label, x + 16, ry + rowH / 2, "15px sans-serif", C.ink2, "left");
+          seg(x + 16 + labelW, ry, cardW - 32 - labelW, rowH, r);
         });
       });
     } else {
@@ -542,23 +690,93 @@ module.exports = function (G) {
       });
     }
 
-    // 底部一行：联系客服（白卡）+ 返回（青绿渐变主按钮）
+    // 底部一行：联系客服（白卡）/ 分享给好友（青绿字白卡）/ 返回（青绿渐变主按钮）
     let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
     let bx = land ? safe.left + m : safe.left + 24;
-    if (land && bw > 360) { bx = (W - 360) / 2; bw = 360; }
-    const by = H - safe.bottom - 75;
-    const halfW = (bw - 12) / 2;
+    if (land && bw > 440) { bx = (W - 440) / 2; bw = 440; }
+    const gapB = 12;
+    const cw = (bw - gapB * 2) / 3;
+    // 底部功能行：屏幕常亮（iOS 风格开关）+ 防误触说明（带图标按钮），两块等高等宽对称
+    const fy = bottomLimit + 8;
+    const fh = 38;            // 功能块高
+    const bh = 34;            // 主按钮高
+    const by = fy + fh + 8;   // 功能行 + 8 间距
+
+    // iOS 风格开关：开=青绿渐变、关=浅灰，白色圆形滑块带微阴影
+    function toggle(cx, cy, w, h, on, cb) {
+      const r = h / 2;
+      ctx.save();
+      if (on) {
+        const grad = ctx.createLinearGradient(cx, cy, cx + w, cy);
+        grad.addColorStop(0, C.startGrad0); grad.addColorStop(1, C.startGrad1);
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = "#e1eae7";
+      }
+      G.rr(ctx, cx, cy, w, h, r);
+      const knob = h - 6;
+      const kx = on ? cx + w - r - 3 : cx + r + 3;
+      ctx.shadowColor = "rgba(0,0,0,.2)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(kx, cy + r, knob / 2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      btn(cx, cy, w, h, cb);
+    }
+
+    // 屏幕常亮块（白卡，左标签 + 右开关）
+    {
+      const fw = (bw - gapB) / 2;
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, bx, fy, fw, fh, 12); ctx.fill(); ctx.stroke();
+      text("屏幕常亮", bx + 16, fy + fh / 2, "bold 15px sans-serif", C.ink, "left");
+      const on = !!G.config.keepScreen;
+      const tw = 52, th = 30;
+      toggle(bx + fw - tw - 14, fy + (fh - th) / 2, tw, th, on, () => {
+        G.config.keepScreen = !on;
+        try { G.platform.keepScreen(G.config.keepScreen); } catch (e) {}
+        G.session._keepOn = G.config.keepScreen;
+        G.saveConfig(); G.playTick();
+      });
+    }
+    // 防误触说明块（白卡，图标 + 文字整体居中）
+    {
+      const fw = (bw - gapB) / 2;
+      const tx = bx + fw + gapB;
+      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, tx, fy, fw, fh, 12); ctx.fill(); ctx.stroke();
+      const iy = fy + fh / 2;
+      ctx.font = "bold 15px sans-serif";
+      const tw = ctx.measureText("防误触说明").width;
+      const gx = tx + (fw - (22 + 12 + tw)) / 2;   // 图标22 + 间距12 + 文字，整组居中
+      const ix = gx + 11;
+      ctx.fillStyle = C.teal; ctx.beginPath(); ctx.arc(ix, iy, 11, 0, Math.PI * 2); ctx.fill();
+      text("?", ix, iy, "bold 15px sans-serif", "#fff");
+      text("防误触说明", gx + 34, iy, "bold 15px sans-serif", C.teal, "left");
+      btn(tx, fy, fw, fh, () => { try { G.platform.antiGuide(() => {}); } catch (e) {} });
+    }
+
+    // 联系客服 / 分享给好友 / 返回（主按钮带柔和投影）
     ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx, by, halfW, 50, 14); ctx.fill(); ctx.stroke();
-    text("联系客服", bx + halfW / 2, by + 25, "bold 16px sans-serif", C.ink);
-    btn(bx, by, halfW, 50, () => G.platform.openSupport());
-    const bx2 = bx + halfW + 12;
-    const bg = ctx.createLinearGradient(bx2, by, bx2, by + 50);
+    G.rr(ctx, bx, by, cw, bh, 13); ctx.fill(); ctx.stroke();
+    text("联系客服", bx + cw / 2, by + bh / 2, "bold 15px sans-serif", C.ink);
+    btn(bx, by, cw, bh, () => G.platform.openSupport());
+    // 分享给好友：无本局结果时回落「猫档案」测评图，带我家猫的战绩邀请好友来比
+    const bx2 = bx + cw + gapB;
+    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+    G.rr(ctx, bx2, by, cw, bh, 13); ctx.fill(); ctx.stroke();
+    text("分享给好友", bx2 + cw / 2, by + bh / 2, "bold 15px sans-serif", C.teal);
+    btn(bx2, by, cw, bh, () => { try { G.shareInvite("settings"); } catch (e) {} });
+    // 返回
+    const bx3 = bx2 + cw + gapB;
+    ctx.save();
+    ctx.shadowColor = "rgba(20,160,147,.35)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 5;
+    const bg = ctx.createLinearGradient(bx3, by, bx3, by + bh);
     bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
-    ctx.fillStyle = bg; ctx.strokeStyle = C.startInner; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx2, by, halfW, 50, 14); ctx.fill(); ctx.stroke();
-    text("返回", bx2 + halfW / 2, by + 25, "bold 18px sans-serif", "#fff");
-    btn(bx2, by, halfW, 50, () => { G.screen = "home"; });
+    ctx.fillStyle = bg; G.rr(ctx, bx3, by, cw, bh, 13); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = C.startInner; ctx.lineWidth = 1.2; G.rr(ctx, bx3, by, cw, bh, 13); ctx.stroke();
+    text("返回", bx3 + cw / 2, by + bh / 2, "bold 17px sans-serif", "#fff");
+    btn(bx3, by, cw, bh, () => { G.screen = "home"; });
   };
 
   /* ================= 记录 ================= */
@@ -595,7 +813,7 @@ module.exports = function (G) {
         ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
         G.rr(ctx, x, y, colW, 44, 12); ctx.fill(); ctx.stroke();
         text(L.date || "-", x + 12, y + 22, "13px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光" }[L.type] || "";
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
         text(typeName, x + 62, y + 22, "13px sans-serif", C.ink3, "left");
         text("捕获 " + (L.hits || 0), x + colW * 0.44, y + 22, "bold 14px sans-serif", C.amberDeep, "left");
         text("命中 " + (L.accuracy || 0) + "%", x + colW * 0.64, y + 22, "13px sans-serif", C.tealDeep, "left");
@@ -609,7 +827,7 @@ module.exports = function (G) {
         ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
         G.rr(ctx, edgeL, y, availW, 44, 12); ctx.fill(); ctx.stroke();
         text(L.date || "-", edgeL + 16, y + 22, "13px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光" }[L.type] || "";
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
         text(typeName, edgeL + 90, y + 22, "13px sans-serif", C.ink3, "left");
         text("捕获 " + (L.hits || 0), edgeL + availW * 0.42, y + 22, "bold 14px sans-serif", C.amberDeep, "left");
         text("命中 " + (L.accuracy || 0) + "%", edgeL + availW * 0.60, y + 22, "13px sans-serif", C.tealDeep, "left");
@@ -747,16 +965,18 @@ module.exports = function (G) {
     ctx.globalAlpha = dim;
     const hx = safe.left, hy = safe.top + 4;
     const PH2 = Math.round(28 * ks);   // 统一药丸高度
+    const infinite = !!S.infinite;
     const m = String(Math.max(Math.floor(S.remaining / 60), 0)).padStart(2, "0");
     const s = String(Math.max(S.remaining % 60, 0)).padStart(2, "0");
-    const urgent = S.remaining <= 10 && S.remaining > 0;
+    const timeTxt = infinite ? "∞" : (m + ":" + s);
+    const urgent = !infinite && S.remaining <= 10 && S.remaining > 0;
     ctx.fillStyle = urgent ? C.hudUrgent : C.hudBg;
     ctx.strokeStyle = "rgba(255,255,255,.18)";
     ctx.lineWidth = 1.2;
-    // 倒计时药丸（70×28 × ks）
+    // 倒计时药丸（无限模式显示 ∞）
     const wTime = Math.round(70 * ks);
     G.rr(ctx, hx + 10, hy, wTime, PH2, Math.round(9 * ks)); ctx.fill(); ctx.stroke();
-    text(m + ":" + s, hx + 10 + wTime / 2, hy + PH2 / 2 + 1, "bold " + Math.round(15 * ks) + "px sans-serif", urgent ? "#ffd7d7" : "#fff");
+    text(timeTxt, hx + 10 + wTime / 2, hy + PH2 / 2 + 1, "bold " + Math.round(15 * ks) + "px sans-serif", urgent ? "#ffd7d7" : "#fff");
     // 捕获数药丸（64×28 × ks）
     const wHit = Math.round(64 * ks);
     const xHit = hx + 10 + wTime + 8;
@@ -807,7 +1027,7 @@ module.exports = function (G) {
         if (px < hx + 26 + 184 * ks + 16) { px = W - safe.right - pw2 - 8; py = menu.bottom + 8; }
       } else {
         px = W - safe.right - pw2 - 8;
-        py = menu.bottom + 8;
+        py = Math.max(menu.bottom + 8, safe.top + 6);   // 竖屏防御：刘海/状态栏下方，不钻进安全区
       }
     } else {
       px = W - safe.right - 52; py = hy;
@@ -850,6 +1070,9 @@ module.exports = function (G) {
     text(String(Math.ceil(c)), 0, 0, "bold 96px sans-serif", "#fff");
     ctx.restore();
     text("准备……", W / 2, H * 0.42 + 110, "18px sans-serif", "rgba(255,255,255,.85)");
+    // 鱼玩法：开局亮出本局海域主题名（每局自动轮换）
+    const sea = G.config.targetType === "fish" && G.session.sea;
+    if (sea) text("本局海域 · " + sea.name, W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
   };
 
   /* ================= 暂停 ================= */
@@ -883,8 +1106,9 @@ module.exports = function (G) {
     const { W, H, land, m, gap, safe } = layout();
     const innerH = H - safe.top - safe.bottom;
     const R = G.result || {};
-    // 模式名：结算页标题要标出这一局选的是哪种玩法
-    const modeName = (MODES.find(md => md.key === G.config.targetType) || {}).name || "";
+    // 模式名：结算页标题要标出这一局选的是哪种玩法（鱼玩法再带海域主题名）
+    const seaName = G.config.targetType === "fish" && G.session.sea ? " · " + G.session.sea.name : "";
+    const modeName = ((MODES.find(md => md.key === G.config.targetType) || {}).name || "") + seaName;
     // 背景半透明：下层是当前玩法的场景（由 game.js 在结算时绘制），透出来才能看出是哪个模式。
     // 蒙版从 .76 降到 .50 一档——之前场景几乎被洗白，截图存图后看不出玩法差异。
     // 文字可读性不再靠压低透明度，改由「标题区柔光 + 文字白描边」解决，见下。
@@ -962,7 +1186,7 @@ module.exports = function (G) {
       ctx.fillStyle = bg;
       G.rr(ctx, leftX, by, bw, 46, 14); ctx.fill();
       text("再来一局", leftX + bw / 2, by + 23, "bold 17px sans-serif", "#fff");
-      btn(leftX, by, bw, 46, () => G.startGame());
+      btn(leftX, by, bw, 46, () => G.requestStart());
       // 晒给猫友：分享带「猫咪反应测评图」，而不是"我得了 X 分"
       const x2 = leftX + bw + gap;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
@@ -1024,7 +1248,7 @@ module.exports = function (G) {
       ctx.fillStyle = bg;
       G.rr(ctx, edgeL, by1, bw2, bh2, 14); ctx.fill();
       text("再来一局", edgeL + bw2 / 2, by1 + bh2 / 2, "bold 18px sans-serif", "#fff");
-      btn(edgeL, by1, bw2, bh2, () => G.startGame());
+      btn(edgeL, by1, bw2, bh2, () => G.requestStart());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
       G.rr(ctx, rx, by1, bw2, bh2, 14); ctx.fill(); ctx.stroke();
       text("晒给猫友", rx + bw2 / 2, by1 + bh2 / 2, "bold 17px sans-serif", C.teal);

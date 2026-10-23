@@ -13,20 +13,31 @@ module.exports = function (G) {
   const ctx = canvas.getContext("2d");
 
   function computeSafe(s) {
-    const area = s.safeArea || { left: 0, top: 0, right: s.windowWidth, bottom: s.windowHeight };
-    let left = Math.max(0, area.left);
-    let top = Math.max(0, area.top);
-    let right = Math.max(0, s.windowWidth - area.right);
-    let bottom = Math.max(0, s.windowHeight - area.bottom);
-    /* 安全区合法性校验：部分安卓机在横屏锁定的小游戏里，safeArea 返回的是【竖屏坐标系】的值
-       （right≈竖屏屏宽、top≈状态栏高）。windowWidth=780(横屏) 时算出 safe.right=780-390=390，
-       整个 UI 会被压进屏幕左半边（首页标题/模式卡/按钮全部挤在左侧 45%）。
-       横屏下左右安全区（刘海）物理上不可能超过屏宽 25%、上下不超过屏高 25%，
-       超限的值一律视为脏数据按 0 处理。 */
-    if (left > s.windowWidth * 0.25) left = 0;
-    if (right > s.windowWidth * 0.25) right = 0;
-    if (top > s.windowHeight * 0.25) top = 0;
-    if (bottom > s.windowHeight * 0.25) bottom = 0;
+    const W = s.windowWidth || 0, H = s.windowHeight || 0;
+    const area = s.safeArea || { left: 0, top: 0, right: W, bottom: H };
+    let left = area.left, top = area.top, right = W - area.right, bottom = H - area.bottom;
+
+    /* 坐标系一致性归一：部分机型（尤其 iOS 横屏锁定 + 从后台切回 onShow）回传的是【竖屏坐标系】的
+       safeArea —— top≈状态栏高(47)、right≈竖屏屏宽，但 windowWidth/Height 已是横屏。
+       直接用会导致「重新进入小程序后首页整体被靠下」（所有界面的顶部基准都是 safe.top），
+       且左右 inset 也不对。
+       判据：横屏(W≥H)下可见区宽度 saW 应接近屏宽 W；若 saW 更接近屏高 H（说明 safeArea 是
+       竖屏坐标套在横屏屏上），按右转 90° 旋转到横屏：
+         竖屏 top(刘海) → 横屏 right(灵动岛)，竖屏 bottom(底条) → 横屏 left，
+         竖屏 left/right → 横屏 bottom/top。 */
+    const saW = area.right - area.left;
+    if (W >= H && saW > 0 && Math.abs(saW - W) > W * 0.3 && Math.abs(saW - H) <= H * 0.5) {
+      const vL = area.left, vT = area.top;
+      const vR = Math.max(0, H - area.right), vB = Math.max(0, W - area.bottom);
+      left = Math.max(0, vB); top = Math.max(0, vR);
+      right = Math.max(0, vT); bottom = Math.max(0, vL);
+    }
+
+    /* 阈值兜底：任何边超过屏宽/高 25% 视为脏值清零（防极端机型；横屏下刘海/圆角物理不可能超此值） */
+    if (left > W * 0.25) left = 0;
+    if (right > W * 0.25) right = 0;
+    if (top > H * 0.25) top = 0;
+    if (bottom > H * 0.25) bottom = 0;
     return { left, top, right, bottom };
   }
   const safe = computeSafe(sys);
@@ -48,7 +59,7 @@ module.exports = function (G) {
     safe,
     menu: getMenu(),
     resizeCb: [],
-    onTouchStart: null, onTouchEnd: null,
+    onTouchStart: null, onTouchEnd: null, onTouchMove: null,
     storage: {
       get(key) {
         try { return wx.getStorageSync(key); } catch (e) { return ""; }
@@ -74,6 +85,26 @@ module.exports = function (G) {
       if (!G.config || G.config.vibrate) { try { wx.vibrateShort({ type: "heavy" }); } catch (e) {} }
     },
     keepScreen(on) { try { wx.setKeepScreenOn({ keepScreenOn: !!on }); } catch (e) {} },
+    /* 防误触引导：首次进入游戏弹一次，教用户开启系统级防误触（微信内无法拦截系统手势，
+       只能靠 iOS 引导式访问 / 安卓防误触模式）。done 回调里继续开始游戏（弹窗期间不倒计时）。 */
+    antiGuide(done) {
+      const run = () => { try { done && done(); } catch (e) {} };
+      try {
+        if (typeof wx.showModal !== "function") { run(); return; }
+        const lines = [
+          "猫玩时容易误拍到屏幕边缘，把游戏退出来。建议先开启手机防误触：",
+          "· iPhone：设置 → 辅助功能 → 引导式访问，开启后进入游戏连按三次侧边/Home 键即可锁定当前界面，猫怎么拍都不会退出。",
+          "· 安卓：设置 → 辅助功能 → 防误触 / 手套模式（或「数字健康」→ 专注模式）。"
+        ];
+        if (this.keepScreen) lines.push("已为你开启屏幕常亮，猫玩多久都不会自动锁屏。");
+        wx.showModal({
+          title: "开启防误触，猫玩更尽兴",
+          content: lines.join("\n"),
+          showCancel: false, confirmText: "知道了",
+          success: run, fail: run
+        });
+      } catch (e) { run(); }
+    },
     /* 好友排行榜：把单局最高捕获写入关系链 KV（仅开放数据域可读） */
     reportBest(v) {
       try {
@@ -172,6 +203,7 @@ module.exports = function (G) {
     } catch (e) {}
   });
   wx.onTouchStart && wx.onTouchStart(e => { if (P.onTouchStart) P.onTouchStart(e); });
+  wx.onTouchMove && wx.onTouchMove(e => { if (P.onTouchMove) P.onTouchMove(e); });
   wx.onTouchEnd && wx.onTouchEnd(e => { if (P.onTouchEnd) P.onTouchEnd(e); });
   /* 前后台切换钩子：业务侧用来自动暂停、补埋点 */
   wx.onHide && wx.onHide(() => { P.hideCb.forEach(f => { try { f(); } catch (e) {} }); });

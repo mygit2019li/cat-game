@@ -151,10 +151,10 @@ function mkPage(browser, errs, tag, vp) {
     await page.close();
   }
 
-  /* ---------- 4. 四种玩法完整一局：阶段推进 + 暂停恢复 + 结算 ---------- */
+  /* ---------- 4. 五种玩法完整一局：阶段推进 + 暂停恢复 + 结算 ---------- */
   {
     R.playthrough = {};
-    for (const mode of ["fish", "butterfly", "mouse", "laser"]) {
+    for (const mode of ["fish", "butterfly", "mouse", "laser", "pool"]) {
       const page = await mkPage(browser, errs, "play-" + mode);
       const before = errs.length;
       const stages = [];

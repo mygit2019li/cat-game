@@ -32,15 +32,19 @@ module.exports = function (G) {
       if (type === "fish") {
         this.pickFishSpecies(forcedSpecies);
       }
-      if (type === "laser") {
-        // 加权随机花色：红色为主，翠绿光点更快更小（约 1/4 概率）
-        const lpool = [];
-        G.LASER_VARIANTS.forEach(v => { for (let i = 0; i < (v.w || 1); i++) lpool.push(v); });
-        this.laserVar = lpool[Math.floor(rand(0, lpool.length))];
-        this.speciesSpeed = this.laserVar.speed;                  // 速度倍率（绿色 1.5）
-        if (this.laserVar.size !== 1) {                           // 花色体型差异
-          this.baseW = Math.round(this.baseW * this.laserVar.size);
-          this.baseH = Math.round(this.baseH * this.laserVar.size);
+      if (type === "laser" || type === "pool") {
+        if (type === "laser") {
+          // 加权随机花色：红色为主，翠绿光点更快更小（约 1/4 概率）
+          const lpool = [];
+          G.LASER_VARIANTS.forEach(v => { for (let i = 0; i < (v.w || 1); i++) lpool.push(v); });
+          this.laserVar = lpool[Math.floor(rand(0, lpool.length))];
+          this.speciesSpeed = this.laserVar.speed;                  // 速度倍率（绿色 1.5）
+          if (this.laserVar.size !== 1) {                           // 花色体型差异
+            this.baseW = Math.round(this.baseW * this.laserVar.size);
+            this.baseH = Math.round(this.baseH * this.laserVar.size);
+          }
+        } else {
+          this.speciesSpeed = 1.1;                                  // 水面光斑：整体比激光再快一档
         }
         this.state = "dart"; this.stateT = 0; this.stateDur = 1.2;
         this.vx = 1; this.vy = 0;
@@ -91,19 +95,27 @@ module.exports = function (G) {
     /* 抽取鱼品种（forced 指定品种用于开局去重；复活/补点时重抽保证一局内种类丰富） */
     pickFishSpecies(forced) {
       this.species = forced || G.FISH_SPECIES[Math.floor(rand(0, G.FISH_SPECIES.length))];
-      this.speciesSpeed = this.species.speed;
+      // 海域主题游速差异（只乘游速不动命中盒：深海慢幽、冰海快滑）
+      this.speciesSpeed = this.species.speed * ((G.seaThemeNow && G.seaThemeNow().speed) || 1);
       this.baseW = this.species.w || this.def.w;
       this.baseH = this.species.h || this.def.h;
-      this.cruiser = Math.random() < (this.species.speed >= 1.2 ? 0.55 : 0.22);
+      // Peppy Cat 式行为个性：有 behavior 的品种不走"平稳巡游"（cruiser），统一交给行为层管节奏
+      this.behavior = this.species.behavior || null;
+      this.cruiser = this.behavior ? false : Math.random() < (this.species.speed >= 1.2 ? 0.55 : 0.22);
       const variants = this.species.variants || [{}];
       this.speciesColors = variants[Math.floor(rand(0, variants.length))];
       this.speciesBurst = this.species.burst || 3.1;          // 品种冲刺爆发
       this.dartMul = this.species.dartMul || 1;               // 品种冲刺频率
       this.speciesScale = (this.species.w || 120) / 120;      // 品种视觉尺寸（命中盒用 baseW）
+      // 行为状态（hop 的绒线拖尾/弹跳相位；stalk 的潜伏节奏；zigzag 的转向计时）
+      this.behT = rand(0.5, 1.4);
+      this.stalking = true; this.stalkT = rand(0.8, 1.8);
+      this.hopPhase = rand(0, Math.PI * 2); this.hopCyc = null; this.hopOff = 0;
+      this.trail = []; this.yarnAcc = 0;
     }
     applySize() {
       const S = G.platform.S || 1;
-      const isLaser = this.type === "laser";
+      const isLaser = this.type === "laser" || this.type === "pool";
       const big = Math.min(1 + (S - 1) * (isLaser ? 0.8 : 0.45), isLaser ? 1.7 : 1.3);
       // 小屏（S<1.15，典型手机尺寸）紧凑系数：鱼和老鼠略缩小，鱼额外收窄横向比例（sx），
       // 避免"又大又胖"；iPad 等大屏（S≥1.15）完全不受影响
@@ -125,7 +137,7 @@ module.exports = function (G) {
       this.wagDur = 0.5;
       this.dartCd = rand(this.def.dartMin, this.def.dartMax) * (this.dartMul || 1);
       this.burstT = 0;
-      if (this.type === "laser") {
+      if (this.type === "laser" || this.type === "pool") {
         const s0 = this.laserSpot();
         this.x = s0.x; this.y = s0.y;
         this.baseY = this.y;
@@ -174,7 +186,73 @@ module.exports = function (G) {
       this.dartCd = rand(this.def.dartMin, this.def.dartMax) * (this.dartMul || 1);
       if (this.stage === 3) this.newWaypoint();
     }
+    /* ============ Peppy Cat 式行为个性（只调节奏/轨迹/拖尾，不动命中盒） ============
+       pulse  忽快忽慢（金鱼/锦鲤）   zigzag 突然转向（神仙鱼/小丑鱼/沙丁鱼）
+       hop    弹跳+绒线拖尾（河豚）   stalk  潜伏突进（鲨鱼） */
+    behaviorTick(dt, t) {
+      if (!this.behavior) return 1;
+      const b = this.behavior;
+      if (b === "pulse") {
+        // 忽快忽慢：速度在 0.55×~1.6× 间正弦波动，像被逗弄的小鱼一惊一乍
+        return 0.55 + 1.05 * (0.5 + 0.5 * Math.sin(t * 1.15 + this.phase));
+      }
+      if (b === "zigzag") {
+        // 突然转向：周期性甩头换向 + 短促加速（猎物最勾猫的"不可预测"）
+        this.behT -= dt;
+        if (this.behT <= 0) {
+          this.behT = rand(0.8, 1.7);
+          this.burstT = Math.max(this.burstT, 0.32);
+          if (this.stage === 3) this.newWaypoint();
+          else {
+            this.dirX = -(this.dirX || this.faceDir || 1);
+            const b2 = G.bounds();
+            const top = b2.y + this.def.yMin * b2.h, bot = b2.y + this.def.yMax * b2.h;
+            if (this.stage === 2 && this.vAmp) this.midY = clamp(this.midY + rand(-70, 70), top + this.vAmp, bot - this.vAmp);
+            else this.baseY = clamp(this.baseY + rand(-50, 50), top, bot);
+          }
+        }
+        return 1.05;
+      }
+      if (b === "hop") {
+        // 弹跳：垂直起伏（毛线球式）+ 落地涟漪 + 绒线拖尾
+        this.hopPhase += dt * 3.1;
+        const cyc = Math.floor(this.hopPhase / Math.PI);
+        if (this.hopCyc != null && cyc > this.hopCyc && G.session.running) {
+          try { G.ripple(this.x, this.y + this.baseH * 0.4, true); } catch (e) {}
+        }
+        this.hopCyc = cyc;
+        this.hopOff = Math.abs(Math.sin(this.hopPhase)) * 26;
+        this.yarnAcc += dt;
+        if (this.yarnAcc > 0.06) {
+          this.yarnAcc = 0;
+          this.trail.push({ x: this.x, y: this.y - this.hopOff });
+          if (this.trail.length > 14) this.trail.shift();
+        }
+        for (let i = this.trail.length - 1; i >= 0; i--) {
+          this.trail[i].life = (this.trail[i].life || 1) - dt * 1.15;
+          if (this.trail[i].life <= 0) this.trail.splice(i, 1);
+        }
+        return 0.92 + 0.22 * Math.abs(Math.cos(this.hopPhase));
+      }
+      if (b === "stalk") {
+        // 潜伏突进：慢速巡游 2s 上下 → 0.9s 爆发突进，鲨鱼捕猎节奏
+        this.stalkT -= dt;
+        if (this.stalkT <= 0) {
+          if (this.stalking) {
+            this.stalking = false;
+            this.stalkT = rand(0.7, 1.1);
+            this.burstT = Math.max(this.burstT, this.stalkT + 0.25);
+          } else {
+            this.stalking = true;
+            this.stalkT = rand(1.6, 2.8);
+          }
+        }
+        return this.stalking ? 0.58 : 1.25;
+      }
+      return 1;
+    }
     warpIn() {
+      if (this.trail) this.trail.length = 0;      // 换位后旧绒线拖尾不能留在原地
       if (this.type === "butterfly") { this.butterflyEnter(); return; }
       const b = G.bounds(), m = 110, FD = 120;
       const top = b.y + this.def.yMin * b.h, bot = b.y + this.def.yMax * b.h;
@@ -242,7 +320,7 @@ module.exports = function (G) {
       this.comboSpeed += ((this.comboSpeedTarget || 1) - this.comboSpeed) * Math.min(1, dt * 6);
       if (this.type === "mouse")   { this.updateMouse(dt, t); return; }
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
-      if (this.type === "laser")   { this.updateLaser(dt, t); return; }
+      if (this.type === "laser" || this.type === "pool") { this.updateLaser(dt, t); return; }
       // ---- 鱼：三阶段 ----
       const d = this.def;
       this.dartCd -= dt; this.burstT -= dt;
@@ -253,7 +331,8 @@ module.exports = function (G) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) { this.vanishT = 0; if (this.type === "fish") this.pickFishSpecies(); this.warpIn(); }
       }
-      const sp = d.speed * this.speedMul * this.comboSpeed * this.adaptiveSlow * this.speciesSpeed * (this.cruiser ? 1.5 : 1) * this.stageSpeed * (this.burstT > 0 ? (this.speciesBurst || 3.1) : 1);
+      const behSp = this.behaviorTick(dt, t);   // Peppy Cat 式行为节奏（无 behavior 返回 1）
+      const sp = d.speed * this.speedMul * this.comboSpeed * this.adaptiveSlow * this.speciesSpeed * (this.cruiser ? 1.5 : 1) * this.stageSpeed * behSp * (this.burstT > 0 ? (this.speciesBurst || 3.1) : 1);
       if (this.stage === 1) {
         this.x += this.dirX * sp * dt * MS;
         this.y = this.baseY + Math.sin(t * 2 + this.phase) * 3;
@@ -654,7 +733,7 @@ module.exports = function (G) {
         const y = b.y + rand(0.03, 0.97) * b.h;
         let d = Infinity;
         preys.forEach(q => {
-          if (q !== this && q.type === "laser") d = Math.min(d, Math.hypot(q.x - x, q.y - y));
+          if (q !== this && (q.type === "laser" || q.type === "pool")) d = Math.min(d, Math.hypot(q.x - x, q.y - y));
         });
         if (d >= minDist) return { x, y };
         if (d > bestD) { bestD = d; best = { x, y }; }
@@ -664,13 +743,20 @@ module.exports = function (G) {
     laserTeleport() {
       const s0 = this.laserSpot();
       this.x = s0.x; this.y = s0.y;
-      G.laserFlash(this.x, this.y, this.laserVar && this.laserVar.key);
+      if (this.type === "pool") {
+        // 萤光瞬移：只散几点萤火碎屑，不出冲击环——环留给真实命中（防满屏圆环抢戏）
+        G.sparkBurst(this.x, this.y, "#e8ff9a", 4);
+        G.pollenBurst(this.x, this.y, 3);
+      } else {
+        G.laserFlash(this.x, this.y, this.laserVar && this.laserVar.key);
+      }
       this.laserNewWaypoint();
     }
     updateLaser(dt, t) {
       const d = this.def, b = G.bounds();
+      const isPool = this.type === "pool";
       if (this.stage !== G.session.stage) this.stage = G.session.stage;
-      const P = G.LASER_PARAMS[this.stage] || G.LASER_PARAMS[1];
+      const P = (isPool ? G.POOL_PARAMS : G.LASER_PARAMS)[this.stage] || (isPool ? G.POOL_PARAMS[1] : G.LASER_PARAMS[1]);
       if (this.vanishT > 0) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
@@ -697,9 +783,14 @@ module.exports = function (G) {
           G.playBounce();
           this.wx = this.x + this.vx * 260; this.wy = this.y + this.vy * 260;
         }
-        if (P.trail) {
+        if (P.trail || isPool) {
           this.trailAcc += Math.hypot(this.x - this.lastTrailX, this.y - this.lastTrailY);
-          if (this.trailAcc > 22) { this.trailAcc = 0; G.laserTrail(this.x, this.y, this.laserVar && this.laserVar.key); }
+          if (this.trailAcc > 22) {
+            this.trailAcc = 0;
+            // 水面光斑：掠过留下小水花痕（比激光灼痕更轻，避免满屏脏点）
+            if (isPool) G.laserTrail(this.x, this.y, "pool");
+            else G.laserTrail(this.x, this.y, this.laserVar && this.laserVar.key);
+          }
         }
         this.lastTrailX = this.x; this.lastTrailY = this.y;
         const near = (this.wx - this.x) * (this.wx - this.x) + (this.wy - this.y) * (this.wy - this.y) < 900;
@@ -731,7 +822,8 @@ module.exports = function (G) {
       const fMin = this.type === "butterfly" ? 0.25 : 0.4;
       if (this.fade < fMin) return false;
       const hw = this.baseW * this.sc * (this.sxMul || 1) / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
-      if (Math.abs(x - this.x) > hw || Math.abs(y - this.y) > hh) return false;
+      const cy = this.y - (this.hopOff || 0);       // hop 弹跳偏移：命中跟着视觉走
+      if (Math.abs(x - this.x) > hw || Math.abs(y - cy) > hh) return false;
       if (this.type === "mouse") return (this.state === "peek" || this.state === "dart") && this.lift < 48;
       if (this.type === "butterfly") return this.state !== "TAKEOFF" && this.state !== "STARTLED";
       return true;
@@ -761,11 +853,30 @@ module.exports = function (G) {
         ctx.scale(s, s);
         ctx.translate(-60, -56);
         G.draw.butterfly(ctx, this, t);
-      } else if (this.type === "laser") {
+      } else if (this.type === "laser" || this.type === "pool") {
         ctx.translate(this.x, this.y);
-        G.draw.laser(ctx, this, t);
+        if (this.type === "pool") G.draw.poolLight(ctx, this, t);
+        else G.draw.laser(ctx, this, t);
       } else {
-        ctx.translate(this.x, this.y);
+        // hop 绒线拖尾（毛线球式轨迹）：画在鱼身后面
+        if (this.trail && this.trail.length > 1) {
+          const col = (this.speciesColors && this.speciesColors.fin) || "#d9a83f";
+          ctx.save();
+          ctx.lineCap = "round"; ctx.lineJoin = "round";
+          for (let i = 1; i < this.trail.length; i++) {
+            const a = (this.trail[i].life != null ? this.trail[i].life : 1) * 0.42 * (i / this.trail.length) * (this.fade || 1);
+            if (a <= 0.02) continue;
+            ctx.globalAlpha = clamp(a, 0, 1) * (alpha / Math.max(this.fade, 0.01));
+            ctx.strokeStyle = col;
+            ctx.lineWidth = (1.5 + i * 0.55) * (this.sc || 1);
+            ctx.beginPath();
+            ctx.moveTo(this.trail[i - 1].x, this.trail[i - 1].y);
+            ctx.lineTo(this.trail[i].x, this.trail[i].y);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+        ctx.translate(this.x, this.y - (this.hopOff || 0));
         const s = this.sc * vs * (this.speciesScale || 1);
         ctx.scale(s * (this.def.face ? this.faceDir : 1) * (this.sxMul || 1), s);
         ctx.translate(-60, -36);
@@ -807,6 +918,8 @@ module.exports = function (G) {
       const holeN = (G.scene && G.scene.holes ? G.scene.holes.length : 8);
       return Math.min(base, Math.max(1, holeN - 1));
     }
+    // 水面追光：光斑太多会满屏乱闪，封顶 3→4→5
+    if (G.config.targetType === "pool") return ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3;
     return base;
   };
   G.topUpPreys = () => {

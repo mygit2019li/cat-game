@@ -16,9 +16,9 @@ module.exports = function (G) {
 
   const CW = 750, CH = 600;          // 5:4，微信转发卡片推荐比例
   const TYPE_NAME = {
-    fish: "深海捕鱼", butterfly: "蝴蝶花园", mouse: "捕鼠行动", laser: "激光暗室"
+    fish: "深海捕鱼", butterfly: "蝴蝶花园", mouse: "捕鼠行动", laser: "激光暗室", pool: "暗夜萤光"
   };
-  const TYPE_SHORT = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光" };
+  const TYPE_SHORT = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" };
 
   /* ---------- 绘制小工具（不依赖 G.rr，避免和主 UI 坐标耦合） ---------- */
   function rr(ctx, x, y, w, h, r) {
@@ -276,6 +276,40 @@ module.exports = function (G) {
   };
   G.SHARE_CARD_SIZE = { w: CW, h: CH };
 
+  /* 导出链路：① 同步 toTempFilePathSync  ② toDataURL + writeFileSync 兜底
+     两条都失败才返回 ""，由调用方弹提示 —— 绝不出现"点了没反应"。 */
+  function exportPath() {
+    try {
+      if (offCanvas && typeof offCanvas.toTempFilePathSync === "function") {
+        const p = offCanvas.toTempFilePathSync({
+          x: 0, y: 0, width: CW, height: CH,
+          destWidth: CW, destHeight: CH,
+          fileType: "jpg", quality: 0.92
+        });
+        if (p) return p;
+      }
+    } catch (e) {
+      console.log("[catToy] toTempFilePathSync failed", e && e.message);
+    }
+    // 兜底：部分机型/低版本基础库没有同步导出，用 toDataURL 落盘到用户目录（同样可存相册）
+    try {
+      if (offCanvas && typeof offCanvas.toDataURL === "function"
+        && typeof wx !== "undefined" && typeof wx.getFileSystemManager === "function"
+        && wx.env && wx.env.USER_DATA_PATH) {
+        const url = offCanvas.toDataURL("image/jpeg", 0.92);
+        const b64 = String(url).replace(/^data:image\/\w+;base64,/, "");
+        if (b64.length > 256) {
+          const fp = wx.env.USER_DATA_PATH + "/catToyShare.jpg";
+          wx.getFileSystemManager().writeFileSync(fp, b64, "base64");
+          return fp;
+        }
+      }
+    } catch (e) {
+      console.log("[catToy] toDataURL fallback failed", e && e.message);
+    }
+    return "";
+  }
+
   /* 生成临时图片路径；失败返回 ""。mode: "single" | "archive" */
   G.buildShareCard = (mode) => {
     if (!ensureCanvas()) return "";
@@ -287,77 +321,129 @@ module.exports = function (G) {
       console.log("[catToy] draw card failed", e && e.message);
       return "";
     }
-    // 同步导出优先，低版本基础库回退异步（异步场景下分享会拿不到图，只能退回默认截图）
-    try {
-      if (typeof offCanvas.toTempFilePathSync === "function") {
-        const p = offCanvas.toTempFilePathSync({
-          x: 0, y: 0, width: CW, height: CH,
-          destWidth: CW, destHeight: CH,
-          fileType: "jpg", quality: 0.92
-        });
-        if (p) return p;
-      }
-    } catch (e) {
-      console.log("[catToy] toTempFilePathSync failed", e && e.message);
-    }
-    return "";
+    const p = exportPath();
+    if (!p) console.log("[catToy] export image failed, path empty");
+    return p;
   };
 
-  /* 保存到相册（含授权处理） */
+  /* 保存到相册。
+     ⚠️ 这里不再先调 wx.authorize —— 正式版/隐私指引未过审时它 100% 走 fail，
+     而原来的 fail 是空回调，导致点了"存成图片"毫无反应。
+     流程：首次弹我们的「允许保存」确认框（只问一次，同意后记到本地存储，以后不再问）；
+     之后直接在用户手势里调 saveImageToPhotosAlbum，系统授权框微信自己会弹、且 OS 级会记住。
+     只有 errMsg 表明"用户此前拒绝过"时，才引导去设置页。 */
   G.saveShareCard = () => {
-    const path = G.buildShareCard();
-    const tip = (content) => {
-      try { wx.showModal({ title: "保存图片", content, showCancel: false }); } catch (e) {}
-    };
-    if (!path) { tip("当前环境不支持生成图片，请在手机上再试。"); return; }
+    const st = (G.platform && G.platform.storage) || null;
+    const OK_KEY = "catToyAlbumOk", DENY_KEY = "catToyAlbumDenied";
 
-    const save = () => {
+    // 提示：优先弹窗，弹窗不可用时退回 toast，再不行至少打日志，保证可感知
+    const tip = (content, title) => {
+      console.log("[catToy] save tip:", content);
+      try {
+        if (typeof wx !== "undefined" && typeof wx.showModal === "function") {
+          wx.showModal({ title: title || "保存图片", content: content, showCancel: false });
+        } else if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
+          wx.showToast({ title: content, icon: "none", duration: 2500 });
+        }
+      } catch (e) {}
+    };
+    const busy = (on) => {
+      try {
+        if (typeof wx === "undefined") return;
+        if (on) { if (typeof wx.showLoading === "function") wx.showLoading({ title: "正在生成图片", mask: true }); }
+        else { if (typeof wx.hideLoading === "function") wx.hideLoading(); }
+      } catch (e) {}
+    };
+    // 友好授权确认框：确认→onConfirm（在用户手势内），取消→静默。无 showModal 时直接走 onConfirm。
+    const confirmPopup = (title, content, confirmText, onConfirm, onCancel) => {
+      try {
+        if (typeof wx !== "undefined" && typeof wx.showModal === "function") {
+          wx.showModal({
+            title, content, confirmText,
+            success: (r) => { if (r && r.confirm) onConfirm(); else if (onCancel) onCancel(); }
+          });
+        } else {
+          onConfirm();
+        }
+      } catch (e) { onConfirm(); }
+    };
+
+    busy(true);
+    const path = G.buildShareCard();
+    if (!path) {
+      busy(false);
+      tip("图片生成失败，请更新微信到最新版后重试。");
+      return;
+    }
+
+    const rememberOk = () => { try { st && st.set(OK_KEY, "1"); } catch (e) {} };
+
+    const guideSetting = () => {
+      try {
+        if (typeof wx.openSetting === "function") {
+          wx.showModal({
+            title: "需要相册权限",
+            content: "开启「保存到相册」后，就能把测评图存进相册发朋友圈。",
+            confirmText: "去设置",
+            success: (r) => { if (r && r.confirm) wx.openSetting({}); }
+          });
+        } else {
+          tip("需要相册权限才能保存。请在右上角「···」→「设置」里打开「保存到相册」。");
+        }
+      } catch (e) { tip("需要相册权限才能保存。"); }
+    };
+
+    const doSave = () => {
       try {
         wx.saveImageToPhotosAlbum({
           filePath: path,
-          success: () => { try { wx.showToast({ title: "已存到相册", icon: "success" }); } catch (e) {} },
+          success: () => {
+            busy(false);
+            rememberOk();   // 同意（且系统也授权成功）后记住，下次不再弹我们的确认框
+            try { wx.showToast({ title: "已存到相册", icon: "success" }); } catch (e) {}
+          },
           fail: (err) => {
-            const msg = (err && err.errMsg) || "";
-            // errno 104 / "privacy permission is not authorized" = 后台《用户隐私保护指引》
-            // 里「相册（仅写入）」的用途没填，属配置问题而非代码问题；真机调试看这行日志即可区分。
+            const msg = String((err && err.errMsg) || err || "");
+            busy(false);
             console.log("[catToy] saveAlbum fail:", msg);
-            if (msg.indexOf("auth") >= 0 || msg.indexOf("deny") >= 0) {
-              tip("需要相册权限才能保存。请在右上角「···」→「设置」里打开「保存到相册」。");
-            } else if (msg.indexOf("cancel") < 0) {
-              tip("保存失败，请稍后再试。");
+            // 用户主动取消授权弹窗：不打扰
+            if (msg.indexOf("cancel") >= 0) return;
+            // errno 104 / "privacy permission is not authorized"：
+            //   后台《用户隐私保护指引》里「相册（仅写入）」没填或审核未过，属配置问题。
+            if (msg.indexOf("privacy") >= 0 || msg.indexOf("104") >= 0) {
+              tip("相册权限还没开通成功，通常是《用户隐私保护指引》审核未完成，过一两天再试。", "暂时无法保存");
+              return;
             }
+            // 拒绝过（auth deny / auth denied）：记住，下次直接引导去设置页，不再弹我们的"允许"框
+            if (msg.indexOf("deny") >= 0 || msg.indexOf("refuse") >= 0 || msg.indexOf("unauthor") >= 0) {
+              try { st && st.set(DENY_KEY, "1"); } catch (e) {}
+              guideSetting();
+              return;
+            }
+            tip("保存失败：" + (msg.length > 60 ? msg.slice(-60) : msg));
           }
         });
-      } catch (e) { tip("保存失败，请稍后再试。"); }
+      } catch (e) {
+        busy(false);
+        tip("保存失败，请稍后再试。");
+      }
     };
 
-    try {
-      if (typeof wx.getSetting !== "function") { save(); return; }
-      wx.getSetting({
-        success: (res) => {
-          const auth = (res && res.authSetting) || {};
-          if (auth["scope.writePhotosAlbum"] === true) { save(); return; }
-          if (auth["scope.writePhotosAlbum"] === false) {
-            // 用户此前拒绝过，只能引导去设置页
-            try {
-              wx.showModal({
-                title: "需要相册权限",
-                content: "开启「保存到相册」后就能保存这张测评图。",
-                confirmText: "去设置",
-                success: (r) => { if (r && r.confirm) wx.openSetting({}); }
-              });
-            } catch (e) {}
-            return;
-          }
-          wx.authorize({
-            scope: "scope.writePhotosAlbum",
-            success: save,
-            fail: () => {}
-          });
-        },
-        fail: save
-      });
-    } catch (e) { save(); }
+    // 已同意过 → 直接保存，不再弹确认框；曾拒绝过系统授权 → 直接引导设置，也不重复问
+    let agreed = false, denied = false;
+    try { agreed = st && st.get(OK_KEY) === "1"; denied = st && st.get(DENY_KEY) === "1"; } catch (e) {}
+    if (agreed) { doSave(); return; }
+    if (denied) { busy(false); guideSetting(); return; }
+
+    // 首次：先关掉 loading 再弹我们的友好确认框，避免遮罩盖住弹窗
+    busy(false);
+    confirmPopup(
+      "保存测评图",
+      "把「猫咪反应测评图」存进相册，方便你发朋友圈炫耀～",
+      "允许",
+      doSave,
+      () => {}   // 暂不允许：本次不保存，下次再点仍会问（没同意就不记）
+    );
   };
 
   /* 轻量埋点。两条链路互不相通，事件必须在对应后台各自建一次：

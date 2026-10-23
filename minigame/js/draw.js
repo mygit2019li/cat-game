@@ -593,6 +593,70 @@ module.exports = function (G) {
     }
   };
 
+  /* ---------- 暗夜萤光：发光小兽（Peppy Cat 式橙黄发光体 + 青绿鳍 + 蓝眼点 + 黄绿光晕） ---------- */
+  D.poolLight = (ctx, p, t) => {
+    const panic = G.session && G.session.combo >= 5;
+    const hold = p.state === "hold";
+    const sc = p.sc || 1;
+    const ph = p.ph || 0;
+    const R = 33 * sc;                                  // 视觉半径（命中盒 66）
+    const jitter = panic ? 1.2 * Math.sin(t * 40) : 0;
+    ctx.save();
+    ctx.translate(jitter, jitter * 0.6);
+    ctx.rotate(Math.sin(t * 3.4 + ph) * 0.14);          // 轻微摆动，像活物
+    // 1) 外发光（黄绿，大范围柔和）——暗底上的"发光"感来源
+    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 2.35);
+    glow.addColorStop(0, hold ? "rgba(236,255,150,.68)" : "rgba(220,255,120,.56)");
+    glow.addColorStop(0.42, "rgba(178,240,92,.24)");
+    glow.addColorStop(1, "rgba(150,230,70,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, R * 2.35, 0, Math.PI * 2); ctx.fill();
+    // 2) 青绿鳍/触须（身体后层）：左右各一条弯带 + 底部两只小脚
+    ctx.fillStyle = "#54e0d2";
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.52, -R * 0.34);
+    ctx.quadraticCurveTo(-R * 1.02, -R * 0.10, -R * 0.92, R * 0.52);
+    ctx.quadraticCurveTo(-R * 0.66, R * 0.30, -R * 0.50, R * 0.06);
+    ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(R * 0.52, -R * 0.34);
+    ctx.quadraticCurveTo(R * 1.02, -R * 0.10, R * 0.92, R * 0.52);
+    ctx.quadraticCurveTo(R * 0.66, R * 0.30, R * 0.50, R * 0.06);
+    ctx.closePath(); ctx.fill();
+    // 底部两只小脚
+    ctx.beginPath(); ctx.ellipse(-R * 0.26, R * 0.82, R * 0.14, R * 0.10, 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(R * 0.26, R * 0.82, R * 0.14, R * 0.10, -0.2, 0, Math.PI * 2); ctx.fill();
+    // 3) 身体：上窄下宽的橄榄形，黄→橙→黄渐变
+    const bg = ctx.createLinearGradient(0, -R * 0.95, 0, R * 0.95);
+    bg.addColorStop(0, "#ffe64e");
+    bg.addColorStop(0.42, "#ffb81c");
+    bg.addColorStop(1, "#ffe255");
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.95);
+    ctx.bezierCurveTo(R * 0.60, -R * 0.72, R * 0.66, R * 0.42, R * 0.34, R * 0.80);
+    ctx.quadraticCurveTo(0, R * 0.98, -R * 0.34, R * 0.80);
+    ctx.bezierCurveTo(-R * 0.66, R * 0.42, -R * 0.60, -R * 0.72, 0, -R * 0.95);
+    ctx.closePath(); ctx.fill();
+    // 4) 内部暗橙结构（梭形，像内壳）
+    ctx.fillStyle = "rgba(242,124,16,.55)";
+    ctx.beginPath(); ctx.ellipse(0, R * 0.10, R * 0.26, R * 0.56, 0, 0, Math.PI * 2); ctx.fill();
+    // 5) 深蓝眼点（2 颗，靠顶部）
+    ctx.fillStyle = "#1e46c8";
+    ctx.beginPath(); ctx.arc(-R * 0.21, -R * 0.50, R * 0.105, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(R * 0.21, -R * 0.50, R * 0.105, 0, Math.PI * 2); ctx.fill();
+    // 6) 高光点（顶部受光）
+    ctx.fillStyle = "rgba(255,255,255,.7)";
+    ctx.beginPath(); ctx.ellipse(-R * 0.30, -R * 0.70, R * 0.10, R * 0.16, -0.5, 0, Math.PI * 2); ctx.fill();
+    // 7) 悬停外圈：主要命中窗口的视觉暗示
+    if (hold) {
+      ctx.strokeStyle = "rgba(232,255,160,.85)";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.arc(0, 0, R * 1.55 + Math.sin(t * 8) * 3.5, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  };
+
   /* ---------- 老鼠洞（60×40，碎边 + 渐深 + 抓痕） ---------- */
   D.hole = (ctx, x, y) => {
     ctx.save();
@@ -643,6 +707,9 @@ module.exports = function (G) {
     } else if (type === "laser") {
       const fake = { state: "hold", sc: 1 };
       D.laser(ctx, fake, 0.6);
+    } else if (type === "pool") {
+      const fake = { state: "hold", sc: 1 };
+      D.poolLight(ctx, fake, 0.6);
     }
     ctx.restore();
   };

@@ -9,12 +9,34 @@ module.exports = function (G) {
   G.GAME_NAME = "逗猫触屏玩具";
 
   const DEFAULTS = {
-    targetType: "fish", preyCount: 3, difficulty: "normal", duration: 180,
-    sound: true, vibrate: true, adaptive: true
+    targetType: "fish", preyCount: 3, difficulty: "normal", duration: 180, infinite: false,
+    keepScreen: true,        // 屏幕常亮（给猫玩时不自动锁屏）
+    antiMistouch: true,      // 进入游戏首次弹「系统防误触」引导
+    bg_mouse: "room"         // 捕鼠可选背景（≥2 套时开始前弹选择层）
   };
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
-  const TYPES = ["fish", "butterfly", "mouse", "laser"];
+  const TYPES = ["fish", "butterfly", "mouse", "laser", "pool"];
+
+  /* ===== 可切换背景表 =====
+     某玩法有 ≥2 套背景时，首页点「开始游戏」先弹背景选择层（可左右滑动），
+     只有 1 套的玩法照旧直接开始。新增背景只需在此加一项 + 绘制分支。
+     key 存进 config["bg_<玩法>"]，跨局记忆。 */
+  G.TYPE_BGS = {
+    mouse: [
+      { key: "room",  name: "室内房间", desc: "木地板 · 窗光 · 地毯" },
+      { key: "plaid", name: "格子地毯", desc: "深色格纹 · 荧光猎场" }
+    ]
+  };
+  G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
+  /* 当前玩法生效的背景 key（存储脏值/不存在时回落到第一套） */
+  G.currentBg = () => {
+    const type = G.config.targetType;
+    const arr = G.TYPE_BGS[type];
+    if (!arr || !arr.length) return "default";
+    const k = G.config["bg_" + type];
+    return arr.some(b => b.key === k) ? k : arr[0].key;
+  };
   const DURS = [60, 120, 180, 300];
   function loadConfig() {
     let saved = {};
@@ -23,9 +45,16 @@ module.exports = function (G) {
     const c = Object.assign({}, DEFAULTS, saved);
     c.preyCount = Number(c.preyCount) === 1 ? 1 : 3;   // 两档：单只/多只
     c.sound = !!c.sound; c.vibrate = !!c.vibrate; c.adaptive = !!c.adaptive;
+    c.keepScreen = !!c.keepScreen; c.antiMistouch = !!c.antiMistouch;   // 常亮 / 防误触开关
     if (TYPES.indexOf(c.targetType) < 0) c.targetType = DEFAULTS.targetType;
     const dur = Number(c.duration);
     c.duration = DURS.indexOf(dur) >= 0 ? dur : DEFAULTS.duration;
+    c.infinite = !!c.infinite;   // 无限模式：给猫玩不计时、不中途打断
+    // 背景 key 收敛：只认当前玩法背景表里存在的值，否则回落第一套
+    Object.keys(G.TYPE_BGS).forEach(k => {
+      const arr = G.TYPE_BGS[k];
+      if (!arr || !arr.some(b => b.key === c["bg_" + k])) c["bg_" + k] = arr && arr[0] ? arr[0].key : "";
+    });
     return c;
   }
   G.saveConfig = () => G.platform.storage.set("catToyConfig", JSON.stringify(G.config));
@@ -141,7 +170,8 @@ module.exports = function (G) {
     fish: { 1: "阶段① 小鱼开始逃跑啦", 2: "阶段② 上下游动", 3: "阶段③ 自由游动" },
     mouse: { 1: "阶段① 慢速探头", 2: "阶段② 快速轮换", 3: "阶段③ 闪电地鼠" },
     butterfly: { 1: "阶段① 轻舞飞扬", 2: "阶段② 花间穿梭", 3: "阶段③ 疾风蝶影" },
-    laser: { 1: "阶段① 缓缓游走", 2: "阶段② 快速闪现", 3: "阶段③ 疯狂光点" }
+    laser: { 1: "阶段① 缓缓游走", 2: "阶段② 快速闪现", 3: "阶段③ 疯狂光点" },
+    pool:  { 1: "阶段① 萤火初现", 2: "阶段② 暗夜疾行", 3: "阶段③ 疯狂萤光" }
   };
   G.stageName = (n) => (STAGE_NAME[G.config.targetType] || STAGE_NAME.fish)[n];
 
@@ -150,6 +180,13 @@ module.exports = function (G) {
     1: { hold: [1.0, 1.4], dart: [0.9, 1.6], tele: 0,    trail: false },
     2: { hold: [0.6, 1.0], dart: [0.5, 1.0], tele: 0.12, trail: true },
     3: { hold: [0.4, 0.6], dart: [0.3, 0.7], tele: 0.15, trail: true }
+  };
+  /* 水面追光三阶段：高速掠水（频繁变向）→ 悬停水珠（主要命中窗口）→ 再掠。
+     比激光整体快一档、转向更勤，靠"亮斑+水痕"制造 Peppy Cat 式的高速光点追逐 */
+  G.POOL_PARAMS = {
+    1: { hold: [0.55, 0.9], dart: [0.65, 1.1],  tele: 0.05 },
+    2: { hold: [0.4, 0.68], dart: [0.42, 0.8],  tele: 0.12 },
+    3: { hold: [0.28, 0.5], dart: [0.26, 0.55], tele: 0.18 }
   };
   /* 蝶式飞行参数（最终调优版：中位 235px/s ≈ 基线 2.08×） */
   G.BFLY_PARAMS = {
@@ -222,7 +259,8 @@ module.exports = function (G) {
      key 与 LASER_VARIANTS 对应；spark=命中火花 trail=拖尾 flash=瞬移灼痕亮圈 burn=灼痕底色 */
   G.LASER_COLORS = {
     red:   { spark: "#ff8a8a", trail: "#ff5252", flash: "#ff7a7a", burn: ["#3a0f0a", "rgba(58,15,10,0)"] },
-    green: { spark: "#4ade80", trail: "#4ade80", flash: "#7dffb0", burn: ["#0a3a1f", "rgba(10,58,31,0)"] }
+    green: { spark: "#4ade80", trail: "#4ade80", flash: "#7dffb0", burn: ["#0a3a1f", "rgba(10,58,31,0)"] },
+    pool:  { spark: "#f4ffa8", trail: "#dcff8a", flash: "#f2ffc0", burn: ["#3a2f12", "rgba(58,47,18,0)"] }
   };
   G.laserColorSet = () => G.LASER_COLORS;
   /* 难度（typeSpeed：仅对特定猎物的额外速度倍率——标准/激烈下蝴蝶与老鼠再提速） */
@@ -240,7 +278,9 @@ module.exports = function (G) {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
     mouse:     { w: 116, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
-    laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" }
+    laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
+    /* 水面追光：高亮光斑。命中盒比激光略大（高速目标宽容些），spark 用水花青白 */
+    pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" }
   };
   /* 全局配色：与 H5 原型 CSS 变量 / 场景色严格对齐 */
   G.COLORS = {
@@ -267,6 +307,9 @@ module.exports = function (G) {
      burst：冲刺爆发倍率（默认 3.1）；dartMul：冲刺频率倍率（越小越爱冲刺）
      shape：默认通用鱼形；puffer/shark/ray/whale/turtle 走专属矢量绘制
      build：通用鱼形的体型纵向系数（1 = 常规；<1 瘦长鱼雷体；>1 高身鱼）——决定造型，不影响命中盒
+     behavior：Peppy Cat 式行为个性（参考其玩具的运动效果）——只调节奏/轨迹，不动命中盒
+       "pulse" 忽快忽慢 | "zigzag" 突然转向 | "hop" 弹跳（毛线球式落地涟漪+绒线拖尾） | "stalk" 潜伏突进
+       无 behavior 的品种保持平稳巡游（乌龟/鲸鱼/魔鬼鱼），形成节奏对比
      与 H5 原型同构，每个品种支持 1~2 组色（随机取一组） */
   G.FISH_SPECIES = [
     { key: "turtle",  name: "乌龟",   speed: 0.5,  w: 118, h: 78, shape: "turtle", burst: 2.4, dartMul: 1.5,
@@ -274,7 +317,7 @@ module.exports = function (G) {
         { body: "#3f9161", belly: "#bfe0c2", fin: "#7cc291", accent: "#2c6b47", pattern: "scutes" },
         { body: "#6f7d3f", belly: "#d5dcae", fin: "#94b463", accent: "#c0392b", pattern: "scutes" }
       ] },
-    { key: "puffer",  name: "河豚",   speed: 0.55, w: 104, h: 92, shape: "puffer",  dartMul: 1.3,
+    { key: "puffer",  name: "河豚",   speed: 0.55, w: 104, h: 92, shape: "puffer",  dartMul: 1.3, behavior: "hop",
       variants: [
         { body: "#e8c46a", belly: "#fbf0cf", fin: "#d9a83f", accent: "#8a6a24", pattern: "spots" }
       ] },
@@ -283,16 +326,16 @@ module.exports = function (G) {
         { body: "#6d8fb0", belly: "#e2edf5", fin: "#56789a", accent: "#3d5a78", pattern: null },
         { body: "#7a8a99", belly: "#eef3f6", fin: "#5d6f80", accent: "#42556a", pattern: null }
       ] },
-    { key: "gold",    name: "金鱼",   speed: 0.7,  w: 110, h: 82, build: 1.2,
+    { key: "gold",    name: "金鱼",   speed: 0.7,  w: 110, h: 82, build: 1.2, behavior: "pulse",
       variants: [{ body: "#ff8c42", belly: "#ffcaa2", fin: "#ff6b2e", accent: "#d94f26", pattern: null }] },
-    { key: "angel",   name: "神仙鱼", speed: 0.75, w: 106, h: 86, build: 1.32,
+    { key: "angel",   name: "神仙鱼", speed: 0.75, w: 106, h: 86, build: 1.32, behavior: "zigzag",
       variants: [{ body: "#ffd94d", belly: "#fff4c8", fin: "#ffb02e", accent: "#3a3428", pattern: "stripes" }] },
-    { key: "koi",     name: "锦鲤",   speed: 0.85, w: 128, h: 64, build: 0.85,
+    { key: "koi",     name: "锦鲤",   speed: 0.85, w: 128, h: 64, build: 0.85, behavior: "pulse",
       variants: [
         { body: "#ff9a4d", belly: "#ffe3bd", fin: "#ff7c33", accent: "#e8542f", pattern: "spots" },
         { body: "#f2f5f7", belly: "#ffffff", fin: "#ffd9a8", accent: "#ff6b3d", pattern: "spots" }
       ] },
-    { key: "clown",   name: "小丑鱼", speed: 1.0,  w: 106, h: 48, build: 0.78,
+    { key: "clown",   name: "小丑鱼", speed: 1.0,  w: 106, h: 48, build: 0.78, behavior: "zigzag",
       variants: [
         { body: "#ff7a3d", belly: "#ffb27e", fin: "#ff6a2a", accent: "#ffffff", pattern: "stripes" }
       ] },
@@ -300,12 +343,12 @@ module.exports = function (G) {
       variants: [
         { body: "#5b7fa6", belly: "#e8f1f7", fin: "#4a6c90", accent: "#31485f", pattern: null }
       ] },
-    { key: "shark",   name: "鲨鱼",   speed: 1.2,  w: 168, h: 86, shape: "shark", burst: 3.5, dartMul: 1.25,
+    { key: "shark",   name: "鲨鱼",   speed: 1.2,  w: 168, h: 86, shape: "shark", burst: 3.5, dartMul: 1.25, behavior: "stalk",
       variants: [
         { body: "#8fa3ad", belly: "#e9eef0", fin: "#6f848f", accent: "#4c5f68", pattern: null },
         { body: "#7d95b5", belly: "#e5edf5", fin: "#617a9b", accent: "#3f5470", pattern: null }
       ] },
-    { key: "sardine", name: "沙丁鱼", speed: 1.45, w: 124, h: 41, build: 0.55, burst: 3.6, dartMul: 0.8,
+    { key: "sardine", name: "沙丁鱼", speed: 1.45, w: 124, h: 41, build: 0.55, burst: 3.6, dartMul: 0.8, behavior: "zigzag",
       variants: [
         { body: "#9fc4d8", belly: "#eaf6fb", fin: "#7fa8c0", accent: "#4f7d99", pattern: null },
         { body: "#a9d2c9", belly: "#edfaf4", fin: "#84b9ac", accent: "#5d9488", pattern: null }
@@ -318,6 +361,30 @@ module.exports = function (G) {
     { min: 10, speed: 1.25, size: 0.92, hint: "猎物越来越快！" },
     { min: 15, speed: 1.45, size: 0.85, hint: "极限追猎！" }
   ];
+
+  /* 鱼玩法海域主题：每局自动轮换（换背景 + 专属环境/命中特效 + 轻微节奏差异）。
+     speed 只乘游速（不碰命中盒，鱼 w/h 已校准勿动）；
+     decor=装饰类型（buildScene/drawSea 分支）；amb=环境粒子类型（fx.update 分支）。 */
+  G.SEA_THEMES = [
+    { key: "reef",  name: "珊瑚海",   speed: 1,    spark: "#ffd76a", ripple: "rgba(255,255,255,.85)",
+      bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e", decor: "coral",  amb: "bubble" },
+    { key: "abyss", name: "深海荧光", speed: 0.92, spark: "#7fe7ff", ripple: "rgba(127,231,255,.85)",
+      bg: ["#0b2d4e", "#072038", "#041226"], sand: "#1e3d52", decor: "glow",   amb: "plankton" },
+    { key: "ice",   name: "冰海浮冰", speed: 1.08, spark: "#eaf6ff", ripple: "rgba(214,238,255,.85)",
+      bg: ["#5c9cc0", "#3a76a0", "#22557c"], sand: "#8fb4c9", decor: "ice",    amb: "snow" },
+    { key: "kelp",  name: "水草森林", speed: 1,    spark: "#b8f08a", ripple: "rgba(184,240,138,.8)",
+      bg: ["#1a7a5e", "#0f5a48", "#083c34"], sand: "#2e6b52", decor: "kelp",   amb: "spore" }
+  ];
+  /* 每局轮换海域：进度存本地，重启后接着换（不重复刚玩过的） */
+  G.nextSeaTheme = () => {
+    let idx = -1;
+    try { idx = Number(G.platform.storage.get("catToySeaIdx")); } catch (e) {}
+    if (!(idx >= 0 && idx < G.SEA_THEMES.length)) idx = -1;
+    idx = (idx + 1) % G.SEA_THEMES.length;
+    try { G.platform.storage.set("catToySeaIdx", String(idx)); } catch (e) {}
+    return G.SEA_THEMES[idx];
+  };
+  G.seaThemeNow = () => (G.session && G.session.sea) || G.SEA_THEMES[0];
 
   /* 活动区域：与原型一致，并叠加安全区 insets */
   G.bounds = () => {

@@ -40,10 +40,13 @@ initDebug();
 G.shareResult = () => {
   const R = G.result || {};
   const hits = Number(R.hits) || 0;
-  const durMin = Math.max(1, Math.round((Number(G.config.duration) || 180) / 60));
+  const infinite = !!G.config.infinite;
+  const durMin = infinite ? 0 : Math.max(1, Math.round((Number(G.config.duration) || 180) / 60));
   const title = R.title
-    ? "我家猫 " + durMin + " 分钟抓了 " + hits + " 只，评级「" + R.title + "」"
-    : "给你家猫开个 " + durMin + " 分钟的捕猎场，看它能抓几只";
+    ? (durMin ? "我家猫 " + durMin + " 分钟抓了 " + hits + " 只，评级「" + R.title + "」"
+              : "我家猫一口气抓了 " + hits + " 只，评级「" + R.title + "」")
+    : (durMin ? "给你家猫开个 " + durMin + " 分钟的捕猎场，看它能抓几只"
+              : "给你家猫开个不限时的捕猎场，看它能抓几只");
   let imageUrl = "";
   try { imageUrl = G.buildShareCard(); } catch (e) {}
   // 属性名与 We分析 后台逐字一致（has_img 蛇形命名），写错不会报错、只会丢字段
@@ -72,7 +75,7 @@ G.shareInvite = (from) => {
   G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=lb" });
 };
 G.platform.initShare(() => ({
-  title: "给你家猫开个 3 分钟的捕猎场：小鱼、蝴蝶、老鼠、光点轮着来",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点轮着来，看它能抓几只",
   query: "from=menu"
 }));
 
@@ -84,20 +87,33 @@ G.startGame = () => {
   S.missStreak = 0; S.dartStreak = 0; S.dartHits = 0;
   S.adaptiveTier = 0; S.comboTier = 0; S.lastTierDropAt = 0;
   S.remaining = Number(G.config.duration) || 180;
+  S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
+  // 鱼玩法：每局轮换海域主题（换背景+专属特效），其他玩法不受影响
+  S.sea = G.config.targetType === "fish" ? G.nextSeaTheme() : null;
   G.buildScene(G.config.targetType);
   G.fx.clear();
   G.buildPreys();
-  G.platform.keepScreen(true);
-  countT = 3; lastInt = -1;
-  G.screen = "counting";
-  G.track("game_start", {
-    mode: G.config.targetType,
-    dur: Number(G.config.duration) || 180,
-    pc: Number(G.config.preyCount) || 3
-  });
+  if (G.config.keepScreen) { G.platform.keepScreen(true); S._keepOn = true; }
+  const beginGame = () => {
+    countT = 3; lastInt = -1;
+    G.screen = "counting";
+    G.track("game_start", {
+      mode: G.config.targetType,
+      dur: G.config.infinite ? 0 : (Number(G.config.duration) || 180),
+      pc: Number(G.config.preyCount) || 3
+    });
+  };
+  // 防误触引导：首局进游戏弹一次系统防误触说明（微信内无法拦截系统手势，只能靠
+  // iOS 引导式访问 / 安卓防误触模式）；弹窗期间不倒计时，看完再开始。
+  if (G.config.antiMistouch && !G.platform.storage.get("catToyAntiShown")) {
+    try { G.platform.storage.set("catToyAntiShown", "1"); } catch (e) {}
+    G.platform.antiGuide(beginGame);
+  } else {
+    beginGame();
+  }
 };
 
 function beginPlay() {
@@ -108,9 +124,85 @@ function beginPlay() {
   G.screen = "playing";
 }
 
+/* ================= 背景选择层（可切换背景的玩法专用） =================
+   有 ≥2 套背景的玩法（当前是捕鼠）点「开始游戏」先弹一层可左右滑动的背景卡，
+   选好再进倒计时；只有 1 套的玩法照旧直接开始，不额外打扰。
+   卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
+G.requestStart = () => {
+  const arr = G.bgsFor(G.config.targetType);
+  if (arr.length > 1) { G.openBgPick(); return; }
+  G.startGame();
+};
+
+G.openBgPick = () => {
+  const arr = G.bgsFor(G.config.targetType);
+  const cur = G.currentBg();
+  G.bgPick = { idx: Math.max(0, arr.findIndex(b => b.key === cur)), off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0 };
+  G.screen = "bgpick";
+};
+
+G.closeBgPick = () => { G.bgPick = null; G.screen = "home"; };
+
+/* 确认背景 → 记住选择（跨局） → 开局 */
+G.confirmBgPick = () => {
+  const type = G.config.targetType;
+  const arr = G.bgsFor(type);
+  const P = G.bgPick;
+  const sel = arr[P ? Math.max(0, Math.min(arr.length - 1, P.idx)) : 0];
+  if (sel) { G.config["bg_" + type] = sel.key; G.saveConfig(); }
+  G.bgPick = null;
+  G.startGame();
+};
+
+function bgPickStep() {
+  const P = G.bgPick;
+  return P && P.cw ? P.cw + P.gap : (G.platform.W || 300) * 0.6;
+}
+G.bgPickTouchStart = (x) => {
+  const P = G.bgPick; if (!P) return;
+  P.drag = true; P.x0 = x; P.moved = 0;
+};
+G.bgPickTouchMove = (x) => {
+  const P = G.bgPick; if (!P || !P.drag) return;
+  const arr = G.bgsFor(G.config.targetType);
+  let d = x - P.x0;
+  P.moved = Math.max(P.moved, Math.abs(d));
+  // 首尾边界：继续往外拖只跟 35%，手感"拉不动"而不是硬顶
+  const step = bgPickStep();
+  const maxScroll = (arr.length - 1) * step;
+  const scroll = P.idx * step - d;
+  if (scroll < 0) d += scroll * 0.65;
+  else if (scroll > maxScroll) d += (scroll - maxScroll) * 0.65;
+  P.off = d;
+};
+G.bgPickTouchEnd = () => {
+  const P = G.bgPick; if (!P) return;
+  P.drag = false;
+  const arr = G.bgsFor(G.config.targetType);
+  const step = bgPickStep();
+  if (Math.abs(P.off) > step * 0.16) {
+    P.idx = Math.max(0, Math.min(arr.length - 1, P.idx + (P.off < 0 ? 1 : -1)));
+  }
+  P.off = 0;
+};
+
 /* ================= 每秒心跳 ================= */
 function tickSecond() {
   const S = G.session;
+  // 无限模式：倒计时仅用于阶段推进，不减到负、不自动结束（给猫玩不中途打断）
+  if (S.infinite) {
+    if (S.remaining > 0) S.remaining--;
+    if (S.remaining < 0) S.remaining = 0;
+    const st = G.stageNow();
+    if (st !== S.stage) {
+      S.stage = st;
+      G.uiFX.stageText = G.stageName(st);
+      G.uiFX.stagePop = 1.6;
+      G.pokeHud();
+      G.topUpPreys();   // 多只蝴蝶/激光：随阶段递增数量（3→5→7）
+    }
+    return;
+  }
   S.remaining--;
   if (S.remaining <= 0) { G.endGame(); return; }
   const st = G.stageNow();
@@ -127,6 +219,7 @@ function tickSecond() {
 G.endGame = (fromPause) => {
   const S = G.session;
   S.running = false;
+  S._keepOn = false;
   G.platform.keepScreen(false);
   const totalHits = S.hits + (S.bonusHits || 0);
   const acc = S.touches > 0 ? Math.min(100, Math.round((totalHits / S.touches) * 100)) : 0;
@@ -149,7 +242,9 @@ G.endGame = (fromPause) => {
   if (totalHits > best) { best = totalHits; G.platform.storage.set("catToyBest", String(best)); }
   G.platform.reportBest(best);
   // 评级（与原型同阈值）
-  const mins = Math.max((Number(G.config.duration) || 180) / 60, 1 / 60);
+  // 真实游玩时长（S.time 在 playing 累加、不含倒计时与暂停）= 累计秒数
+  const playSec = Math.max(S.time, 1 / 60);
+  const mins = Math.max(playSec / 60, 1 / 60);
   const hpm = totalHits / mins;
   const interacted = S.touches >= 8 && (totalHits >= 5 || S.maxCombo >= 3);
   // 累计档案（分享图的"猫档案"维度全从这里取）+ 结束埋点。
@@ -159,17 +254,17 @@ G.endGame = (fromPause) => {
   } catch (e) {}
   G.track("game_end", {
     mode: G.config.targetType,
-    dur: Number(G.config.duration) || 180,
+    dur: G.config.infinite ? 0 : (Number(G.config.duration) || 180),
     hits: totalHits,
     done: fromPause ? 0 : 1,
-    sec: Math.max(0, Math.round((Number(G.config.duration) || 180) - S.remaining))
+    sec: Math.round(playSec)
   });
   let title, desc;
   if (hpm >= 18)      { title = "捕猎大师！"; desc = "这个反应速度，堪称专业级猎手。"; }
   else if (hpm >= 9 || (interacted && hpm >= 6)) { title = "矫健猎手"; desc = "扑击精准、节奏稳健，状态很好。"; }
   else if (hpm >= 3.5 || interacted) { title = "灵巧学徒"; desc = "全程都有参与，正在建立信心。"; }
   else                { title = "慵懒观察员"; desc = "今天兴趣不大？换个猎物类型试试。"; }
-  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : "奖励命中";
+  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "光爆炸裂" : "奖励命中";
   G.result = {
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
     bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
@@ -216,18 +311,21 @@ function onHit(x, y, prey) {
   const isMouse = G.config.targetType === "mouse";
   const isBfly = G.config.targetType === "butterfly";
   const isLaser = G.config.targetType === "laser";
+  const isPool = G.config.targetType === "pool";
   const chasing = isMouse && prey.state === "dart";
   const resting = isBfly && prey.state === "RESTING";
-  const holding = isLaser && prey.state === "hold";
+  const holding = (isLaser || isPool) && prey.state === "hold";
   S.touches++;
   S.hits++;
   S.combo++;
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
   prey.vanish();
-  const sparkC = isLaser
+  const sparkC = isPool
+    ? "#eaf9ff"
+    : isLaser
     ? ((G.laserColorSet && G.laserColorSet())[(prey.laserVar && prey.laserVar.key) || "red"] || {}).spark || "#ff8a8a"
-    : (prey.def.sparkColor || "#ffd76a");
+    : (isMouse || isBfly ? (prey.def.sparkColor || "#ffd76a") : (G.seaThemeNow().spark || prey.def.sparkColor || "#ffd76a"));
   G.sparkBurst(x, y, sparkC, 8);
   if (!isLaser) G.ripple(x, y, false);
   G.plantsStartle(x, y);
@@ -255,6 +353,12 @@ function onHit(x, y, prey) {
       G.pollenBurst(x, y, 7);
       G.playFlutter();
     }
+  } else if (isPool) {
+    // 夸张光爆：连击越高越大（hold 停窗命中也走大光爆）
+    G.splashBurst(x, y, holding || S.combo >= 5);
+    G.playHit(S.combo);
+    G.tone("sine", 1320, 320, 0.12, 0.22);        // 高频"叮"叠加，增强炸裂感
+    if (holding) { S.bonusHits++; G.playMilestone(); }
   } else if (isLaser) {
     G.sparkBurst(x, y, "#ff5252", 8);
     G.scorch(x, y);
@@ -272,6 +376,7 @@ function onHit(x, y, prey) {
   } else {
     if (isMouse) G.floatText(x, y - 20, chasing ? "+2 追击成功！" : "+1 抓住！", chasing ? "big" : "");
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
+    else if (isPool) G.floatText(x, y - 20, holding ? "+2 光爆连击！" : "光爆 +1", holding ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
     else G.floatText(x, y - 20, "+1");
   }
@@ -305,6 +410,11 @@ function onMiss(x, y) {
     });
   }
   else if (G.config.targetType === "butterfly") G.pollenBurst(x, y, 3);
+  else if (G.config.targetType === "pool") {
+    // 拍偏：几点萤火碎屑（明显弱于命中，不抢戏）
+    G.sparkBurst(x, y, "#e8ff9a", 3);
+    G.dustBurst(x, y, 3);
+  }
   else G.bubbleBurst(x, y, 3);
   G.playMiss();
   G.pokeHud();
@@ -320,6 +430,11 @@ G.platform.onTouchStart = (e) => {
   const S = G.platform.S || 1;
   const vx = x / S, vy = y / S;
   G.ensureAudio();
+  if (G.screen === "bgpick") {
+    if (G.hitButton(vx, vy)) return;      // 「开始游戏」/「关闭」按钮
+    G.bgPickTouchStart(vx);               // 卡片画廊：按下即开始跟手（虚拟空间位移）
+    return;
+  }
   if (G.screen === "playing") {
     // 暂停按钮：长按手势（按下开始计时，松手取消；不判 miss 不影响连击）
     const pr = G.ui.pauseRect;
@@ -343,7 +458,16 @@ G.platform.onTouchStart = (e) => {
   if (G.screen === "counting") return;
   G.hitButton(vx, vy);   // 其余界面：按钮优先
 };
+G.platform.onTouchMove = (e) => {
+  const tp = e.touches && e.touches[0] || e.changedTouches && e.changedTouches[0];
+  if (!tp) return;
+  if (G.screen === "bgpick") {
+    const S = G.platform.S || 1;
+    G.bgPickTouchMove(tp.clientX / S);
+  }
+};
 G.platform.onTouchEnd = () => {
+  if (G.screen === "bgpick") { G.bgPickTouchEnd(); return; }
   if (G.pauseHold.active) { G.pauseHold.active = false; G.pauseHold.progress = 0; }   // 未满 600ms：取消，无惩罚
 };
 
@@ -377,6 +501,13 @@ function loop(ts) {
   const S = G.session;
   const t = S.time;
 
+  // 集中收尾：离开游戏态（counting/playing/paused 之外）时关闭屏幕常亮，
+  // 覆盖所有直接 G.screen="home" 的返回路径，避免回首页后仍常亮耗电
+  if (S._keepOn && G.screen !== "counting" && G.screen !== "playing" && G.screen !== "paused") {
+    S._keepOn = false;
+    G.platform.keepScreen(false);
+  }
+
   if (G.screen === "counting") {
     countT -= dt;
     const ci = Math.ceil(countT);
@@ -406,6 +537,10 @@ function loop(ts) {
   // 绘制当前界面
   G.ui.buttons.length = 0;
   if (G.screen === "home") uiScaleCtx(() => G.ui.drawHome());
+  else if (G.screen === "bgpick") {
+    // 背景选择层自带实底，不再叠首页（否则首页标题会与弹层文字叠在一起）
+    uiScaleCtx(() => G.ui.drawBgPick());
+  }
   else if (G.screen === "settings") uiScaleCtx(() => G.ui.drawSettings());
   else if (G.screen === "records") uiScaleCtx(() => G.ui.drawRecords());
   else if (G.screen === "leaderboard") uiScaleCtx(() => G.ui.drawLeaderboard());
@@ -469,6 +604,13 @@ G.platform.hideCb.push(() => {
   if (G.screen === "playing" && G.session.running && !G.session.paused) {
     G.session.paused = true;
     G.screen = "paused";
+  }
+});
+
+/* 回前台：微信可能重置 keepScreenOn 状态，游戏中则重设常亮 */
+G.platform.showCb.push(() => {
+  if (G.session && G.session._keepOn && G.config.keepScreen) {
+    try { G.platform.keepScreen(true); } catch (e) {}
   }
 });
 
