@@ -460,7 +460,7 @@ module.exports = function (G) {
       c.fillStyle = "#0f1410"; c.fillRect(x, y, w, h);
       c.strokeStyle = "rgba(178,206,178,.10)"; c.lineWidth = 1;
       for (let i = -h; i < w + h; i += 8) { c.beginPath(); c.moveTo(x + i, y); c.lineTo(x + i + h, y + h); c.stroke(); }
-      const cell = Math.max(26, Math.round(w / 5));
+      const cell = Math.max(20, Math.round(w / 8));
       for (let ix = 0, gx = x; gx < x + w; ix++, gx += cell) {
         for (let iy = 0, gy = y; gy < y + h; iy++, gy += cell) {
           c.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.35)" : "rgba(150,180,140,.07)";
@@ -487,7 +487,7 @@ module.exports = function (G) {
       c.fillRect(x + w * 0.62, y + h * 0.1, w * 0.24, h * 0.23);
       c.fillStyle = "#2b211a";
       [0.28, 0.62].forEach(f => {
-        c.beginPath(); c.ellipse(x + w * f, y + h * 0.78, w * 0.095, h * 0.065, 0, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.ellipse(x + w * f, y + h * 0.8, w * 0.06, h * 0.045, 0, 0, Math.PI * 2); c.fill();
       });
     }
     c.restore();
