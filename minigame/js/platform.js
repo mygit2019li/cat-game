@@ -53,11 +53,26 @@ module.exports = function (G) {
     return null;
   }
 
+  /* 胶囊矩形归一：部分机型（iOS 横竖屏切换后 / 安卓冷启动瞬间）回传的是【竖屏坐标系】的
+     胶囊位置（与上面 safeArea 同款问题）——横屏下 menu.left 只有 300 左右（贴在"左侧"），
+     drawHud 按它计算暂停按钮位置会误触发"极窄屏降级"，把暂停甩到胶囊下方、与倒计时不同行。
+     校验：胶囊必须贴在右上角区域（横屏 right≥0.7W 且纵向不超过 0.45H；竖屏 bottom≤0.3H），
+     不合规矩按标准边距重建（宽 87 高 32、右距 7；横屏顶距 4，竖屏顶距状态栏+4）。 */
+  function normalizeMenu(r, W, H, safe) {
+    if (!r || !(r.width > 0) || !(r.height > 0)) return null;
+    const land = W >= H;
+    const okLand = land && r.right >= W * 0.7 && r.top >= 0 && r.top <= H * 0.3 && r.bottom <= H * 0.45;
+    const okPort = !land && r.right >= W * 0.7 && r.top >= 0 && r.top <= H * 0.2 && r.bottom <= H * 0.3;
+    if (okLand || okPort) return r;
+    const top = land ? 4 : Math.max(4, (safe ? safe.top : 0) + 4);
+    return { left: W - 94, right: W - 7, top, bottom: top + 32, width: 87, height: 32 };
+  }
+
   const P = {
     canvas, ctx, dpr,
     W: sys.windowWidth, H: sys.windowHeight,
     safe,
-    menu: getMenu(),
+    menu: normalizeMenu(getMenu(), sys.windowWidth, sys.windowHeight, safe),
     resizeCb: [],
     onTouchStart: null, onTouchEnd: null, onTouchMove: null,
     storage: {
@@ -116,6 +131,23 @@ module.exports = function (G) {
       try {
         if (typeof wx.getOpenDataContext === "function") wx.getOpenDataContext().postMessage(msg);
       } catch (e) {}
+    },
+    /* 资源图缓存：loadImage(src) 异步加载并存入 assets[src]（onload 后可直接 drawImage） */
+    assets: {},
+    loadImage(src) {
+      if (!src) return null;
+      if (P.assets[src]) return P.assets[src];
+      try {
+        // 真机 wx 环境用相对包内路径；浏览器垫片（harness 页面在 test/ 下）回退 ../ 前缀
+        const inWx = typeof wx !== "undefined" && wx.createImage;
+        const img = inWx ? wx.createImage() : new Image();
+        img.ok = false;
+        img.onload = () => { img.ok = true; };
+        img.onerror = () => { img.ok = false; };
+        img.src = inWx ? src : "../" + src;
+        P.assets[src] = img;
+        return img;
+      } catch (e) { return null; }
     },
     audioCtx() {
       try { return wx.createWebAudioContext(); } catch (e) { return null; }   // 基础库 <2.19 时静默降级
@@ -196,7 +228,7 @@ module.exports = function (G) {
       const s = wx.getSystemInfoSync();
       P.W = s.windowWidth; P.H = s.windowHeight;
       P.safe = computeSafe(s);
-      P.menu = getMenu();
+      P.menu = normalizeMenu(getMenu(), P.W, P.H, P.safe);
       applySize();
       computeScale();
       P.resizeCb.forEach(f => f());
@@ -217,7 +249,7 @@ module.exports = function (G) {
         ["left", "top", "right", "bottom"].some(k => ns[k] !== P.safe[k]);
       if (changed) {
         P.W = s.windowWidth; P.H = s.windowHeight;
-        P.safe = ns; P.menu = getMenu();
+        P.safe = ns; P.menu = normalizeMenu(getMenu(), P.W, P.H, ns);
         applySize(); computeScale();
         P.resizeCb.forEach(f => { try { f(); } catch (e) {} });
       }

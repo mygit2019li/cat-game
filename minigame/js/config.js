@@ -12,21 +12,50 @@ module.exports = function (G) {
     targetType: "fish", preyCount: 3, difficulty: "normal", duration: 180, infinite: false,
     keepScreen: true,        // 屏幕常亮（给猫玩时不自动锁屏）
     antiMistouch: true,      // 进入游戏首次弹「系统防误触」引导
-    bg_mouse: "room"         // 捕鼠可选背景（≥2 套时开始前弹选择层）
+    sound: true,             // 音效默认开
+    vibrate: true,           // 震动默认开
+    adaptive: true,          // 自适应辅助默认开（猫更容易抓到）
+    bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
+    bg_fish: "kelp"          // 捕鱼可选海域（水草森林 / 泳池追鱼）
   };
+  /* ===== 召唤猫咪：按性格归类（小字为该性格的代表品种）=====
+     img 为真实猫咪照片（assets/cats/），audioPath 为本地真实喵叫（assets/audio/）：
+     由用户提供的四段实拍视频（懒惰/活泼/温柔/高冷.mp4）提取音轨，去首尾静音后
+     循环平铺到 15s 以上（7s/6s 的短素材平铺 3 遍），循环点做 0.15s 交叉淡化，
+     统一响度到 -16 LUFS、96kbps 单声道 —— 音频可直接 loop 无缝续播。
+     mews 为合成"喵"声兜底参数 [起始Hz, 滑向Hz, 时长s]（本地音频不可用时启用），gap 为合成声间隔毫秒 */
+  G.CAT_KINDS = [
+    { key: "lazy",   name: "慵懒慢喵", breed: "橘猫 · 布偶猫", img: "assets/cats/lazy.jpg",
+      color: "#e8944a", audioPath: "assets/audio/cat_lazy.mp3",
+      mews: [[420, 660, 0.7], [380, 600, 0.62]], gap: 700 },
+    { key: "lively", name: "活泼啁啾", breed: "狸花猫 · 奶牛猫", img: "assets/cats/lively.jpg",
+      color: "#c99a5b", audioPath: "assets/audio/cat_lively.mp3",
+      mews: [[900, 1400, 0.3], [950, 1450, 0.28], [880, 1350, 0.3]], gap: 450 },
+    { key: "gentle", name: "温柔软喵", breed: "布偶猫 · 波斯猫", img: "assets/cats/gentle.jpg",
+      color: "#d9b98a", audioPath: "assets/audio/cat_gentle.mp3",
+      mews: [[520, 900, 0.5], [460, 820, 0.45]], gap: 650 },
+    { key: "cool",   name: "高冷轻唤", breed: "俄罗斯蓝猫 · 英短", img: "assets/cats/cool.jpg",
+      color: "#9fb2c4", audioPath: "assets/audio/cat_cool.mp3",
+      mews: [[1300, 1750, 0.16], [1400, 1850, 0.15], [1350, 1800, 0.16], [1450, 1900, 0.18]], gap: 600 }
+  ];
+
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
   const TYPES = ["fish", "butterfly", "mouse", "laser", "pool"];
 
-  /* ===== 可切换背景表 =====
-     某玩法有 ≥2 套背景时，首页点「开始游戏」先弹背景选择层（可左右滑动），
-     只有 1 套的玩法照旧直接开始。新增背景只需在此加一项 + 绘制分支。
-     key 存进 config["bg_<玩法>"]，跨局记忆。 */
+  /* ===== 可切换模式表 =====
+     某玩法有 ≥2 套模式时，首页点「开始游戏」先弹模式选择层（可左右滑动/点按翻页），
+     每套 = 不同布景 + 不同运动规则 + 不同猎物种类；只有 1 套的玩法照旧直接开始。
+     新增模式只需在此加一项 + 绘制分支。key 存进 config["bg_<玩法>"]，跨局记忆。 */
   G.TYPE_BGS = {
     mouse: [
       { key: "room",  name: "室内房间", desc: "木地板 · 窗光 · 地毯" },
-      { key: "plaid", name: "格子地毯", desc: "深色格纹 · 荧光猎场" },
-      { key: "neon",  name: "霓虹格毯", desc: "粗格暗纹 · 彩色光点" }
+      { key: "swarm", name: "群鼠乱窜", desc: "俯视群鼠 · 满屏乱窜" }
+    ],
+    fish: [
+      { key: "kelp", name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
+      { key: "pool", name: "泳池追鱼", desc: "亮蓝池水 · 焦散光网" },
+      { key: "school", name: "鱼群巡游", desc: "深海鱼群 · 结群游动" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
@@ -45,7 +74,13 @@ module.exports = function (G) {
     if (typeof saved !== "object" || Array.isArray(saved)) saved = {};
     const c = Object.assign({}, DEFAULTS, saved);
     c.preyCount = Number(c.preyCount) === 1 ? 1 : 3;   // 两档：单只/多只
-    c.sound = !!c.sound; c.vibrate = !!c.vibrate; c.adaptive = !!c.adaptive;
+    // 音效/震动/自适应辅助默认开启：旧版本存档里是旧逻辑写入的显式 false，
+    // 用 sndV1 标记做一次性迁移（重置为默认开），此后用户在设置里手动关闭的会一直保留
+    if (!saved.sndV1) {
+      c.sound = true; c.vibrate = true; c.adaptive = true; c.sndV1 = 1;
+    } else {
+      c.sound = c.sound !== false; c.vibrate = c.vibrate !== false; c.adaptive = c.adaptive !== false;
+    }
     c.keepScreen = !!c.keepScreen; c.antiMistouch = !!c.antiMistouch;   // 常亮 / 防误触开关
     if (TYPES.indexOf(c.targetType) < 0) c.targetType = DEFAULTS.targetType;
     const dur = Number(c.duration);
@@ -328,17 +363,17 @@ module.exports = function (G) {
         { body: "#7a8a99", belly: "#eef3f6", fin: "#5d6f80", accent: "#42556a", pattern: null }
       ] },
     { key: "gold",    name: "金鱼",   speed: 0.7,  w: 110, h: 82, build: 1.2, behavior: "pulse",
-      variants: [{ body: "#ff8c42", belly: "#ffcaa2", fin: "#ff6b2e", accent: "#d94f26", pattern: null }] },
+      variants: [{ body: "#ff8c42", bodyGrad: ["#ffdd55", "#f5620f"], belly: "#ffcaa2", fin: "#ff6b2e", accent: "#d94f26", pattern: null }] },
     { key: "angel",   name: "神仙鱼", speed: 0.75, w: 106, h: 86, build: 1.32, behavior: "zigzag",
-      variants: [{ body: "#ffd94d", belly: "#fff4c8", fin: "#ffb02e", accent: "#3a3428", pattern: "stripes" }] },
+      variants: [{ body: "#ffd94d", bodyGrad: ["#ffe27a", "#ffa41e"], belly: "#fff4c8", fin: "#ffb02e", accent: "#3a3428", pattern: "stripes" }] },
     { key: "koi",     name: "锦鲤",   speed: 0.85, w: 128, h: 64, build: 0.85, behavior: "pulse",
       variants: [
-        { body: "#ff9a4d", belly: "#ffe3bd", fin: "#ff7c33", accent: "#e8542f", pattern: "spots" },
+        { body: "#ff9a4d", bodyGrad: ["#ffc06a", "#ef5a24"], belly: "#ffe3bd", fin: "#ff7c33", accent: "#e8542f", pattern: "spots" },
         { body: "#f2f5f7", belly: "#ffffff", fin: "#ffd9a8", accent: "#ff6b3d", pattern: "spots" }
       ] },
     { key: "clown",   name: "小丑鱼", speed: 1.0,  w: 106, h: 48, build: 0.78, behavior: "zigzag",
       variants: [
-        { body: "#ff7a3d", belly: "#ffb27e", fin: "#ff6a2a", accent: "#ffffff", pattern: "stripes" }
+        { body: "#ff7a3d", bodyGrad: ["#ffa85c", "#ff5f1f"], belly: "#ffb27e", fin: "#ff6a2a", accent: "#ffffff", pattern: "stripes" }
       ] },
     { key: "ray",     name: "魔鬼鱼", speed: 0.9,  w: 152, h: 70, shape: "ray",  dartMul: 1.15,
       variants: [
@@ -373,9 +408,42 @@ module.exports = function (G) {
       bg: ["#0b2d4e", "#072038", "#041226"], sand: "#1e3d52", decor: "glow",   amb: "plankton" },
     { key: "ice",   name: "冰海浮冰", speed: 1.08, spark: "#eaf6ff", ripple: "rgba(214,238,255,.85)",
       bg: ["#5c9cc0", "#3a76a0", "#22557c"], sand: "#8fb4c9", decor: "ice",    amb: "snow" },
-    { key: "kelp",  name: "水草森林", speed: 1,    spark: "#b8f08a", ripple: "rgba(184,240,138,.8)",
-      bg: ["#1a7a5e", "#0f5a48", "#083c34"], sand: "#2e6b52", decor: "kelp",   amb: "spore" }
+    { key: "kelp",  name: "水草森林", speed: 1,    spark: "#ffd76a", ripple: "rgba(255,255,255,.85)",
+      bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e", decor: "kelp",   amb: "bubble" },
+    { key: "school", name: "鱼群巡游", speed: 1.3, spark: "#ffe9a8", ripple: "rgba(255,255,255,.9)",
+      bg: ["#12406b", "#0c2e50", "#071e38"], sand: "#22405c", decor: "school", amb: "bubble" },
+    { key: "pool",  name: "泳池追鱼", speed: 1.12, spark: "#fff3b0", ripple: "rgba(255,255,255,.9)",
+      bg: ["#2aa4e0", "#1565b5", "#0e4a9e"], sand: "#2c6f9b", decor: "pool",   amb: "bubble" }
   ];
+  /* 泳池追鱼专属鱼种：与深海鱼完全区分——泳池里只有观赏金鱼这一种（贴近真实金鱼），
+     三个色型随机出现；专属造型 shape:"poolGold"（蛋形圆身 + 背深橙到腹浅金纵向渐变 +
+     半透明暖橙鳍 + 鳃盖弧线 + 鳞片纹 + 黑亮圆眼）；136×76、游速偏快 + pulse 忽快忽慢 */
+  G.POOL_FISH_SPECIES = [
+    { key: "poolgold", name: "泳池金鱼", shape: "poolGold", speed: 0.95, w: 136, h: 76, behavior: "pulse",
+      variants: [
+        { body: "#ff8c2b", bodyGrad: ["#ef520f", "#ffdca8"], fin: "#ffb877", accent: "#241a14", pattern: null },
+        { body: "#e8562a", bodyGrad: ["#c9310b", "#ffd0a0"], fin: "#ff9e6e", accent: "#20140f", pattern: null },
+        { body: "#ffb730", bodyGrad: ["#f08c00", "#ffe6b8"], fin: "#ffd08a", accent: "#2a1d12", pattern: null }
+      ] }
+  ];
+  G.POOL_FISH_KEYS = ["poolgold"];
+  /* 鱼群巡游专属鱼种：极小的银蓝"彗星"小鱼（亮头长尾迹，独立表不进深海全表），
+     数量多（36→44→52）聚成"饵球"——鲸鱼捕猎式致密鱼团，整体漂移+球内旋转 */
+  G.SCHOOL_FISH_SPECIES = [
+    { key: "minnow", name: "小银鱼", shape: "minnow", speed: 1.15, w: 52, h: 20, burst: 3.4, dartMul: 0.9,
+      variants: [
+        { body: "#aebfc9", belly: "#eef6fa", fin: "#8fadb8", accent: "#4a7086", pattern: null },
+        { body: "#9fc4d8", belly: "#eaf6fb", fin: "#7fa8c0", accent: "#4f7d99", pattern: null },
+        { body: "#b8cfd6", belly: "#f2fafc", fin: "#93b7c4", accent: "#5d8296", pattern: null }
+      ] }
+  ];
+  /* 当前海域可出现的鱼种列表：泳池取专属鱼种、鱼群取小银鱼，其余海域/无海域时取全表 */
+  G.fishSpeciesList = () => {
+    const key = G.session && G.session.sea && G.session.sea.key;
+    if (key === "pool") return G.POOL_FISH_SPECIES;
+    if (key === "school") return G.SCHOOL_FISH_SPECIES;
+    return G.FISH_SPECIES;
+  };
   /* 每局轮换海域：进度存本地，重启后接着换（不重复刚玩过的） */
   G.nextSeaTheme = () => {
     let idx = -1;

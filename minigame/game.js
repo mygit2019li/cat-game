@@ -15,9 +15,18 @@ require("./js/sharecard.js")(G);   // 分享卡片 / 猫咪反应测评图
 const ctx = G.platform.ctx;
 const clamp = G.clamp;
 G.screen = "home";        // home | settings | records | counting | playing | paused | result
+G.nextScreen = null;
+G.transitionT = 0;
+G.shake = 0;
 G.result = null;
 G.pauseHold = { active: false, t0: 0, progress: 0 };   // HUD 暂停按钮长按状态（600ms 触发）
 let countT = 0, lastInt = -1;
+
+G.switchScreen = (name) => {
+  if (G.screen === name) return;
+  G.nextScreen = name;
+  G.transitionT = 0;
+};
 
 /* ================= 真机调试面板（预览/体验版默认关闭 vConsole，需要时把 enableDebug 改为 true） ================= */
 function initDebug() {
@@ -36,17 +45,33 @@ initDebug();
 
 /* ================= 分享：结算页"晒给猫友" + 右上角菜单转发 =================
    传播逻辑：玩的是猫，转发的是铲屎官。所以文案主语必须是「我家猫」，
-   配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。 */
+   配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
+   量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
+const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫" };
 G.shareResult = () => {
   const R = G.result || {};
   const hits = Number(R.hits) || 0;
+  const type = (G.config && G.config.targetType) || "fish";
+  const unit = HIT_UNIT[type] || "只";
+  const noun = HIT_NOUN[type] || "猎物";
+  // 评级本身带感叹号（"捕猎大师！"），再套一层「」会显得叠字，去掉尾部标点
+  const rating = String(R.title || "").replace(/[!！。.、\s]+$/, "");
   const infinite = !!G.config.infinite;
   const durMin = infinite ? 0 : Math.max(1, Math.round((Number(G.config.duration) || 180) / 60));
-  const title = R.title
-    ? (durMin ? "我家猫 " + durMin + " 分钟抓了 " + hits + " 只，评级「" + R.title + "」"
-              : "我家猫一口气抓了 " + hits + " 只，评级「" + R.title + "」")
-    : (durMin ? "给你家猫开个 " + durMin + " 分钟的捕猎场，看它能抓几只"
-              : "给你家猫开个不限时的捕猎场，看它能抓几只");
+  // 一只没抓到时不写"抓了 0 只"（像在自嘲成绩），改成有画面感的描述；量词要跟玩法一致
+  const none = "一" + unit + noun + "都没抓到，全程当观众";
+  let title;
+  if (hits <= 0) {
+    title = durMin ? "我家猫 " + durMin + " 分钟里" + none : "我家猫" + none;
+    if (rating) title += "，评级「" + rating + "」";
+  } else {
+    const body = hits + " " + unit + noun;
+    title = durMin
+      ? "我家猫 " + durMin + " 分钟抓了 " + body
+      : "我家猫一口气抓了 " + body;
+    if (rating) title += "，评级「" + rating + "」";
+  }
   let imageUrl = "";
   try { imageUrl = G.buildShareCard(); } catch (e) {}
   // 属性名与 We分析 后台逐字一致（has_img 蛇形命名），写错不会报错、只会丢字段
@@ -59,28 +84,32 @@ G.saveCard = () => {
   G.saveShareCard();
 };
 /* 排行榜/首页的「邀猫友比一比」：没有本局结果时用累计档案卡，保证卡片永远有内容。
-   注意合规：这里只是邀请，不设"分享才解锁/复活"之类的奖励门槛。 */
+   注意合规：这里只是邀请，不设"分享才解锁/复活"之类的奖励门槛。
+   纪录（catToyBest）是跨玩法取最大值，量词不能按当前玩法写，统一用「个猎物」。 */
 G.shareInvite = (from) => {
   const arch = G.archiveSummary ? G.archiveSummary() : { games: 0, hits: 0 };
   let best = 0;
   try { best = Number(G.platform.storage.get("catToyBest")) || 0; } catch (e) {}
   const title = best > 0
-    ? "我家猫单局最高抓了 " + best + " 只，把你家猫也拉来比比"
+    ? "我家猫一局最多抓了 " + best + " 个猎物，把你家猫也拉来比比"
     : "给你家猫开个捕猎场，看谁家猫更凶";
   let imageUrl = "";
   try { imageUrl = G.buildShareCard(arch.games > 0 ? "archive" : "single"); } catch (e) {}
   // 参数用 src 不用 from：属性在 We分析 里是全局共享的，app_open 的 from 是数值(0~3)，
   // 这里传文本 "lb" 会造成同一属性两种类型，后台只会认一种，另一边的数据就被判脏。
   G.track("invite_tap", { src: from || "lb", best, arch: arch.games, has_img: imageUrl ? 1 : 0 });
-  G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=lb" });
+  // 落地页来源按入口区分：设置页分享与排行榜分享的转化率要能分开看
+  const src = from === "settings" ? "settings" : "lb";
+  G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=" + src });
 };
 G.platform.initShare(() => ({
-  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点轮着来，看它能抓几只",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、萤光虫轮着来，看它能抓到几个",
   query: "from=menu"
 }));
 
 /* ================= 开局 ================= */
 G.startGame = () => {
+  G.stopSummonMusic();   // 召唤语音不串进对局
   G.ensureAudio();
   const S = G.session;
   S.touches = 0; S.hits = 0; S.bonusHits = 0; S.combo = 0; S.maxCombo = 0;
@@ -91,15 +120,16 @@ G.startGame = () => {
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
-  // 鱼玩法：每局轮换海域主题（换背景+专属特效），其他玩法不受影响
-  S.sea = G.config.targetType === "fish" ? G.nextSeaTheme() : null;
+  // 鱼玩法：海域由背景选择层决定（水草森林 / 泳池追鱼，左右滑动切换、跨局记忆）
+  S.sea = G.config.targetType === "fish" ? (G.SEA_THEMES.find(t => t.key === G.currentBg()) || G.SEA_THEMES[0]) : null;
   G.buildScene(G.config.targetType);
   G.fx.clear();
   G.buildPreys();
+  G.topUpPreys();   // 开局即补足到当前阶段的目标数量（鱼群模式开局就该是一大群，而非 3 条等阶段②）
   if (G.config.keepScreen) { G.platform.keepScreen(true); S._keepOn = true; }
   const beginGame = () => {
     countT = 3; lastInt = -1;
-    G.screen = "counting";
+    G.switchScreen("counting");
     G.track("game_start", {
       mode: G.config.targetType,
       dur: G.config.infinite ? 0 : (Number(G.config.duration) || 180),
@@ -121,12 +151,14 @@ function beginPlay() {
   G.session.running = true;
   G.session.lastTs = performance.now();
   G.playGo();
-  G.screen = "playing";
+  G.screen = "playing"; // Use direct assignment to avoid repeated calls during transition
+  G.nextScreen = null;
+  G.transitionT = 0;
 }
 
-/* ================= 背景选择层（可切换背景的玩法专用） =================
-   有 ≥2 套背景的玩法（当前是捕鼠）点「开始游戏」先弹一层可左右滑动的背景卡，
-   选好再进倒计时；只有 1 套的玩法照旧直接开始，不额外打扰。
+/* ================= 模式选择弹层（拥有多套模式的玩法专用） =================
+   有 ≥2 套模式的玩法（捕鼠/捕鱼）点「开始游戏」先弹一层可左右滑动/点按翻页的模式卡，
+   每张卡对应一套布景+运动规则+猎物种类；只有 1 套的玩法照旧直接开始，不额外打扰。
    卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
 G.requestStart = () => {
   const arr = G.bgsFor(G.config.targetType);
@@ -137,11 +169,13 @@ G.requestStart = () => {
 G.openBgPick = () => {
   const arr = G.bgsFor(G.config.targetType);
   const cur = G.currentBg();
-  G.bgPick = { idx: Math.max(0, arr.findIndex(b => b.key === cur)), off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0 };
-  G.screen = "bgpick";
+  // t0=弹入动画起点；relOff/relT0=松手后的吸附动画（残余位移按缓动归零）；touchActive=本次按压是否落在卡片区（按钮点按不翻页）
+  G.bgPick = { idx: Math.max(0, arr.findIndex(b => b.key === cur)), off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0,
+    t0: performance.now(), relOff: 0, relT0: 0, touchActive: false };
+  G.switchScreen("bgpick");
 };
 
-G.closeBgPick = () => { G.bgPick = null; G.screen = "home"; };
+G.closeBgPick = () => { G.bgPick = null; G.switchScreen("home"); };
 
 /* 确认背景 → 记住选择（跨局） → 开局 */
 G.confirmBgPick = () => {
@@ -158,9 +192,24 @@ function bgPickStep() {
   const P = G.bgPick;
   return P && P.cw ? P.cw + P.gap : (G.platform.W || 300) * 0.6;
 }
+/* 箭头按钮切换：与松手吸附共用同一动画（relOff 连续归零），拖动中忽略 */
+G.bgPickArrow = (dir) => {
+  const P = G.bgPick; if (!P || P.drag) return;
+  const arr = G.bgsFor(G.config.targetType);
+  const ni = Math.max(0, Math.min(arr.length - 1, P.idx + dir));
+  if (ni === P.idx) return;
+  const step = bgPickStep();
+  P.relOff = P.off + (ni - P.idx) * step;
+  P.idx = ni;
+  P.relT0 = performance.now();
+  P.off = 0;
+};
+
 G.bgPickTouchStart = (x) => {
   const P = G.bgPick; if (!P) return;
   P.drag = true; P.x0 = x; P.moved = 0;
+  P.touchActive = true;
+  P.relOff = 0;                                    // 按下即终止上一次吸附动画
 };
 G.bgPickTouchMove = (x) => {
   const P = G.bgPick; if (!P || !P.drag) return;
@@ -175,15 +224,58 @@ G.bgPickTouchMove = (x) => {
   else if (scroll > maxScroll) d += (scroll - maxScroll) * 0.65;
   P.off = d;
 };
-G.bgPickTouchEnd = () => {
+G.bgPickTouchEnd = (x) => {
   const P = G.bgPick; if (!P) return;
   P.drag = false;
+  const wasActive = P.touchActive; P.touchActive = false;
+  if (!wasActive) return;                          // 按钮点按（onTouchStart 已被 hitButton 截走）：不翻页
   const arr = G.bgsFor(G.config.targetType);
   const step = bgPickStep();
-  if (Math.abs(P.off) > step * 0.16) {
-    P.idx = Math.max(0, Math.min(arr.length - 1, P.idx + (P.off < 0 ? 1 : -1)));
+  let dir = 0;
+  if (P.moved > 8) {                               // 拖动：按位移阈值换页
+    if (Math.abs(P.off) > step * 0.16) dir = P.off < 0 ? 1 : -1;
+  } else if (x != null) {                          // 点按：当前卡左右边缘之外（层叠露出的邻卡/空侧）翻页
+    const W = G.platform.W;
+    const half = (P.cw || W * 0.64) / 2;
+    if (x < W / 2 - half) dir = -1;
+    else if (x > W / 2 + half) dir = 1;
   }
+  const newIdx = Math.max(0, Math.min(arr.length - 1, P.idx + dir));
+  // 吸附动画：残余位移从「松手位置 + 已换页步长」连续归零（换页/回弹都平滑）
+  P.relOff = P.off + (newIdx - P.idx) * step;
+  P.idx = newIdx;
+  P.relT0 = performance.now();
   P.off = 0;
+};
+
+/* ================= 召唤猫咪交互 ================= */
+G.summonPickTouchStart = (x) => {
+  const P = G.summonPick; if (!P) return;
+  P.drag = true; P.x0 = x; P.off = 0; P.relOff = 0;
+};
+G.summonPickTouchMove = (x) => {
+  const P = G.summonPick; if (!P || !P.drag) return;
+  P.off = x - P.x0;
+};
+G.summonPickTouchEnd = (x) => {
+  const P = G.summonPick, kinds = G.CAT_KINDS || [];
+  if (!P || !P.drag) return;
+  P.drag = false;
+  const threshold = P.cw * 0.35;
+  let dir = 0;
+  if (P.off < -threshold) dir = 1;
+  else if (P.off > threshold) dir = -1;
+  
+  const old = P.idx;
+  P.idx = G.clamp(P.idx + dir, 0, kinds.length - 1);
+  P.relOff = P.off - (P.idx - old) * P.step;
+  P.relT0 = performance.now();
+  P.off = 0;                     // 清掉拖动残留位移，避免回弹结束后卡片跳位
+  if (P.idx !== old) {
+    // 滑动/点按翻页只切换卡片，不自动播放：必须点「开始召唤」或卡片才发声
+    G.stopSummonMusic();
+    G.playTick();
+  }
 };
 
 /* ================= 每秒心跳 ================= */
@@ -269,7 +361,7 @@ G.endGame = (fromPause) => {
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
     bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
   };
-  G.screen = "result";
+  G.switchScreen("result");
 };
 
 /* ================= 自适应辅助（与原型 1:1） ================= */
@@ -320,6 +412,7 @@ function onHit(x, y, prey) {
   S.combo++;
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
+  G.shake = Math.min(G.shake + 8, 20); // Add screen shake
   prey.vanish();
   const sparkC = isPool
     ? "#eaf9ff"
@@ -332,13 +425,11 @@ function onHit(x, y, prey) {
   if (isMouse) {
     G.dustBurst(x, y, 5);
     G.playSqueak(chasing);
-    // 霓虹格毯：命中撒多彩光点（参考图的彩虹颗粒）
-    if (G.scene && G.scene.mouseBg === "neon") {
-      ["#5ef0e0", "#ff7ac0", "#ffe45e", "#9d8cff"].forEach(c => G.sparkBurst(x, y, c, 3));
-    }
-    // 命中洞口 = 好洞：清空蹲守热度（半径 60，两排洞互不误伤）
+    // 群鼠乱窜：命中撒彩虹纸屑 + 金环（参考猫抓老鼠玩具的 confetti）
+    if (G.scene && G.scene.mouseBg === "swarm") G.swarmPopBurst(x, y);
+    // 命中洞口 = 好洞：清空蹲守热度（半径 60，两排洞互不误伤）；群鼠模式无洞口跳过
     const Sc = G.scene;
-    Sc.holes.forEach((h, i) => { if (Math.hypot(x - h.x, y - h.y) < 60) Sc.holeHeat[i] = []; });
+    if (Sc.holes) Sc.holes.forEach((h, i) => { if (Math.hypot(x - h.x, y - h.y) < 60) Sc.holeHeat[i] = []; });
     if (chasing) {
       S.bonusHits++;
       S.dartHits = (S.dartHits || 0) + 1;
@@ -366,11 +457,19 @@ function onHit(x, y, prey) {
   } else if (isLaser) {
     G.sparkBurst(x, y, "#ff5252", 8);
     G.scorch(x, y);
-    G.playZap();
-    if (holding) G.tone("sine", 1760, 0, 0.14, 0.16);
+    G.playLaserHit(holding);          // 新激光命中音：pew 下滑 + 玻璃双音（hold 加铃音）
     if (holding) S.bonusHits++;
   } else {
-    G.bubbleBurst(x, y, 5);
+    // 捕鱼命中：泳池海域走夸张的金橙水花、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
+    const seaKey = G.session.sea && G.session.sea.key;
+    if (seaKey === "pool") G.splashBurst(x, y, S.combo >= 4, "gold");
+    else if (seaKey === "school") { G.confettiBurst(x, y); G.sparkBurst(x, y, "#dff2ff", 6); G.playSchoolPop(); }
+    else {
+      // 水草/珊瑚/深海/冰海：水花四溅（银白）+ 鱼鳞飞散 + 气泡——原来只有几个上浮气泡，几乎看不出"散开"
+      G.splashBurst(x, y, false, "silver");
+      G.scalesBurst(x, y, 10);
+      G.bubbleBurst(x, y, 6);
+    }
     G.playHit(S.combo);
     // 所有目标命中均不触发设备震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
   }
@@ -386,6 +485,7 @@ function onHit(x, y, prey) {
   }
   G.pokeHud();
 }
+G.onHit = onHit;                                   // 测试钩子：命中路径可直接驱动
 
 /* ================= 拍偏 ================= */
 function onMiss(x, y) {
@@ -405,7 +505,7 @@ function onMiss(x, y) {
     G.dustBurst(x, y, 3);
     S.dartStreak = 0;
     const now = performance.now(), Sc = G.scene;
-    Sc.holes.forEach((h, i) => {
+    if (Sc.holes) Sc.holes.forEach((h, i) => {
       if (Math.hypot(x - h.x, y - h.y) < 60) {
         const arr = Sc.holeHeat[i] || (Sc.holeHeat[i] = []);
         arr.push(now);
@@ -439,6 +539,11 @@ G.platform.onTouchStart = (e) => {
     G.bgPickTouchStart(vx);               // 卡片画廊：按下即开始跟手（虚拟空间位移）
     return;
   }
+  if (G.screen === "summon") {
+    if (G.hitButton(vx, vy)) return;
+    G.summonPickTouchStart(vx);
+    return;
+  }
   if (G.screen === "playing") {
     // 暂停按钮：长按手势（按下开始计时，松手取消；不判 miss 不影响连击）
     const pr = G.ui.pauseRect;
@@ -468,23 +573,43 @@ G.platform.onTouchMove = (e) => {
   if (G.screen === "bgpick") {
     const S = G.platform.S || 1;
     G.bgPickTouchMove(tp.clientX / S);
+  } else if (G.screen === "summon") {
+    const S = G.platform.S || 1;
+    G.summonPickTouchMove(tp.clientX / S);
   }
 };
-G.platform.onTouchEnd = () => {
-  if (G.screen === "bgpick") { G.bgPickTouchEnd(); return; }
+G.platform.onTouchEnd = (e) => {
+  if (G.screen === "bgpick") {
+    // 空事件兜底（测试垫片会传 {}）：取不到 x 则跳过点按翻页，仅走拖动收尾
+    const tp = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
+    G.bgPickTouchEnd(tp ? tp.clientX / (G.platform.S || 1) : null);
+    return;
+  }
+  if (G.screen === "summon") {
+    const tp = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
+    G.summonPickTouchEnd(tp ? tp.clientX / (G.platform.S || 1) : null);
+    return;
+  }
   if (G.pauseHold.active) { G.pauseHold.active = false; G.pauseHold.progress = 0; }   // 未满 600ms：取消，无惩罚
 };
 
 /* ================= 画面绘制 ================= */
 function drawGameFrame(t) {
+  ctx.save();
+  if (G.shake > 0.1) {
+    const sx = (Math.random() - 0.5) * G.shake;
+    const sy = (Math.random() - 0.5) * G.shake;
+    ctx.translate(sx, sy);
+  }
   G.drawScene(ctx, t);
   // 激光暗室：先压暗背景，让激光光点与拖尾"穿透"黑暗，对比更醒目
   if (G.scene && G.scene.dark) {
     ctx.fillStyle = "rgba(0,0,0,.72)";
-    ctx.fillRect(0, 0, G.platform.W, G.platform.H);
+    ctx.fillRect(-20, -20, G.platform.W + 40, G.platform.H + 40); // Larger to cover shake
   }
   G.preys.forEach(p => p.render(ctx, t));
   G.fx.draw(ctx);
+  ctx.restore();
 }
 
 /* ================= 主循环 ================= */
@@ -513,6 +638,7 @@ function loop(ts) {
   }
 
   if (G.screen === "counting") {
+    if (G.nextScreen === "playing") return; // Prevent logic during transition to playing
     countT -= dt;
     const ci = Math.ceil(countT);
     if (ci !== lastInt && ci > 0) { lastInt = ci; G.playTick(); }
@@ -524,6 +650,7 @@ function loop(ts) {
     G.preys.forEach(p => p.update(dt, S.time));
   }
   G.fx.update(dt, t);
+  if (G.shake > 0) G.shake *= 0.88; // Decay shake
 
   // 暂停按钮长按推进：满 HOLD_MS 触发暂停（震动反馈 + 掉档音效免打扰，用 tick 音）
   const PH = G.pauseHold;
@@ -532,7 +659,7 @@ function loop(ts) {
     if (PH.progress >= 1) {
       PH.active = false; PH.progress = 0;
       S.paused = true;
-      G.screen = "paused";
+      G.switchScreen("paused");
       G.platform.vibrate();
       G.playTick();
     }
@@ -540,6 +667,26 @@ function loop(ts) {
 
   // 绘制当前界面
   G.ui.buttons.length = 0;
+  
+  // 处理页面切换过渡
+  let screenAlpha = 1;
+  if (G.nextScreen) {
+    G.transitionT += dt;
+    const dur = 0.22;
+    if (G.transitionT < dur / 2) {
+      screenAlpha = 1 - (G.transitionT / (dur / 2));
+    } else if (G.transitionT < dur) {
+      G.screen = G.nextScreen;
+      screenAlpha = (G.transitionT - dur / 2) / (dur / 2);
+    } else {
+      G.screen = G.nextScreen;
+      G.nextScreen = null;
+      G.transitionT = 0;
+      screenAlpha = 1;
+    }
+  }
+  ctx.globalAlpha = screenAlpha;
+
   if (G.screen === "home") uiScaleCtx(() => G.ui.drawHome());
   else if (G.screen === "bgpick") {
     // 背景选择层自带实底，不再叠首页（否则首页标题会与弹层文字叠在一起）
@@ -565,6 +712,7 @@ function loop(ts) {
     else uiScaleCtx(() => G.ui.drawHud(t, dt));
     if (G.screen === "paused") uiScaleCtx(() => G.ui.drawPause());
   }
+  ctx.globalAlpha = 1;
   requestAnimationFrame(loop);
 }
 
@@ -586,7 +734,7 @@ function dayNum(d) {
   return Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
 }
 (function trackLaunch() {
-  const fromMap = { share: 1, menu: 2, lb: 3 };
+  const fromMap = { share: 1, menu: 2, lb: 3, settings: 4 };
   const q = (G.platform.launch && G.platform.launch.query) || {};
   const scene = (G.platform.launch && Number(G.platform.launch.scene)) || 0;
   const from = fromMap[q.from] || 0;

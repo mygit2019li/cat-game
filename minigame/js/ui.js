@@ -4,8 +4,8 @@ module.exports = function (G) {
   const ctx = G.platform.ctx;
   const clamp = G.clamp;
   const C = G.COLORS;
-  const ui = { buttons: [], hudDimT: 0, stagePop: 0, stageText: "", comboPop: 0, comboShown: 0 };
-  const SHOW_SUMMON = false;   // 召唤猫咪入口暂时隐藏：改 true 可恢复首页入口（页面代码保留）
+  const ui = { buttons: [], hudDimT: 0, stagePop: 0, stageText: "", comboPop: 0, comboShown: 0, pressedBtn: null };
+  const SHOW_SUMMON = true;    // 召唤猫咪首页入口
   G.ui = ui;
   G.uiFX = { stagePop: 0, stageText: "", comboPop: 0 };
 
@@ -13,7 +13,15 @@ module.exports = function (G) {
   const inBtn = (x, y, b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   G.hitButton = (x, y) => {
     for (let i = ui.buttons.length - 1; i >= 0; i--) {
-      if (inBtn(x, y, ui.buttons[i])) { ui.buttons[i].cb(); return true; }
+      const b = ui.buttons[i];
+      if (inBtn(x, y, b)) {
+        ui.pressedBtn = b;
+        setTimeout(() => {
+          if (ui.pressedBtn === b) ui.pressedBtn = null;
+        }, 100);
+        b.cb();
+        return true;
+      }
     }
     return false;
   };
@@ -23,6 +31,14 @@ module.exports = function (G) {
     ctx.strokeStyle = stroke || C.line;
     ctx.lineWidth = 1.2;
     G.rr(ctx, x, y, w, h, 16); ctx.fill(); ctx.stroke();
+  }
+  /* 只建圆角矩形路径不填充（描边专用；G.rr 是"建路径+顺带填充"，描边前误填当前 fillStyle） */
+  function rrPath(x, y, w, h, rad) {
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad); ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad); ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
   }
   function text(str, x, y, font, color, align) {
     ctx.font = font; ctx.fillStyle = color || C.ink;
@@ -73,8 +89,8 @@ module.exports = function (G) {
     ctx.restore();
   }
   // 召唤猫咪页面的大猫咪插画
-  function drawCat(cx, cy, s) {
-    const c = "#6b7c75";
+  function drawCat(cx, cy, s, color) {
+    const c = color || "#6b7c75";
     ctx.save(); ctx.translate(cx, cy);
     ctx.fillStyle = c;
     ctx.beginPath(); ctx.moveTo(-s * 0.5, -s * 0.15); ctx.lineTo(-s * 0.78, -s * 0.75); ctx.lineTo(-s * 0.05, -s * 0.5); ctx.closePath(); ctx.fill();
@@ -97,25 +113,36 @@ module.exports = function (G) {
   }
   function drawBtn(x, y, w, h, label, opts) {
     const o = opts || {};
+    const isPressed = ui.pressedBtn && ui.pressedBtn.x === x && ui.pressedBtn.y === y && ui.pressedBtn.w === w && ui.pressedBtn.h === h;
+    
+    ctx.save();
+    if (isPressed) {
+      ctx.translate(x + w / 2, y + h / 2);
+      ctx.scale(0.96, 0.96);
+      ctx.translate(-(x + w / 2), -(y + h / 2));
+      ctx.globalAlpha = 0.9;
+    }
+
     ctx.fillStyle = o.primary ? C.startGrad1 : (o.on ? C.card : C.segBg);
     ctx.strokeStyle = o.primary ? C.teal : (o.on ? C.line : C.line);
     ctx.lineWidth = o.on ? 2 : 1.2;
     G.rr(ctx, x, y, w, h, 14); ctx.fill(); ctx.stroke();
+    
     if (o.icon) {
       const lc = o.primary ? "#fff" : (o.on ? C.ink : C.ink2);
       const gap = 6;
-      let fsize = o.primary ? 19 : 16;
-      let lf = (o.primary ? "bold " : "") + fsize + "px sans-serif";
+      let fsize = o.primary ? 19 : 17; // Increased from 16
+      let lf = (o.primary ? "bold " : (o.bold ? "bold " : "")) + fsize + "px sans-serif";
       ctx.font = lf;
       let tw = ctx.measureText(label).width;
-      let ih = Math.min(15, h * 0.42);
+      let ih = Math.min(16, h * 0.45); // Increased from 15
       let total = ih + gap + tw;
-      const pad = 10;                       // 左右内边距，保证不贴边
+      const pad = 12; // Increased from 10
       const avail = w - pad;
-      const scale = total > avail ? avail / total : 1;  // 超宽则整体等比缩小
+      const scale = total > avail ? avail / total : 1;
       if (scale < 1) {
         fsize *= scale; ih *= scale;
-        lf = (o.primary ? "bold " : "") + fsize + "px sans-serif";
+        lf = (o.primary ? "bold " : (o.bold ? "bold " : "")) + fsize + "px sans-serif";
         ctx.font = lf; tw = ctx.measureText(label).width;
         total = ih + gap + tw;
       }
@@ -124,12 +151,26 @@ module.exports = function (G) {
       drawVecIcon(o.icon, iconX + ih / 2, y + h / 2, ih, lc);
       text(label, labelX + tw / 2, y + h / 2 + 1, lf, lc);
     } else {
-      text(label, x + w / 2, y + h / 2 + 1, o.primary ? "bold 19px sans-serif" : "16px sans-serif",
+      const fsize = o.primary ? 19 : 17; // Increased from 16
+      const font = (o.primary ? "bold " : (o.bold ? "bold " : "")) + fsize + "px sans-serif";
+      text(label, x + w / 2, y + h / 2 + 1, font,
         o.primary ? "#fff" : (o.on ? C.ink : C.ink2));
     }
+    ctx.restore();
     btn(x, y, w, h, o.cb);
   }
   ui.panel = panel; ui.text = text; ui.drawBtn = drawBtn;
+  /* 按内容量算按钮宽度：文案短就窄一些，避免"内容少却撑成大宽条"（有图标时额外留图标位） */
+  function fitBtnWidth(label, h, opts) {
+    const o = opts || {};
+    const primary = !!o.primary;
+    const fsize = h >= 50 ? (primary ? 19 : 18) : (primary ? 19 : 17);
+    ctx.font = (primary ? "bold " : (o.bold ? "bold " : "")) + fsize + "px sans-serif";
+    const tw = ctx.measureText(label).width;
+    const ic = o.icon ? Math.min(16, h * 0.45) + 6 : 0;
+    return Math.ceil(tw + ic + (o.icon ? 38 : 48));
+  }
+  ui.fitBtnWidth = fitBtnWidth;
 
   function layout() {
     const S = G.platform.S || 1;
@@ -149,7 +190,7 @@ module.exports = function (G) {
     { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
     { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
     { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
-    { key: "pool",      name: "暗夜萤光", desc: "发光小兽在石板上乱窜" }
+    { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" }
   ];
   /* 首页常驻小字：适龄提示(12周岁) / 健康游戏忠告(标准原文) / 安全提示 / 免责声明（自动按宽度折行）
      文案依据：《网络游戏适龄提示》团体标准 + 新闻出版署《健康游戏忠告》标准原文，逐字使用 */
@@ -214,9 +255,11 @@ module.exports = function (G) {
     const sc = D / 148;                       // 相对原型 148px 的缩放
     const breath = 1 + Math.sin(t * Math.PI * 2 / 2.8) * 0.018;
 
-    // 外圈光环（原型 box-shadow 0 0 0 12px rgba(142,226,210,.22)）
-    ctx.fillStyle = "rgba(142,226,210,.22)";
-    ctx.beginPath(); ctx.arc(cx, cy, R * breath + 12 * sc, 0, Math.PI * 2); ctx.fill();
+    // 外圈光环（增加双层光环，更显精致）
+    ctx.fillStyle = "rgba(142,226,210,.18)";
+    ctx.beginPath(); ctx.arc(cx, cy, R * breath + 15 * sc, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(142,226,210,.25)";
+    ctx.beginPath(); ctx.arc(cx, cy, R * breath + 8 * sc, 0, Math.PI * 2); ctx.fill();
 
     // 主体：径向渐变（高光在 35% 28% 处）+ 底部投影
     ctx.save();
@@ -336,23 +379,34 @@ module.exports = function (G) {
       tip2.lines.forEach((s, i) => text(s, edgeL, tipsTop + 6 + i * tip2.lh, tip2.fs + "px sans-serif", C.ink3, "left"));
       ctx.globalAlpha = 1;
 
-      // 右侧：单张「模式选择」卡片
+      // 右侧：单张「猎物选择」卡片
       const headH = 34, rowH = 46, pad = 12;
       // 底部通栏一行：设置/本周记录/好友排行（召唤猫咪入口按 SHOW_SUMMON 开关）
       const rowY = tipsTop - rowH - 8;
       const rowBtns = [
-        { label: "设置", icon: "gear", cb: () => { G.screen = "settings"; } },
-        { label: "本周记录", icon: "chart", cb: () => { G.screen = "records"; } },
-        { label: "好友排行", icon: "trophy", cb: () => { G.screen = "leaderboard"; G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
+        { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
+        { label: "设置", icon: "gear", cb: () => { G.switchScreen("settings"); } },
+        { label: "本周记录", icon: "chart", cb: () => { G.switchScreen("records"); } },
+        { label: "好友排行", icon: "trophy", cb: () => { G.switchScreen("leaderboard"); G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
       ];
-      if (SHOW_SUMMON) rowBtns.push({ label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.screen = "summon"; } });
-      const bwN = (availW - gap * (rowBtns.length - 1)) / rowBtns.length;
-      rowBtns.forEach((b, i) => drawBtn(edgeL + (bwN + gap) * i, rowY, bwN, rowH, b.label, { icon: b.icon, cb: b.cb }));
+      // 底部通栏一行：设置/本周记录/好友排行——按钮宽度按文案自适应，整行居中（不再强行三等分撑满）
+      const rowW = rowBtns.map(b => fitBtnWidth(b.label, rowH, { icon: true }));
+      const rowSum = rowW.reduce((a, w) => a + w, 0) + gap * (rowBtns.length - 1);
+      let rowXs = [];
+      if (rowSum <= availW) {
+        let rxCur = edgeL + (availW - rowSum) / 2;
+        rowW.forEach(w => { rowXs.push(rxCur); rxCur += w + gap; });
+      } else {
+        const eq = (availW - gap * (rowBtns.length - 1)) / rowBtns.length;
+        rowBtns.forEach((b, i) => rowXs.push(edgeL + (eq + gap) * i));
+        rowW.fill(eq);
+      }
+      rowBtns.forEach((b, i) => drawBtn(rowXs[i], rowY, rowW[i], rowH, b.label, { icon: b.icon, cb: b.cb }));
 
       const cardTop = topY + m;
       const cardBottomLimit = rowY - m;
       const gridH = cardBottomLimit - cardTop - headH - pad; // 卡内网格区高度
-      // 5 个模式时改 3 列×2 行（保持 2 行不动垂直空间，避免横屏矮屏卡片区压到按钮行）
+      // 5 个模式时改 3 列×2 行，最后一行居中以消除视觉空缺
       const cols = MODES.length > 4 ? 3 : 2;
       const rows = Math.ceil(MODES.length / cols);
       const cw = Math.min((rightW - gap * (cols - 1)) / cols, 148);
@@ -370,13 +424,22 @@ module.exports = function (G) {
       ctx.fillStyle = "rgba(31,64,58,.08)";
       G.rr(ctx, cardX + 1, cardY + 4, cardW - 2, cardH - 4, 20); ctx.fill();
       panel(cardX, cardY, cardW, cardH, C.card, C.line);
-      text("模式选择", cardX + 18, cardY + headH / 2, "bold 16px sans-serif", C.ink, "left");
+      text("猎物选择", cardX + 18, cardY + headH / 2, "bold 16px sans-serif", C.ink, "left");
       const gy = cardY + headH;
       MODES.forEach((mItem, i) => {
-        const x = gx + (i % cols) * (cw + gap), y = gy + Math.floor(i / cols) * (ch + gap);
+        const r = Math.floor(i / cols), c = i % cols;
+        const nInRow = (r < rows - 1) ? cols : (MODES.length % cols || cols);
+        const offX = (cols - nInRow) * (cw + gap) / 2;
+        const x = gx + c * (cw + gap) + offX, y = gy + r * (ch + gap);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
-        if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
+        if (sel) {
+          ctx.save();
+          ctx.shadowColor = "rgba(46,196,170,.3)"; ctx.shadowBlur = 10;
+          ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5;
+          G.rr(ctx, x, y, cw, ch, 16); ctx.stroke();
+          ctx.restore();
+        }
         // 自适应布局：图标占「文字区之上」的剩余空间并随卡高缩放，矮卡不再与文字重叠
         const iconZone = ch - 42;
         const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
@@ -386,8 +449,8 @@ module.exports = function (G) {
         const bob = Math.sin(Date.now() / 500 + i) * 2;
         G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
-        text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
-        text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
+        text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
+        text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
           if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
           G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
@@ -401,18 +464,27 @@ module.exports = function (G) {
       const colsP = MODES.length > 4 ? 3 : 2;
       const rowsP = Math.ceil(MODES.length / colsP);
       const cw = (availW - 14 * (colsP - 1)) / colsP, ch = 88, gx = edgeL, gy = safe.top + innerH * 0.16;
-      // 模式选择卡片容器
+      // 猎物选择卡片容器
       const cardX = gx - 12, cardY = gy - 36, cardW = availW + 24, cardH = ch * rowsP + 14 * (rowsP - 1) + 36;
       ctx.fillStyle = "rgba(31,64,58,.08)";
       G.rr(ctx, cardX + 1, cardY + 4, cardW - 2, cardH - 4, 20); ctx.fill();
       panel(cardX, cardY, cardW, cardH, C.card, C.line);
-      text("模式选择", cardX + 18, cardY + 22, "bold 16px sans-serif", C.ink, "left");
+      text("猎物选择", cardX + 18, cardY + 22, "bold 16px sans-serif", C.ink, "left");
       const gy2 = gy;
       MODES.forEach((mItem, i) => {
-        const x = gx + (i % colsP) * (cw + 14), y = gy2 + Math.floor(i / colsP) * (ch + 14);
+        const r = Math.floor(i / colsP), c = i % colsP;
+        const nInRow = (r < rowsP - 1) ? colsP : (MODES.length % colsP || colsP);
+        const offX = (colsP - nInRow) * (cw + 14) / 2;
+        const x = gx + c * (cw + 14) + offX, y = gy2 + r * (ch + 14);
         const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
-        if (sel) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, y, cw, ch, 16); ctx.stroke(); }
+        if (sel) {
+          ctx.save();
+          ctx.shadowColor = "rgba(46,196,170,.3)"; ctx.shadowBlur = 10;
+          ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5;
+          G.rr(ctx, x, y, cw, ch, 16); ctx.stroke();
+          ctx.restore();
+        }
         const iconZone = ch - 42;
         const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
         const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
@@ -421,8 +493,8 @@ module.exports = function (G) {
         const bob = Math.sin(Date.now() / 500 + i) * 2;
         G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
-        text(mItem.name, x + cw / 2, y + ch - 30, "bold 13px sans-serif", sel ? C.tealDeep : C.ink);
-        text(mItem.desc, x + cw / 2, y + ch - 14, "9.5px sans-serif", C.ink3);
+        text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
+        text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
           if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
           G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
@@ -432,7 +504,7 @@ module.exports = function (G) {
       const cardBottom = cardY + cardH;
       let afterCard = cardBottom + 12;
       if (SHOW_SUMMON) {
-        drawBtn(edgeL, afterCard, availW, 46, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.screen = "summon"; } });
+        drawBtn(edgeL, afterCard, availW, 46, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } });
         afterCard += 46 + 14;
       }
       const by = afterCard;
@@ -441,10 +513,17 @@ module.exports = function (G) {
       const orbD2 = Math.max(96, Math.min(148, Math.floor(tipsTop2 - 14 - by - 84)));
       ui.drawStartOrb(W / 2, by + orbD2 / 2, orbD2, "开始游戏", () => G.requestStart());
       const subY2 = by + orbD2 + 40;
-      const tw = (availW - 20) / 3;
-      drawBtn(edgeL, subY2, tw, 44, "设置", { icon: "gear", cb: () => { G.screen = "settings"; } });
-      drawBtn(edgeL + tw + 10, subY2, tw, 44, "本周记录", { icon: "chart", cb: () => { G.screen = "records"; } });
-      drawBtn(edgeL + (tw + 10) * 2, subY2, tw, 44, "好友排行", { icon: "trophy", cb: () => { G.screen = "leaderboard"; G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } });
+      // 设置/本周记录/好友排行：按文案自适应宽度，整行水平居中
+      const subBtns = [
+        { label: "设置", icon: "gear", cb: () => { G.switchScreen("settings"); } },
+        { label: "本周记录", icon: "chart", cb: () => { G.switchScreen("records"); } },
+        { label: "好友排行", icon: "trophy", cb: () => { G.switchScreen("leaderboard"); G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
+      ];
+      const subW = subBtns.map(b => fitBtnWidth(b.label, 44, { icon: true }));
+      const subSum = subW.reduce((a, w) => a + w, 0) + 10 * (subBtns.length - 1);
+      let subX = edgeL + Math.max(0, (availW - subSum) / 2);
+      if (subSum > availW) { const eq = (availW - 20) / 3; subW.fill(eq); subX = edgeL; }
+      subBtns.forEach((b, i) => { drawBtn(subX, subY2, subW[i], 44, b.label, { icon: b.icon, cb: b.cb }); subX += subW[i] + 10; });
 
       // 适龄/健康忠告/安全/免责提示（底部居中，自动折行）
       drawTips(edgeL, tipsTop2, availW, 15, "left");
@@ -452,34 +531,38 @@ module.exports = function (G) {
   };
 
   /* ================= 设置 ================= */
+  /* 用游戏内的鱼绘制函数画预览鱼：预览与实机造型完全一致（设计空间 120×72，中心 60,36） */
+  function drawRealFish(c, sp, v, cx, cy, k, ph) {
+    if (!sp || !G.draw || !G.draw.fish) return;
+    c.save();
+    c.translate(cx - 60 * k, cy - 36 * k);
+    c.scale(k, k);
+    G.draw.fish(c, { species: sp, speciesColors: v, wagDur: 0.5, phase: ph || 0, state: "FLAP" }, 1.2);
+    c.restore();
+  }
   /* 背景缩略预览：不复用 drawScene（依赖全局 scene 状态），各背景单独画一张小图 */
   function drawBgPreview(c, key, x, y, w, h) {
     c.save();
     G.rr(c, x, y, w, h, 12); c.clip();
-    if (key === "neon") {
-      // 霓虹格毯：更黑 + 更大格 + 几个彩色微光点
-      c.fillStyle = "#0b100b"; c.fillRect(x, y, w, h);
-      c.strokeStyle = "rgba(190,210,175,.12)"; c.lineWidth = 1;
-      for (let i = -h; i < w + h; i += 7) { c.beginPath(); c.moveTo(x + i, y); c.lineTo(x + i + h, y + h); c.stroke(); }
-      const nc = Math.max(34, Math.round(w / 4));
-      for (let ix = 0, gx = x; gx < x + w; ix++, gx += nc) {
-        for (let iy = 0, gy = y; gy < y + h; iy++, gy += nc) {
-          c.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.34)" : "rgba(118,132,92,.18)";
-          c.fillRect(gx, gy, nc, nc);
-        }
-      }
-      c.strokeStyle = "rgba(0,0,0,.55)"; c.lineWidth = 1.8;
-      for (let gx = x; gx <= x + w; gx += nc) { c.beginPath(); c.moveTo(gx, y); c.lineTo(gx, y + h); c.stroke(); }
-      for (let gy = y; gy <= y + h; gy += nc) { c.beginPath(); c.moveTo(x, gy); c.lineTo(x + w, gy); c.stroke(); }
-      const dots = [[0.2, 0.34, "94,240,224"], [0.63, 0.26, "255,122,192"], [0.38, 0.72, "255,228,94"], [0.8, 0.62, "157,140,255"]];
-      dots.forEach(d => {
-        const dx = x + w * d[0], dy = y + h * d[1];
-        const rg = c.createRadialGradient(dx, dy, 0, dx, dy, 16);
-        rg.addColorStop(0, "rgba(" + d[2] + ",.55)"); rg.addColorStop(1, "rgba(" + d[2] + ",0)");
-        c.fillStyle = rg; c.beginPath(); c.arc(dx, dy, 16, 0, Math.PI * 2); c.fill();
-        c.fillStyle = "rgba(" + d[2] + ",.95)";
-        c.beginPath(); c.arc(dx, dy, 3, 0, Math.PI * 2); c.fill();
+    if (key === "swarm") {
+      // 群鼠乱窜：深色斑驳地板 + 3 只俯视小灰鼠（大粉耳/粉尾）
+      const sg = c.createLinearGradient(0, y, 0, y + h);
+      sg.addColorStop(0, "#28312a"); sg.addColorStop(1, "#141a15");
+      c.fillStyle = sg; c.fillRect(x, y, w, h);
+      c.fillStyle = "rgba(0,0,0,.15)";
+      [[0.25, 0.3, 0.2], [0.7, 0.55, 0.16], [0.45, 0.82, 0.13]].forEach(sp => {
+        c.beginPath(); c.ellipse(x + w * sp[0], y + h * sp[1], w * sp[2], h * sp[2] * 0.7, 0.5, 0, Math.PI * 2); c.fill();
       });
+      const miniMouse = (mx, my, ms, rot) => {
+        // 直接复用游戏内的俯视鼠绘制：预览与实机造型完全一致
+        c.save(); c.translate(mx, my); c.rotate(rot || 0); c.scale(ms, ms);
+        c.translate(-60, -50);
+        G.draw.mouseTop(c, { phase: mx * 0.01 }, 1.2);
+        c.restore();
+      };
+      miniMouse(x + w * 0.30, y + h * 0.42, 0.42, Math.PI / 2);
+      miniMouse(x + w * 0.60, y + h * 0.68, 0.38, -Math.PI / 2 + 0.3);
+      miniMouse(x + w * 0.78, y + h * 0.26, 0.33, 0.2);
     } else if (key === "plaid") {
       c.fillStyle = "#0f1410"; c.fillRect(x, y, w, h);
       c.strokeStyle = "rgba(178,206,178,.10)"; c.lineWidth = 1;
@@ -498,100 +581,335 @@ module.exports = function (G) {
       c.fillStyle = rg; c.beginPath(); c.arc(fx2, fy2, 20, 0, Math.PI * 2); c.fill();
       c.fillStyle = "rgba(240,255,150,.95)";
       c.beginPath(); c.arc(fx2, fy2, 5, 0, Math.PI * 2); c.fill();
+    } else if (key === "kelp") {
+      // 水草森林：用游戏内同一套主题色 + 真实鱼种绘制（预览即实机画面缩影）
+      const th = (G.SEA_THEMES || []).find(t => t.key === "kelp") || { bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e" };
+      const kg = c.createRadialGradient(x + w / 2, y, 0, x + w / 2, y, Math.max(w, h) * 1.1);
+      kg.addColorStop(0, th.bg[0]); kg.addColorStop(0.52, th.bg[1]); kg.addColorStop(1, th.bg[2]);
+      c.fillStyle = kg; c.fillRect(x, y, w, h);
+      // 光柱（与 drawSea 同色同透明度）
+      c.fillStyle = "rgba(180,240,255,.10)";
+      c.beginPath(); c.moveTo(x + w * 0.22, y); c.lineTo(x + w * 0.3, y); c.lineTo(x + w * 0.42, y + h); c.lineTo(x + w * 0.28, y + h); c.closePath(); c.fill();
+      // 沙床 + 石头
+      c.fillStyle = th.sand; c.fillRect(x, y + h * 0.88, w, h * 0.12);
+      c.fillStyle = "#4a6b60";
+      c.beginPath(); c.ellipse(x + w * 0.18, y + h * 0.9, w * 0.07, h * 0.045, 0.2, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(x + w * 0.62, y + h * 0.92, w * 0.09, h * 0.05, -0.15, 0, Math.PI * 2); c.fill();
+      // 水草（游戏内 kelp 主题的绿色系）
+      const kc = ["#2f8f5e", "#276f4c", "#1d5a3e", "#38a56c"];
+      [0.1, 0.22, 0.7, 0.82].forEach((f, i) => {
+        c.fillStyle = kc[i % kc.length];
+        const bx0 = x + w * f, bh0 = h * (0.32 + (i % 2) * 0.12);
+        c.beginPath(); c.moveTo(bx0, y + h * 0.9);
+        c.quadraticCurveTo(bx0 + 4, y + h * 0.9 - bh0 * 0.55, bx0 - 2, y + h * 0.9 - bh0);
+        c.quadraticCurveTo(bx0 + 6, y + h * 0.9 - bh0 * 0.5, bx0 + 7, y + h * 0.9);
+        c.closePath(); c.fill();
+      });
+      // 真实鱼种（小丑鱼 + 锦鲤，都是水草海域会出现的鱼）
+      const spClown = (G.FISH_SPECIES || []).find(s => s.key === "clown");
+      const spKoi = (G.FISH_SPECIES || []).find(s => s.key === "koi");
+      if (spClown) drawRealFish(c, spClown, spClown.variants[0], x + w * 0.42, y + h * 0.44, 0.42, 0.8);
+      if (spKoi) drawRealFish(c, spKoi, spKoi.variants[0], x + w * 0.72, y + h * 0.62, 0.36, 2.1);
+    } else if (key === "school") {
+      // 鱼群巡游：深海蓝（与 school 主题同色）+ 小银鱼群（贴在一起，像游戏里的"饵球"）
+      const th = (G.SEA_THEMES || []).find(t => t.key === "school") || { bg: ["#12406b", "#0c2e50", "#071e38"], sand: "#22405c" };
+      const sg = c.createRadialGradient(x + w / 2, y, 0, x + w / 2, y, Math.max(w, h) * 1.1);
+      sg.addColorStop(0, th.bg[0]); sg.addColorStop(0.52, th.bg[1]); sg.addColorStop(1, th.bg[2]);
+      c.fillStyle = sg; c.fillRect(x, y, w, h);
+      c.fillStyle = "rgba(180,240,255,.09)";
+      c.beginPath(); c.moveTo(x + w * 0.3, y); c.lineTo(x + w * 0.4, y); c.lineTo(x + w * 0.52, y + h); c.lineTo(x + w * 0.36, y + h); c.closePath(); c.fill();
+      c.fillStyle = th.sand; c.fillRect(x, y + h * 0.9, w, h * 0.1);
+      const spM = (G.SCHOOL_FISH_SPECIES || [])[0];
+      if (spM) {
+        const pts = [[0.42, 0.42], [0.5, 0.5], [0.58, 0.4], [0.36, 0.5], [0.54, 0.58], [0.46, 0.34], [0.62, 0.5], [0.4, 0.6]];
+        pts.forEach((pt, i) => {
+          drawRealFish(c, spM, spM.variants[i % spM.variants.length], x + w * pt[0], y + h * pt[1], 0.24, i * 0.6);
+        });
+      }
+    } else if (key === "pool") {
+      // 泳池追鱼：与游戏内 pool 主题同色 + 同款焦散 + 真实的泳池金鱼
+      const th = (G.SEA_THEMES || []).find(t => t.key === "pool") || { bg: ["#2aa4e0", "#1565b5", "#0e4a9e"] };
+      const pg = c.createRadialGradient(x + w / 2, y, 0, x + w / 2, y, Math.max(w, h) * 1.1);
+      pg.addColorStop(0, th.bg[0]); pg.addColorStop(0.52, th.bg[1]); pg.addColorStop(1, th.bg[2]);
+      c.fillStyle = pg; c.fillRect(x, y, w, h);
+      // 阳光辉光
+      const sgp = c.createRadialGradient(x + w * 0.5, y - h * 0.3, 0, x + w * 0.5, y - h * 0.3, h * 1.6);
+      sgp.addColorStop(0, "rgba(255,255,255,.3)"); sgp.addColorStop(1, "rgba(255,255,255,0)");
+      c.fillStyle = sgp; c.fillRect(x, y, w, h);
+      // 网状焦散（静态示意：抖动格点连网，两层线）
+      const hh = (i, j, k) => { const s2 = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453; return s2 - Math.floor(s2); };
+      const cs2 = Math.max(22, Math.round(w / 7));
+      const cols2 = Math.ceil(w / cs2), rows2 = Math.ceil(h / cs2);
+      const px = (i, j) => x + i * cs2 + (hh(i, j, 1) - 0.5) * cs2 * 0.55;
+      const py = (i, j) => y + j * cs2 + (hh(i, j, 2) - 0.5) * cs2 * 0.55;
+      c.save(); c.globalCompositeOperation = "lighter"; c.lineCap = "round";
+      for (let pass = 0; pass < 2; pass++) {
+        c.strokeStyle = pass ? "rgba(200,245,255,.4)" : "rgba(120,210,255,.16)";
+        c.lineWidth = pass ? 1 : 2.2;
+        for (let i = 0; i <= cols2; i++) for (let j = 0; j <= rows2; j++) {
+          if (i < cols2) { c.beginPath(); c.moveTo(px(i, j), py(i, j)); c.lineTo(px(i + 1, j), py(i + 1, j)); c.stroke(); }
+          if (j < rows2) { c.beginPath(); c.moveTo(px(i, j), py(i, j)); c.lineTo(px(i, j + 1), py(i, j + 1)); c.stroke(); }
+        }
+      }
+      // 星芒两枚（四角十字星）
+      [[0.24, 0.3, 7], [0.74, 0.62, 5]].forEach(sd => {
+        const sx = x + w * sd[0], sy = y + h * sd[1], sr = sd[2];
+        c.fillStyle = "rgba(240,252,255,.85)";
+        [[sr, sr * 0.18], [sr * 0.18, sr]].forEach(dd => {
+          c.beginPath();
+          c.moveTo(sx - dd[0], sy); c.lineTo(sx, sy - dd[1]); c.lineTo(sx + dd[0], sy); c.lineTo(sx, sy + dd[1]);
+          c.closePath(); c.fill();
+        });
+      });
+      c.restore();
+      // 真实的泳池金鱼（游戏内 POOL_FISH_SPECIES 造型）
+      const spG = (G.POOL_FISH_SPECIES || [])[0];
+      if (spG) drawRealFish(c, spG, spG.variants[0], x + w * 0.5, y + h * 0.46, 0.62, 0.6);
     } else {
-      // 室内：墙 + 地板木纹 + 窗光 + 两个洞口
-      c.fillStyle = "#554b40"; c.fillRect(x, y, w, h * 0.42);
-      c.fillStyle = "#7a6a58"; c.fillRect(x, y + h * 0.42, w, h * 0.58);
+      // 室内房间：墙 + 窗体 + 木地板 + 一排老鼠洞 + 一只探头的鼠（与游戏内布局一致）
+      c.fillStyle = "#554b40"; c.fillRect(x, y, w, h * 0.40);
+      c.fillStyle = "#7a6a58"; c.fillRect(x, y + h * 0.40, w, h * 0.60);
+      // 地板拼缝
       c.strokeStyle = "rgba(0,0,0,.16)"; c.lineWidth = 1;
       for (let i = 1; i < 5; i++) {
-        const yy = y + h * 0.42 + (h * 0.58 / 5) * i;
+        const yy = y + h * 0.40 + (h * 0.60 / 5) * i;
         c.beginPath(); c.moveTo(x, yy); c.lineTo(x + w, yy); c.stroke();
       }
-      c.fillStyle = "rgba(205,232,255,.5)";
-      c.fillRect(x + w * 0.62, y + h * 0.1, w * 0.24, h * 0.23);
-      c.fillStyle = "#2b211a";
-      [0.28, 0.62].forEach(f => {
-        c.beginPath(); c.ellipse(x + w * f, y + h * 0.8, w * 0.06, h * 0.045, 0, 0, Math.PI * 2); c.fill();
-      });
+      // 窗体（暖光）
+      c.fillStyle = "rgba(205,232,255,.55)";
+      c.fillRect(x + w * 0.60, y + h * 0.08, w * 0.26, h * 0.22);
+      c.strokeStyle = "rgba(120,110,96,.5)"; c.lineWidth = 1.4;
+      c.strokeRect(x + w * 0.60, y + h * 0.08, w * 0.26, h * 0.22);
+      // 地毯
+      c.fillStyle = "rgba(150,96,66,.35)";
+      c.beginPath(); c.ellipse(x + w * 0.5, y + h * 0.72, w * 0.34, h * 0.16, 0, 0, Math.PI * 2); c.fill();
+      // 一排老鼠洞（游戏内是两排共 10 个，这里示意后排 5 个）
+      for (let i = 0; i < 5; i++) {
+        const hx = x + w * (0.14 + i * 0.18), hy = y + h * 0.62;
+        c.fillStyle = "#2b211a";
+        c.beginPath(); c.ellipse(hx, hy, w * 0.045, h * 0.035, 0, 0, Math.PI * 2); c.fill();
+        c.fillStyle = "rgba(0,0,0,.55)";
+        c.beginPath(); c.ellipse(hx, hy + h * 0.008, w * 0.032, h * 0.022, 0, 0, Math.PI * 2); c.fill();
+      }
+      // 一只探头的老鼠（复用游戏内的侧视鼠绘制）
+      if (G.draw && G.draw.mouse) {
+        const mk = 0.34, mcx = x + w * 0.32, mcy = y + h * 0.60;
+        c.save();
+        c.translate(mcx - 60 * mk, mcy - 40 * mk);
+        c.scale(mk, mk);
+        G.draw.mouse(c, { state: "peek", phase: 0.7, mouseVar: G.MOUSE_VARIANTS[0] }, 1.2);
+        c.restore();
+      }
     }
     c.restore();
   }
 
-  /* ================= 背景选择层（左右滑动，一屏约 1.5 张卡） =================
-     卡片本身不注册按钮（走拖动判定），弹层开头清空按钮表，避免命中首页残留按钮。 */
+  /* ================= 模式选择弹层（左右滑动/点按两侧翻页，一屏约 1.5 张卡） =================
+     每张卡 = 一套玩法模式（不同布景/运动规则/猎物种类）；卡片本身不注册按钮（走拖动判定），
+     弹层开头清空按钮表，避免命中首页残留按钮。 */
   ui.drawBgPick = () => {
-    const { W, H, safe } = layout();
+    const { W, H, land, safe } = layout();
     const P = G.bgPick;
     if (!P) return;
     const list = G.bgsFor(G.config.targetType);
     ui.buttons.length = 0;                                  // 弹层独占按钮表
 
-    // 实底渐变（不叠首页：首页大标题会和"选择背景"叠字，底部合规小字也会透出来）
+    // 弹入动画：整层淡入 + 内容轻微上滑归位（背后是冻结的首页帧，透出即自然过渡）
+    const openK = Math.min(1, (performance.now() - (P.t0 || 0)) / 260);
+    const openE = 1 - Math.pow(1 - openK, 3);
+    // 实底渐变（不叠首页：首页大标题会和弹层文字叠字，底部合规小字也会透出来）
     const bgG = ctx.createLinearGradient(0, 0, W, H);
     bgG.addColorStop(0, C.homeBg1); bgG.addColorStop(0.55, C.homeBg2); bgG.addColorStop(1, C.homeBg3);
-    ctx.fillStyle = bgG; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bgG; ctx.globalAlpha = openE; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "rgba(6,22,20,.55)"; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.translate(0, (1 - openE) * 18);
 
-    const CW = Math.round(W * 0.64);                        // 卡宽 ≈ 0.64 屏 → 露出一半下一张
-    const CH = Math.min(Math.round(H * 0.44), Math.round(CW * 0.6));
+    // 纵向布局：卡片 + 指示点 + 按钮作为一个整体在可用区垂直居中，
+    // 卡与按钮之间固定 24px 间距（之前按钮钉死在底部，高屏上卡下留出大片空白，看着不居中）
+    const bh = 44;
+    const spanTop = safe.top + 34;                           // 标题下缘
+    const spanBot = H - safe.bottom - 14;                    // 按钮区底缘
+    const spanH = Math.max(140, spanBot - spanTop);
+    const dotGap = 26, btnGap = 24;                          // 卡→指示点 / 指示点→按钮
+    const CH0 = Math.round(H * 0.56);
+    const chCap = spanH - dotGap - btnGap - bh - 8;
+    // 宽度再收窄（横屏 44% / 竖屏 60%）；高度按原基准宽度算，宽度收窄不影响卡片高度
+    const refW = Math.min(Math.round(W * (land ? 0.54 : 0.72)), Math.round(CH0 * 2.1), Math.round(chCap * 2.1));
+    const CW = Math.min(Math.round(W * (land ? 0.44 : 0.60)), Math.round(chCap * 1.9));
+    // 横屏长宽比 ≤2.1 防扁长；竖屏卡片可更高（≤1.15 倍宽）比例更协调
+    const CH = Math.min(CH0, Math.round(refW * (land ? 0.78 : 1.15)), chCap);
     const gap = Math.round(W * 0.035);
     const pad = Math.round(W * 0.05);
     const step = CW + gap;
-    P.cw = CW; P.gap = gap;
-    // 整块（标题 + 卡片 + 指示点 + 按钮）垂直居中，避免横屏压到首页 UI、竖屏顶在上面
-    const bh = 44;
-    const blockH = 30 + CH + 24 + 16 + bh;
-    const top = Math.max(safe.top + 16, Math.round((H - blockH) / 2));
-    const cardY = top + 30;
+    // 水平居中基准取「安全区中点」（有刘海/圆角时按可用区居中，视觉上才真的居中）
+    const cx0 = safe.left + (W - safe.left - safe.right) / 2;
+    P.cw = CW; P.ch = CH; P.gap = gap;
+    const edgeL = safe.left + pad;
+    const blockH = CH + dotGap + btnGap + bh;
+    const cardY = Math.round(spanTop + Math.max(0, (spanH - blockH) / 2));
 
-    text("选择背景", pad, cardY - 18, "bold 17px sans-serif", "#fff", "left");
-    text("左右滑动切换", pad + 78, cardY - 17, "11px sans-serif", "rgba(255,255,255,.7)", "left");
+    // 背景氛围：当前卡后方一团柔光（把视觉焦点聚在卡片上）
+    const glow = ctx.createRadialGradient(cx0, cardY + CH / 2, 20, cx0, cardY + CH / 2, CW * 0.95);
+    glow.addColorStop(0, "rgba(255,255,255,.10)"); glow.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
 
-    // 画廊：裁到屏幕内，滑出的卡不画到屏幕外
+    // 标题：青绿竖条作节标 + 白色粗标题 + 灰白副题
+    ctx.fillStyle = C.teal;
+    G.rr(ctx, edgeL, safe.top + 11, 4, 14, 2);
+    text("模式选择", edgeL + 13, safe.top + 18, "bold 17px sans-serif", "#fff", "left");
+    ctx.font = "bold 17px sans-serif";
+    const titleW2 = ctx.measureText("模式选择").width;
+    text("左右滑动 · 点按两侧翻页", edgeL + 13 + titleW2 + 10, safe.top + 19, "11px sans-serif", "rgba(255,255,255,.7)", "left");
+
+    // 画廊：卡片层叠——当前卡 1:1 居中，其余卡缩压在左右后方错位露出（后卡先画、前卡压上面）；
+    // 拖动 / 点按翻页时各卡在自己的层位间连续插值，松手吸附回弹
     ctx.save();
-    ctx.beginPath(); ctx.rect(0, cardY - 6, W, CH + 12); ctx.clip();
-    const baseX = pad - P.idx * step + (P.off || 0);
-    list.forEach((b, i) => {
-      const x = baseX + i * step;
-      if (x > W || x + CW < 0) return;
-      const active = i === P.idx;
-      panel(x, cardY, CW, CH, active ? "#fbfaf7" : "rgba(250,249,245,.86)", active ? C.teal : "rgba(255,255,255,.5)");
-      if (active) { ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5; G.rr(ctx, x, cardY, CW, CH, 16); ctx.stroke(); }
-      const pvH = Math.round(CH * 0.64);
-      drawBgPreview(ctx, b.key, x + 10, cardY + 10, CW - 20, pvH - 10);
-      text(b.name, x + CW / 2, cardY + pvH + 16, "bold 15px sans-serif", active ? C.tealDeep : C.ink);
-      text(b.desc, x + CW / 2, cardY + pvH + 34, "10.5px sans-serif", C.ink3);
+    ctx.beginPath(); ctx.rect(0, cardY - CH * 0.22, W, CH * 1.44); ctx.clip();
+    // 松手吸附：残余位移按缓出归零（换页滑动 / 边界回弹都连续，不再瞬移）
+    let off = P.off || 0;
+    if (!P.drag && P.relOff) {
+      const rk = Math.min(1, (performance.now() - P.relT0) / 240);
+      off = P.relOff * Math.pow(1 - rk, 3);
+    }
+    // 层位映射（按 |d| 分段线性）：0 居中 → 1 级（±0.30CW、0.90 倍、上移）→ 2 级（±0.48CW、0.80 倍）
+    const stackAt = (a) => {
+      const k1 = Math.min(a, 1), k2 = G.clamp(a - 1, 0, 1);
+      return {
+        dx: (0.30 * k1 + 0.18 * k2) * CW,
+        sc: 1 - 0.10 * k1 - 0.10 * k2,
+        dy: -7 * k1 - 7 * k2,
+        veil: Math.min(0.5, 0.24 * k1 + 0.22 * k2)
+      };
+    };
+    const cardCY = cardY + CH / 2;
+    // 侧卡错位上限：保证最远端（0.8 倍）卡片的右缘不出屏，窄屏也不会被切掉
+    const dxCap = Math.max(CW * 0.22, W - 12 - cx0 - CW * 0.40);
+    list.map((b, i) => ({ b, d: (i - P.idx) + off / step }))  // d = 层位（拖动时连续变化）
+      .filter(c => Math.abs(c.d) < 2.55)
+      .sort((A, B) => Math.abs(B.d) - Math.abs(A.d))          // 后层先画，当前卡最后压顶
+      .forEach(c => {
+      const d = c.d, b = c.b;
+      const st = stackAt(Math.abs(d));
+      const cx = cx0 + (d < 0 ? -1 : 1) * Math.min(st.dx, dxCap);   // 左侧层向左错、右侧层向右错
+      const sc = st.sc;
+      const active = Math.abs(d) < 0.5;
+      const veil = st.veil;                                   // 层越深压得越暗
+      ctx.save();
+      ctx.translate(cx, cardCY + st.dy);
+      ctx.scale(sc, sc);
+      const x = -CW / 2, y = -CH / 2;
+      if (active) {                                   // 当前卡：软投影 + 高亮描边（微发光），比邻卡更"浮"出来
+        ctx.save();
+        ctx.shadowColor = "rgba(8,40,36,.35)"; ctx.shadowBlur = 22; ctx.shadowOffsetY = 6;
+        ctx.fillStyle = "#fbfaf7";
+        G.rr(ctx, x, y, CW, CH, 16); ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.shadowColor = "rgba(46,196,170,.45)"; ctx.shadowBlur = 12;
+        ctx.strokeStyle = C.teal; ctx.lineWidth = 2.5;
+        rrPath(x, y, CW, CH, 16); ctx.stroke();
+        ctx.restore();
+      } else {
+        panel(x, y, CW, CH, "rgba(250,249,245,.86)", "rgba(255,255,255,.5)");
+      }
+      const pvH = CH - 38;
+      drawBgPreview(ctx, b.key, x + 10, y + 10, CW - 20, pvH - 10);
+      ctx.strokeStyle = "rgba(20,60,54,.14)"; ctx.lineWidth = 1;   // 预览图描一圈细边
+      rrPath(x + 10.5, y + 10.5, CW - 21, pvH - 11, 12); ctx.stroke();
+      // 模式名：预览图左上角深色圆角条 + 青绿圆点（白字，任何预览底色上都可读）
+      ctx.font = "bold 14px sans-serif";
+      const nw = ctx.measureText(b.name).width;
+      ctx.fillStyle = "rgba(8,30,44,.6)";
+      G.rr(ctx, x + 18, y + 18, nw + 32, 24, 12);
+      ctx.fillStyle = "#3ee6c8";
+      ctx.beginPath(); ctx.arc(x + 31, y + 30, 3.2, 0, Math.PI * 2); ctx.fill();
+      text(b.name, x + 41, y + 30, "bold 14px sans-serif", "#fff", "left");
+      if (active) {                                   // 当前卡预览右上角 ✓ 角标
+        const bx2 = x + CW - 30, by2 = y + 30;
+        ctx.fillStyle = C.teal;
+        ctx.beginPath(); ctx.arc(bx2, by2, 11, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(bx2 - 4.4, by2 + 0.4); ctx.lineTo(bx2 - 1.2, by2 + 3.8); ctx.lineTo(bx2 + 4.6, by2 - 3.4);
+        ctx.stroke();
+      }
+      // 游戏说明：卡底靠左（上方一道发丝分隔线）
+      ctx.strokeStyle = "rgba(20,60,54,.10)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x + 14, y + CH - 38); ctx.lineTo(x + CW - 14, y + CH - 38); ctx.stroke();
+      text(b.desc, x + 18, y + CH - 19, "10.5px sans-serif", active ? C.ink2 : C.ink3, "left");
+      if (veil > 0.01) {                                    // 压暗蒙层（随卡位距离加深）
+        ctx.fillStyle = "rgba(16,38,34," + veil.toFixed(2) + ")";
+        G.rr(ctx, x, y, CW, CH, 16); ctx.fill();
+      }
+      ctx.restore();
     });
     ctx.restore();
 
-    // 指示点
+    // 指示点：灰点静态铺底，青绿胶囊跟随滑动位置连续移动（吸附动画同样跟手）
     const dotY = cardY + CH + 14;
+    const dsp = 20;
     list.forEach((b, i) => {
-      const dx = W / 2 + (i - (list.length - 1) / 2) * 16;
-      ctx.fillStyle = i === P.idx ? C.teal : "rgba(255,255,255,.35)";
-      ctx.beginPath(); ctx.arc(dx, dotY, i === P.idx ? 4 : 3, 0, Math.PI * 2); ctx.fill();
+      const dx = cx0 + (i - (list.length - 1) / 2) * dsp;
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.beginPath(); ctx.arc(dx, dotY, 3, 0, Math.PI * 2); ctx.fill();
+    });
+    const dotPos = Math.max(0, Math.min(list.length - 1, P.idx - off / step));
+    ctx.fillStyle = C.teal;
+    G.rr(ctx, cx0 + (dotPos - (list.length - 1) / 2) * dsp - 9, dotY - 3, 18, 6, 3); ctx.fill();
+
+    // 左右切换箭头：压在当前卡左右边缘的圆形按钮（点按翻页，复用松手吸附动画）
+    const arR = 21;
+    [[-1, cx0 - CW / 2], [1, cx0 + CW / 2]].forEach(aa => {
+      const dir = aa[0], ax = aa[1];
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,.3)"; ctx.shadowBlur = 10; ctx.shadowOffsetY = 3;
+      ctx.fillStyle = "rgba(255,255,255,.18)";
+      ctx.beginPath(); ctx.arc(ax, cardCY, arR, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = "rgba(255,255,255,.75)"; ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.arc(ax, cardCY, arR, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.8; ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      if (dir < 0) { ctx.moveTo(ax + 4, cardCY - 8); ctx.lineTo(ax - 4, cardCY); ctx.lineTo(ax + 4, cardCY + 8); }
+      else { ctx.moveTo(ax - 4, cardCY - 8); ctx.lineTo(ax + 4, cardCY); ctx.lineTo(ax - 4, cardCY + 8); }
+      ctx.stroke();
+      btn(ax - arR, cardCY - arR, arR * 2, arR * 2, () => G.bgPickArrow(dir));
     });
 
-    // 开始按钮（宽条按钮，比圆形开始球更适配方屏；紧随指示点，整块居中）
-    const bw = Math.min(Math.round(W * 0.42), 260);
-    const bx = (W - bw) / 2, by = Math.min(dotY + 16, H - safe.bottom - bh - 12);
-    ctx.fillStyle = C.tealDeep;
+    // 底部双按钮（钉在底部安全区上方）：「返回」次级 + 「开始游戏 · 模式名」主按钮。
+    // 不再用右上角 × 关闭——真机上会被微信胶囊按钮（退出/更多）遮挡点不到。
+    const gap2 = Math.round(W * 0.035);
+    // 按钮按文案自适应：短文案（返回）不再撑成大宽条，主按钮仍比次级宽一些
+    const bwBack = G.clamp(fitBtnWidth("返回", bh), 80, 130);
+    const startLabel = "开始游戏 · " + (list[P.idx] ? list[P.idx].name : "");
+    // 宽度贴近文案（只留 32px 内边距）+ 上限收紧，避免短文案被拉成长条
+    ctx.font = "bold 16px sans-serif";
+    const bw = G.clamp(Math.round(ctx.measureText(startLabel).width) + 32, 140, 210);
+    const bx0 = Math.round(cx0 - (bwBack + gap2 + bw) / 2);
+    const by = cardY + CH + dotGap + btnGap;                  // 紧跟卡片下方（固定间距，不再钉底部）
+    // 返回（次级：磨砂白底 + 白描边，适配深色弹层）
+    ctx.fillStyle = "rgba(255,255,255,.18)";
+    G.rr(ctx, bx0, by, bwBack, bh, bh / 2); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 1.4;
+    rrPath(bx0, by, bwBack, bh, bh / 2); ctx.stroke();
+    text("返回", bx0 + bwBack / 2, by + bh / 2, "bold 16px sans-serif", "#fff");
+    btn(bx0, by, bwBack, bh, () => G.closeBgPick());
+    // 开始游戏（主按钮：青绿渐变 + 辉光 + 内描边，文案带当前模式名）
+    const bx = bx0 + bwBack + gap2;
+    ctx.save();
+    ctx.shadowColor = "rgba(13,107,125,.5)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 5;
+    const sbg = ctx.createLinearGradient(0, by, 0, by + bh);
+    sbg.addColorStop(0, "#17b5a1"); sbg.addColorStop(1, "#0c5f6e");
+    ctx.fillStyle = sbg;
     G.rr(ctx, bx, by, bw, bh, bh / 2); ctx.fill();
+    ctx.restore();
     ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1.4;
-    G.rr(ctx, bx + 3, by + 3, bw - 6, bh - 6, (bh - 6) / 2); ctx.stroke();
-    text("开始游戏", W / 2, by + bh / 2, "bold 16px sans-serif", "#fff");
+    rrPath(bx + 3, by + 3, bw - 6, bh - 6, (bh - 6) / 2); ctx.stroke();
+    text(startLabel, bx + bw / 2, by + bh / 2, "bold 16px sans-serif", "#fff");
     btn(bx, by, bw, bh, () => G.confirmBgPick());
-
-    // 关闭（右上角 ×）
-    const cs = 30, cx = W - safe.right - cs - 10, cy = safe.top + 8;
-    ctx.fillStyle = "rgba(255,255,255,.16)";
-    ctx.beginPath(); ctx.arc(cx + cs / 2, cy + cs / 2, cs / 2, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 2; ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(cx + cs * 0.34, cy + cs * 0.34); ctx.lineTo(cx + cs * 0.66, cy + cs * 0.66);
-    ctx.moveTo(cx + cs * 0.66, cy + cs * 0.34); ctx.lineTo(cx + cs * 0.34, cy + cs * 0.66);
-    ctx.stroke();
-    btn(cx, cy, cs, cs, () => G.closeBgPick());
+    ctx.restore();                                   // 弹入动画整体位移结束
   };
 
   ui.drawSettings = () => {
@@ -800,7 +1118,7 @@ module.exports = function (G) {
     ctx.restore();
     ctx.strokeStyle = C.startInner; ctx.lineWidth = 1.2; G.rr(ctx, bx3, by, cw, bh, 13); ctx.stroke();
     text("返回", bx3 + cw / 2, by + bh / 2, "bold 17px sans-serif", "#fff");
-    btn(bx3, by, cw, bh, () => { G.screen = "home"; });
+    btn(bx3, by, cw, bh, () => { G.switchScreen("home"); });
   };
 
   /* ================= 记录 ================= */
@@ -836,12 +1154,12 @@ module.exports = function (G) {
         const y = listTop + (col === 0 ? i : i - maxPerCol) * rowH;
         ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
         G.rr(ctx, x, y, colW, 44, 12); ctx.fill(); ctx.stroke();
-        text(L.date || "-", x + 12, y + 22, "13px sans-serif", C.ink3, "left");
+        text(L.date || "-", x + 12, y + 22, "14px sans-serif", C.ink3, "left");
         const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
-        text(typeName, x + 62, y + 22, "13px sans-serif", C.ink3, "left");
-        text("捕获 " + (L.hits || 0), x + colW * 0.44, y + 22, "bold 14px sans-serif", C.amberDeep, "left");
-        text("命中 " + (L.accuracy || 0) + "%", x + colW * 0.64, y + 22, "13px sans-serif", C.tealDeep, "left");
-        text("连击 " + (L.combo || 0), x + colW * 0.86, y + 22, "13px sans-serif", C.danger, "left");
+        text(typeName, x + 65, y + 22, "14px sans-serif", C.ink3, "left");
+        text("捕获 " + (L.hits || 0), x + colW * 0.44, y + 22, "bold 15px sans-serif", C.amberDeep, "left");
+        text("命中 " + (L.accuracy || 0) + "%", x + colW * 0.64, y + 22, "14px sans-serif", C.tealDeep, "left");
+        text("连击 " + (L.combo || 0), x + colW * 0.86, y + 22, "14px sans-serif", C.danger, "left");
       });
     } else {
       const edgeL = safe.left + 18, availW = W - safe.left - safe.right - 36;
@@ -850,12 +1168,12 @@ module.exports = function (G) {
         if (y > H - safe.bottom - 110) return;
         ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
         G.rr(ctx, edgeL, y, availW, 44, 12); ctx.fill(); ctx.stroke();
-        text(L.date || "-", edgeL + 16, y + 22, "13px sans-serif", C.ink3, "left");
+        text(L.date || "-", edgeL + 16, y + 22, "14px sans-serif", C.ink3, "left");
         const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
-        text(typeName, edgeL + 90, y + 22, "13px sans-serif", C.ink3, "left");
-        text("捕获 " + (L.hits || 0), edgeL + availW * 0.42, y + 22, "bold 14px sans-serif", C.amberDeep, "left");
-        text("命中 " + (L.accuracy || 0) + "%", edgeL + availW * 0.60, y + 22, "13px sans-serif", C.tealDeep, "left");
-        text("连击 " + (L.combo || 0), edgeL + availW * 0.80, y + 22, "13px sans-serif", C.danger, "left");
+        text(typeName, edgeL + 90, y + 22, "14px sans-serif", C.ink3, "left");
+        text("捕获 " + (L.hits || 0), edgeL + availW * 0.42, y + 22, "bold 15px sans-serif", C.amberDeep, "left");
+        text("命中 " + (L.accuracy || 0) + "%", edgeL + availW * 0.60, y + 22, "14px sans-serif", C.tealDeep, "left");
+        text("连击 " + (L.combo || 0), edgeL + availW * 0.80, y + 22, "14px sans-serif", C.danger, "left");
       });
     }
     let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
@@ -867,7 +1185,7 @@ module.exports = function (G) {
     ctx.fillStyle = bg;
     G.rr(ctx, bx, by, bw, 50, 14); ctx.fill();
     text("返回", W / 2, by + 25, "bold 18px sans-serif", "#fff");
-    btn(bx, by, bw, 50, () => { G.screen = "home"; });
+    btn(bx, by, bw, 50, () => { G.switchScreen("home"); });
   };
 
   /* ================= 好友排行（开放数据域渲染） =================
@@ -924,54 +1242,208 @@ module.exports = function (G) {
     ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
     G.rr(ctx, rx, row.by, row.half, row.bh, 14); ctx.fill(); ctx.stroke();
     text("返回", rx + row.half / 2, row.by + row.bh / 2, "bold 17px sans-serif", C.ink);
-    btn(rx, row.by, row.half, row.bh, () => { ui.hideLB(); G.screen = "home"; });
+    btn(rx, row.by, row.half, row.bh, () => { ui.hideLB(); G.switchScreen("home"); });
   };
 
-  /* ================= 召唤猫咪（播放轻音乐吸引猫） ================= */
+  /* ================= 召唤猫咪（猫种卡牌 + 专属召唤语音） =================
+     展现形式为卡牌滑动切换，点击卡牌或下方大按钮播放语音 */
   ui.drawSummon = () => {
     const { W, H, land, m, safe } = layout();
+    const kinds = G.CAT_KINDS || [];
+    const P = G.summonPick || { idx: 0, off: 0, t0: performance.now() };
+    if (!G.summonPick) G.summonPick = P;
+    
+    const sel = P.idx;
+    const kind = kinds[sel] || {};
+    const playing = !!G.summonPlaying;
+    
     const g = ctx.createLinearGradient(0, 0, W, H);
     g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    const playing = !!G.summonPlaying;
+    ui.buttons.length = 0;
 
-    // 返回（左上角圆钮，返回即停音乐）
-    const bs = 42, bx = safe.left + 16, by = safe.top + 14;
+    // 弹入动画
+    const openK = Math.min(1, (performance.now() - P.t0) / 300);
+    const openE = 1 - Math.pow(1 - openK, 3);
+    ctx.save();
+    ctx.translate(0, (1 - openE) * 20);
+    ctx.globalAlpha = openE;
+
+    // 返回按钮
+    const bs = 42, bX = safe.left + 16, bY = safe.top + 14;
     ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx, by, bs, bs, 14); ctx.fill(); ctx.stroke();
+    G.rr(ctx, bX, bY, bs, bs, 14); ctx.fill(); ctx.stroke();
     ctx.strokeStyle = C.ink2; ctx.lineWidth = 2.4; ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(bx + bs * 0.6, by + bs * 0.32); ctx.lineTo(bx + bs * 0.38, by + bs * 0.5); ctx.lineTo(bx + bs * 0.6, by + bs * 0.68);
+    ctx.moveTo(bX + bs * 0.6, bY + bs * 0.32); ctx.lineTo(bX + bs * 0.38, bY + bs * 0.5); ctx.lineTo(bX + bs * 0.6, bY + bs * 0.68);
     ctx.stroke();
-    btn(bx, by, bs, bs, () => { G.stopSummonMusic(); G.screen = "home"; });
+    btn(bX, bY, bs, bs, () => { G.stopSummonMusic(); G.switchScreen("home"); });
 
-    text("召唤猫咪", W / 2, safe.top + 54, "bold 24px sans-serif", C.ink);
+    text("召唤猫咪", W / 2, safe.top + 34, "bold 22px sans-serif", C.ink);
 
-    // 猫咪插画
-    const cs = Math.min(W, H) * 0.2;
-    const catY = H * 0.40;
-    drawCat(W / 2, catY, cs);
+    // 卡牌滑动切换逻辑：优化尺寸计算，确保在不同高度屏幕下均不被遮挡
+    const bh = 56;                                     // 底部按钮高度
+    const bMargin = 20;                                // 底部间距
+    const titleH = safe.top + 60;                      // 标题区占用高度
+    const footerH = safe.bottom + bh + bMargin + 10;   // 底部按钮占用高度（指示点已删）
+    const availH = H - titleH - footerH;               // 卡牌区可用总高度
+    
+    // 动态调整卡牌尺寸：加高卡身吃满可用空间（不压底部按钮）
+    const CWbase = Math.min(W * 0.68, 280);
+    const CH = Math.min(Math.round(CWbase * 1.3), availH - 8);   // 高度优先吃满可用空间
+    const CW = Math.min(Math.round(CWbase), Math.round(CH / 1.3));
+    const gap = 20, step = CW + gap;
+    // 垂直中心点：在可用区域内平分空间
+    const cx0 = W / 2, cy0 = titleH + availH / 2;
+    
+    // 位移量：拖动中跟手，松手后按回弹动画衰减（不能回落到残留的拖动位移，否则会跳位）
+    let off = 0;
+    if (P.drag) {
+      off = P.off || 0;
+    } else if (P.relOff) {
+      const rk = Math.min(1, (performance.now() - P.relT0) / 240);
+      off = P.relOff * Math.pow(1 - rk, 3);
+      if (rk >= 1) P.relOff = 0;
+    } else {
+      P.off = 0;
+    }
+    P.cw = CW; P.ch = CH; P.step = step;
 
-    text(playing ? "音乐播放中…用摇篮曲召唤你的猫" : "点击下方按钮，播放吸引猫咪的轻音乐", W / 2, catY + cs * 1.15, "14px sans-serif", C.ink2);
+    kinds.map((k, i) => ({ k, i, d: (i - P.idx) + off / step }))
+      .filter(c => Math.abs(c.d) < 2.5)
+      .sort((A, B) => Math.abs(B.d) - Math.abs(A.d))
+      .forEach(c => {
+        const d = c.d, k = c.k, idx = c.i;
+        const absD = Math.abs(d);
+        const active = absD < 0.5;
+        
+        // 层级变换：活跃卡片正常大小，非活跃卡片缩小、偏移、半透明
+        const sc = 1 - absD * 0.18;
+        const opacity = 1 - absD * 0.55;
+        const dx = (d < 0 ? -1 : 1) * (Math.min(absD, 1) * CW * 0.78 + Math.max(0, absD - 1) * CW * 0.4);
+        
+        ctx.save();
+        ctx.translate(cx0 + dx, cy0);
+        ctx.scale(sc, sc);
+        ctx.globalAlpha = Math.max(0, opacity * openE);
+        
+        const x = -CW / 2, y = -CH / 2;
+        
+        // 卡片容器
+        ctx.save();
+        if (active) {
+          ctx.shadowColor = "rgba(0,0,0,.15)"; ctx.shadowBlur = 20; ctx.shadowOffsetY = 8;
+        }
+        ctx.fillStyle = "#fff";
+        ctx.strokeStyle = active ? C.teal : "rgba(0,0,0,.08)";
+        ctx.lineWidth = active ? 2.5 : 1.2;
+        G.rr(ctx, x, y, CW, CH, 20); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        
+        // 猫咪形象：展示真实照片
+        const imgS = CW * 0.84;
+        const imgH = imgS * 0.75;
+        const imgX = -imgS / 2, imgY = -CH * 0.42;
+        
+        ctx.save();
+        G.rr(ctx, imgX, imgY, imgS, imgH, 16);
+        ctx.clip();
+        // 尝试从缓存加载真实照片，若无则显示占位色块
+        // 注意：这里取的是图片元素本身（.ok 只是就绪标记，曾经把 true 传给 drawImage 每帧抛错走占位分支）
+        const cached = G.platform.assets && G.platform.assets[k.img];
+        const realImg = cached && cached.ok ? cached : null;
+        if (realImg) {
+          try {
+            ctx.drawImage(realImg, imgX, imgY, imgS, imgH);
+          } catch (e) {
+            // 照片尚未完成解码（ok 标记竞态）：本帧跳过，下一帧照片就绪后自然绘出
+            ctx.fillStyle = k.color || "#eee";
+            ctx.fillRect(imgX, imgY, imgS, imgH);
+          }
+        } else {
+          ctx.fillStyle = k.color || "#eee";
+          ctx.fillRect(imgX, imgY, imgS, imgH);
+          // 异步预加载图片
+          if (G.platform.loadImage) G.platform.loadImage(k.img);
+        }
+        ctx.restore();
+        
+        // 名字与品种小字（字号随卡宽收缩，保证不出卡边）
+        const nameF = Math.min(17, Math.round(CW * 0.115));
+        const breedF = Math.min(11, Math.max(9.5, Math.round(CW * 0.055 * 10) / 10));
+        text(k.name, 0, CH * 0.17, "bold " + nameF + "px sans-serif", active ? C.tealDeep : C.ink);
+        text(k.breed, 0, CH * 0.3, breedF + "px sans-serif", C.ink3);
+        
+        // 播放状态指示：环绕卡片的动效
+        if (active && playing) {
+          ctx.save();
+          const waveT = Date.now() / 300;
+          for (let wv = 0; wv < 2; wv++) {
+            const r2 = imgS * 0.5 + ((waveT + wv * 0.5) % 1) * 20;
+            const alpha2 = 1 - ((waveT + wv * 0.5) % 1);
+            ctx.strokeStyle = C.teal; ctx.lineWidth = 2; ctx.globalAlpha = alpha2 * 0.6;
+            ctx.strokeRect(imgX - (r2 - imgS * 0.5), imgY - (r2 - imgS * 0.5), imgS + (r2 - imgS * 0.5) * 2, imgH + (r2 - imgS * 0.5) * 2);
+          }
+          ctx.restore();
+        }
+        
+        btn(cx0 + dx - CW / 2, cy0 - CH / 2, CW, CH, () => {
+          if (active) {
+            G.ensureAudio();
+            if (G.summonPlaying) G.stopSummonMusic(); else G.startSummonKind(P.idx);
+          } else {
+            // 平滑切换到点击的卡片：切换卡牌时不自动播放语音
+            const oldIdx = P.idx;
+            P.idx = idx;
+            P.off = 0;
+            P.relOff = (oldIdx - idx) * step;
+            P.relT0 = performance.now();
+            G.stopSummonMusic(); // 切换时停止当前播放
+            G.playTick();
+          }
+        });
+        ctx.restore();
+      });
 
-    // 播放/暂停 大圆钮
-    const pr = Math.min(W, H) * 0.11;
-    const py = H * 0.70;
-    ctx.fillStyle = C.teal;
-    ctx.beginPath(); ctx.arc(W / 2, py, pr, 0, Math.PI * 2); ctx.fill();
+    // 底部播放大按钮
+    const bH_fixed = 46, bW_fixed = 176;
+    const bY2_fixed = H - safe.bottom - bH_fixed - 20;
+    const bX2_fixed = W / 2 - bW_fixed / 2;
+    
+    ctx.save();
+    ctx.shadowColor = "rgba(20,160,147,.3)"; ctx.shadowBlur = 15; ctx.shadowOffsetY = 5;
+    const bgGrad = ctx.createLinearGradient(bX2_fixed, bY2_fixed, bX2_fixed, bY2_fixed + bH_fixed);
+    bgGrad.addColorStop(0, C.startGrad0); bgGrad.addColorStop(1, C.startGrad1);
+    ctx.fillStyle = bgGrad;
+    G.rr(ctx, bX2_fixed, bY2_fixed, bW_fixed, bH_fixed, bH_fixed / 2); ctx.fill();
+    ctx.restore();
+    
+    const iconS = 20;
+    const label = playing ? "停止召唤" : "开始召唤";
+    ctx.font = "bold 15px sans-serif";
+    const tW = ctx.measureText(label).width;
+    const totalW = iconS + 10 + tW;
+    const startX = bX2_fixed + (bW_fixed - totalW) / 2;
+    
+    // 图标
     ctx.fillStyle = "#fff";
     if (playing) {
-      ctx.fillRect(W / 2 - pr * 0.3, py - pr * 0.28, pr * 0.18, pr * 0.56);
-      ctx.fillRect(W / 2 + pr * 0.12, py - pr * 0.28, pr * 0.18, pr * 0.56);
+      ctx.fillRect(startX, bY2_fixed + (bH_fixed - iconS) / 2, 8, iconS);
+      ctx.fillRect(startX + 12, bY2_fixed + (bH_fixed - iconS) / 2, 8, iconS);
     } else {
       ctx.beginPath();
-      ctx.moveTo(W / 2 - pr * 0.16, py - pr * 0.3); ctx.lineTo(W / 2 - pr * 0.16, py + pr * 0.3); ctx.lineTo(W / 2 + pr * 0.32, py);
-      ctx.closePath(); ctx.fill();
+      ctx.moveTo(startX, bY2_fixed + (bH_fixed - iconS) / 2);
+      ctx.lineTo(startX, bY2_fixed + (bH_fixed + iconS) / 2);
+      ctx.lineTo(startX + iconS, bY2_fixed + bH_fixed / 2);
+      ctx.fill();
     }
-    btn(W / 2 - pr, py - pr, pr * 2, pr * 2, () => {
+    text(label, startX + iconS + 10 + tW / 2, bY2_fixed + bH_fixed / 2, "bold 18px sans-serif", "#fff");
+    btn(bX2_fixed, bY2_fixed, bW_fixed, bH_fixed, () => {
       G.ensureAudio();
-      if (G.summonPlaying) G.stopSummonMusic(); else G.startSummonMusic();
+      if (G.summonPlaying) G.stopSummonMusic(); else G.startSummonKind(sel);
     });
+
+    ctx.restore();
   };
 
   /* ================= 游戏内 HUD =================
@@ -1001,6 +1473,7 @@ module.exports = function (G) {
     const wTime = Math.round(70 * ks);
     G.rr(ctx, hx + 10, hy, wTime, PH2, Math.round(9 * ks)); ctx.fill(); ctx.stroke();
     text(timeTxt, hx + 10 + wTime / 2, hy + PH2 / 2 + 1, "bold " + Math.round(15 * ks) + "px sans-serif", urgent ? "#ffd7d7" : "#fff");
+    ui.timePillRect = { x: hx + 10, y: hy, w: wTime, h: PH2 };   // 测试钩子：HUD 同行校验用
     // 捕获数药丸（64×28 × ks）
     const wHit = Math.round(64 * ks);
     const xHit = hx + 10 + wTime + 8;
@@ -1044,8 +1517,8 @@ module.exports = function (G) {
     if (menu && menu.width > 0) {
       if (land) {
         px = menu.left - 16 - pw2 - gcW;
-        py = menu.top + (menu.height - pw2) / 2;
-        // 大屏 S>1 时按钮比胶囊高，居中补偿可能顶出屏幕，钳制在安全区内
+        // 纵向锚定倒计时药丸中线（不跟胶囊的 top 走——部分机型胶囊偏下，会把暂停带离倒计时行）
+        py = hy + (PH2 - pw2) / 2;
         py = Math.max(py, safe.top + 6);
         // 极窄屏：靠太左会撞 HUD 药丸（右端 hx+26+184·ks + 16px 间距），退到胶囊下方
         if (px < hx + 26 + 184 * ks + 16) { px = W - safe.right - pw2 - 8; py = menu.bottom + 8; }
@@ -1204,30 +1677,35 @@ module.exports = function (G) {
         text(R.bonusTag, centerX, cardY + chh + 20, "bold 14px sans-serif", C.amberDeep);
         ctx.restore();
       }
-      const bw = (availW - gap * 3) / 4, by = btnTop;
-      const bg = ctx.createLinearGradient(leftX, by, leftX, by + 46);
+      // 四个按钮文案等长（4 字）：宽度按文案收紧、整行居中，不再撑满整个横屏宽度
+      ctx.font = "bold 17px sans-serif";
+      const rLabW = ctx.measureText("再来一局").width;
+      const bw = Math.min((availW - gap * 3) / 4, rLabW + 46), by = btnTop;
+      const rowOff = Math.max(0, (availW - (bw * 4 + gap * 3)) / 2);
+      const rX = leftX + rowOff;
+      const bg = ctx.createLinearGradient(rX, by, rX, by + 46);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
-      G.rr(ctx, leftX, by, bw, 46, 14); ctx.fill();
-      text("再来一局", leftX + bw / 2, by + 23, "bold 17px sans-serif", "#fff");
-      btn(leftX, by, bw, 46, () => G.requestStart());
+      G.rr(ctx, rX, by, bw, 46, 14); ctx.fill();
+      text("再来一局", rX + bw / 2, by + 23, "bold 17px sans-serif", "#fff");
+      btn(rX, by, bw, 46, () => G.requestStart());
       // 晒给猫友：分享带「猫咪反应测评图」，而不是"我得了 X 分"
-      const x2 = leftX + bw + gap;
+      const x2 = rX + bw + gap;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
       G.rr(ctx, x2, by, bw, 46, 14); ctx.fill(); ctx.stroke();
       text("晒给猫友", x2 + bw / 2, by + 23, "bold 17px sans-serif", C.teal);
       btn(x2, by, bw, 46, () => G.shareResult());
       // 存成图片：朋友圈发图不受游戏类分享限制
-      const x3 = leftX + (bw + gap) * 2;
+      const x3 = rX + (bw + gap) * 2;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.amber; ctx.lineWidth = 1.4;
       G.rr(ctx, x3, by, bw, 46, 14); ctx.fill(); ctx.stroke();
       text("存成图片", x3 + bw / 2, by + 23, "bold 17px sans-serif", C.amberDeep);
       btn(x3, by, bw, 46, () => G.saveCard());
-      const x4 = leftX + (bw + gap) * 3;
+      const x4 = rX + (bw + gap) * 3;
       ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
       G.rr(ctx, x4, by, bw, 46, 14); ctx.fill(); ctx.stroke();
       text("返回首页", x4 + bw / 2, by + 23, "bold 17px sans-serif", C.ink);
-      btn(x4, by, bw, 46, () => { G.screen = "home"; G.clearPreys(); });
+      btn(x4, by, bw, 46, () => { G.switchScreen("home"); G.clearPreys(); });
     } else {
       const modeLabel = modeName ? "本局结束 · " + modeName : "本局结束";
       const pTitleY = safe.top + innerH * 0.09;
@@ -1246,7 +1724,10 @@ module.exports = function (G) {
       const cw = (availW - 12) / 2, chh = 78;
       // 按钮几何先算出来：数据卡在「标题底 ↔ 按钮顶」之间垂直居中。
       // 原来固定 innerH*0.24 定位，在 2×2 按钮布局下会留出一大片空白。
-      const bw2 = (availW - 12) / 2, bh2 = 54;
+      // 按钮宽度按文案收紧（4 字文案不再撑满两列），一对按钮整行居中
+      const bh2 = 54;
+      const bw2 = Math.min((availW - 12) / 2, fitBtnWidth("再来一局", bh2, { bold: true }) + 8);
+      const pairL = edgeL + Math.max(0, (availW - (bw2 * 2 + 12)) / 2);
       const by4 = H - safe.bottom - 26 - bh2;
       const by1 = by4 - (bh2 + 14);
       const titleBottom = safe.top + innerH * 0.15 + 30;
@@ -1266,25 +1747,25 @@ module.exports = function (G) {
         ctx.restore();
       }
       // 四个按钮 2×2 网格：竖屏四段纵排会压到数据卡，网格更省高度、热区也更大
-      const rx = edgeL + bw2 + 12;
-      const bg = ctx.createLinearGradient(edgeL, by1, edgeL, by1 + bh2);
+      const rx = pairL + bw2 + 12;
+      const bg = ctx.createLinearGradient(pairL, by1, pairL, by1 + bh2);
       bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
       ctx.fillStyle = bg;
-      G.rr(ctx, edgeL, by1, bw2, bh2, 14); ctx.fill();
-      text("再来一局", edgeL + bw2 / 2, by1 + bh2 / 2, "bold 18px sans-serif", "#fff");
-      btn(edgeL, by1, bw2, bh2, () => G.requestStart());
+      G.rr(ctx, pairL, by1, bw2, bh2, 14); ctx.fill();
+      text("再来一局", pairL + bw2 / 2, by1 + bh2 / 2, "bold 18px sans-serif", "#fff");
+      btn(pairL, by1, bw2, bh2, () => G.requestStart());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
       G.rr(ctx, rx, by1, bw2, bh2, 14); ctx.fill(); ctx.stroke();
       text("晒给猫友", rx + bw2 / 2, by1 + bh2 / 2, "bold 17px sans-serif", C.teal);
       btn(rx, by1, bw2, bh2, () => G.shareResult());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.amber; ctx.lineWidth = 1.4;
-      G.rr(ctx, edgeL, by4, bw2, bh2, 14); ctx.fill(); ctx.stroke();
-      text("存成图片", edgeL + bw2 / 2, by4 + bh2 / 2, "bold 17px sans-serif", C.amberDeep);
-      btn(edgeL, by4, bw2, bh2, () => G.saveCard());
+      G.rr(ctx, pairL, by4, bw2, bh2, 14); ctx.fill(); ctx.stroke();
+      text("存成图片", pairL + bw2 / 2, by4 + bh2 / 2, "bold 17px sans-serif", C.amberDeep);
+      btn(pairL, by4, bw2, bh2, () => G.saveCard());
       ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
       G.rr(ctx, rx, by4, bw2, bh2, 14); ctx.fill(); ctx.stroke();
       text("返回首页", rx + bw2 / 2, by4 + bh2 / 2, "bold 17px sans-serif", C.ink);
-      btn(rx, by4, bw2, bh2, () => { G.screen = "home"; G.clearPreys(); });
+      btn(rx, by4, bw2, bh2, () => { G.switchScreen("home"); G.clearPreys(); });
     }
   };
 };

@@ -16,21 +16,8 @@ module.exports = function (G) {
       // 整屏格纹地毯：格子边长随屏取，横竖屏都好铺
       S.plaid = { cell: Math.max(64, Math.round(Math.min(W, H) / 4.6)) };
     }
-    if (type === "mouse" && S.mouseBg === "neon") {
-      // 霓虹格毯：更黑更粗的格纹 + 地毯上零星彩色微光点（缓慢呼吸）
-      S.neon = { cell: Math.max(104, Math.round(Math.min(W, H) / 2.5)), dots: [] };
-      const PAL = ["94,240,224", "255,122,192", "255,228,94", "157,140,255", "125,255,154", "255,159,94"];
-      const dn = Math.floor(rand(9, 13.99));
-      for (let i = 0; i < dn; i++) {
-        S.neon.dots.push({
-          x: rand(0.05, 0.95) * W, y: rand(0.1, 0.9) * H,
-          r: rand(2.2, 4.6), rgb: PAL[Math.floor(rand(0, PAL.length))],
-          ph: rand(0, Math.PI * 2), f: rand(0.8, 2.2)
-        });
-      }
-    }
 
-    // 只有 room（或激光暗室）才生成墙/窗/家具/地毯；plaid、neon 是整屏铺满的纯地面背景
+    // 只有 room（或激光暗室）才生成墙/窗/家具/地毯；plaid、swarm 是整屏铺满的纯地面背景
     const roomBg = type === "laser" || S.mouseBg === "room";
     if ((type === "mouse" || type === "laser") && roomBg) {
       // 窗户（光柱）：捕鼠模式地台全屏化后墙只剩顶部一条，窗户相应缩小
@@ -49,7 +36,16 @@ module.exports = function (G) {
       S.rugW = W * rand(0.36, 0.46);
       S.rugX = W * rand(0.1, 0.9) - S.rugW / 2;
     }
-    if (type === "mouse") {
+    if (type === "mouse" && S.mouseBg === "swarm") {
+      // 群鼠乱窜地板：深色底 + 大块暗斑（参考图的斑驳石地）；无洞口、无家具
+      S.swarmSpots = [];
+      const nsp = Math.floor(rand(9, 13.99));
+      for (let i = 0; i < nsp; i++) S.swarmSpots.push({
+        x: rand(0, W), y: rand(0, H), rx: rand(60, 150), ry: rand(40, 110),
+        rot: rand(0, Math.PI), a: rand(0.08, 0.2), lite: Math.random() < 0.3
+      });
+    }
+    if (type === "mouse" && S.mouseBg !== "swarm") {
       // 台球桌布局：四条边各 3 个洞（2 角洞 + 1 边中洞，共 8 个）+ 中场 2 个洞，共 10 个
       // 老鼠从任意洞出现、窜向任意洞，路线横穿台面，猫咪可点击拦截
       const b = G.bounds();
@@ -103,9 +99,10 @@ module.exports = function (G) {
       S.sandPts = [];
       const seg = 8;
       for (let i = 0; i <= seg; i++) S.sandPts.push(rand(6, 16));
-      // 石头
+      // 石头（泳池主题为开阔池水，不放石头/水草/底床装饰）
       S.stones = [];
-      const sn = Math.floor(rand(3, 5.99));
+      const pool = th.decor === "pool";
+      const sn = pool ? 0 : Math.floor(rand(3, 5.99));
       for (let i = 0; i < sn; i++) {
         const w = rand(30, 88);
         S.stones.push({ x: rand(4, Math.max(W - w - 8, 8)), y: H - rand(10, 26) - 14, w, h: w * rand(0.55, 0.75), rot: rand(-8, 8) * Math.PI / 180, tone: rand(0, 1) });
@@ -113,7 +110,7 @@ module.exports = function (G) {
       // 水草（每丛 2~3 叶；水草森林主题加密加高）
       S.plants = [];
       const kelp = th.decor === "kelp";
-      const pn = Math.floor(rand(kelp ? 7 : 4, kelp ? 10.99 : 6.99));
+      const pn = pool ? 0 : Math.floor(rand(kelp ? 7 : 4, kelp ? 10.99 : 6.99));
       for (let i = 0; i < pn; i++) {
         const blades = [];
         const bn = Math.floor(rand(kelp ? 3 : 2, kelp ? 5.99 : 3.99));
@@ -153,13 +150,24 @@ module.exports = function (G) {
           });
         }
       }
+      // 泳池主题专属：焦散网格间距 + 四角星芒（对齐泳池玩具参考图的网状光网 + 星光点）
+      if (th.decor === "pool") {
+        S.poolNet = { cs: Math.max(56, Math.round(Math.min(W, H) / 5.8)) };
+        S.poolStars = [];
+        const ns = Math.round(G.clamp(Math.min(W, H) / 85, 7, 13));
+        for (let i = 0; i < ns; i++) S.poolStars.push({
+          x: rand(0.06, 0.94), y: rand(0.08, 0.92), r: rand(5, 12),
+          ph: rand(0, Math.PI * 2), f: rand(0.6, 1.5), dx: rand(4, 12)
+        });
+      }
     }
     if (type === "pool") {
       // Peppy Cat 石板墙（对齐官方游玩背景：深棕灰不规则石块 + 深缝，衬托发光猎物）
+      // 密度控制：大块石板 + 窄缝 + 少裂纹，避免密集恐惧感
       S.stones = [];
-      const cell = Math.max(88, Math.round(Math.min(W, H) / 4.0));   // 石块基准边长
+      const cell = Math.max(150, Math.round(Math.min(W, H) / 2.6));  // 石块基准边长（更大更疏朗）
       const cols = Math.ceil(W / cell) + 1, rows = Math.ceil(H / cell) + 1;
-      const jx = cell * 0.30;                                        // 格点抖动 → 石块不规则
+      const jx = cell * 0.22;                                        // 格点抖动 → 石块不规则
       // 共享抖动格点：相邻石块共用顶点，拼合无缝
       const P = [];
       for (let i = 0; i <= cols; i++) {
@@ -179,13 +187,13 @@ module.exports = function (G) {
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
         const a = P[i][j], b = P[i + 1][j], c = P[i + 1][j + 1], d = P[i][j + 1];
         const cx = (a.x + b.x + c.x + d.x) / 4, cy = (a.y + b.y + c.y + d.y) / 4;
-        const ins = rand(0.055, 0.105);                     // 向心内缩 → 石块之间留深缝
+        const ins = rand(0.030, 0.055);                     // 向心内缩更小 → 缝隙更窄（弱化网状密孔感）
         const pts = [a, b, c, d].map(p => ({ x: p.x + (cx - p.x) * ins, y: p.y + (cy - p.y) * ins }));
-        // 石块内部的碎石裂线（1~2 条短折线，只做质感）
+        // 石块内部的碎石裂线（最多 1 条，弱化密集纹理）
         const cracks = [];
-        const cn3 = Math.floor(rand(0, 2.99));
-        for (let k = 0; k < cn3; k++) {
-          const e1 = pts[k % 4], e2 = pts[(k + 2) % 4];
+        if (Math.random() < 0.5) {
+          const k = Math.floor(rand(0, 4));
+          const e1 = pts[k], e2 = pts[(k + 2) % 4];
           const mx = (e1.x + e2.x) / 2 + rand(-8, 8), my = (e1.y + e2.y) / 2 + rand(-8, 8);
           cracks.push([e1.x + (cx - e1.x) * 0.25, e1.y + (cy - e1.y) * 0.25, mx, my]);
         }
@@ -193,6 +201,17 @@ module.exports = function (G) {
         S.stones.push({
           pts, cracks, c: sw[0], c2: sw[1],
           hi: "rgba(255,255,255," + rand(0.03, 0.075).toFixed(3) + ")"   // 受光边
+        });
+      }
+      // 背景萤尘：石板墙上缓漂呼吸的微光点（稀疏大间距，避免成片密集）
+      S.poolDust = [];
+      const nd = Math.round(Math.min(W, H) / 52);
+      for (let i = 0; i < nd; i++) {
+        S.poolDust.push({
+          x: rand(0, W), y: rand(0, H),
+          r: rand(1.5, 3.2), ph: rand(0, Math.PI * 2),
+          sp: rand(4, 10), amp: rand(6, 16),               // 上漂速度 / 左右摆幅
+          hue: rand(0, 1) < 0.72 ? "220,255,120" : "120,240,220"   // 黄绿为主、青色点缀
         });
       }
     }
@@ -352,6 +371,8 @@ module.exports = function (G) {
   function drawSea(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
     const th = S.theme || G.seaThemeNow();
+    // 泳池追鱼：整屏泳池布景（渐变池水 + 阳光 + 网状焦散 + 星芒 + 猫爪），无沙床/石头/水草
+    if (th.decor === "pool") { drawPoolSea(ctx, t); return; }
     // 背景：主题渐变（珊瑚海=原型色，深海/冰海/水草各自换色系）
     const g = ctx.createRadialGradient(W / 2, 0, 0, W / 2, 0, Math.max(W, H) * 1.1);
     g.addColorStop(0, th.bg[0]); g.addColorStop(0.52, th.bg[1]); g.addColorStop(1, th.bg[2]);
@@ -365,6 +386,24 @@ module.exports = function (G) {
       lg.addColorStop(0, "rgba(" + rayC + "," + rayA + ")"); lg.addColorStop(1, "rgba(" + rayC + ",0)");
       ctx.fillStyle = lg;
       ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx + 56, 0); ctx.lineTo(lx + 130, H); ctx.lineTo(lx + 30, H); ctx.closePath(); ctx.fill();
+    }
+    // 鱼群巡游：鱼团底一大团银白柔光（把整群鱼托成"一团亮光"；画在鱼层之下）
+    if (th.decor === "school") {
+      const fish = (G.preys || []).filter(q => q.type === "fish" && q.vx != null);
+      if (fish.length) {
+        let cx = 0, cy = 0;
+        fish.forEach(f => { cx += f.x; cy += f.y; });
+        cx /= fish.length; cy /= fish.length;
+        let r = 0;
+        fish.forEach(f => { r = Math.max(r, Math.hypot(f.x - cx, f.y - cy)); });
+        const rr = Math.max(r * 1.9, 130);
+        const gg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+        gg.addColorStop(0, "rgba(228,246,255,.30)");
+        gg.addColorStop(0.55, "rgba(190,232,255,.13)");
+        gg.addColorStop(1, "rgba(190,232,255,0)");
+        ctx.fillStyle = gg;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill();
+      }
     }
     // 沙床
     ctx.fillStyle = th.sand;
@@ -462,6 +501,135 @@ module.exports = function (G) {
     });
   }
 
+  /* ============ 泳池追鱼布景（对齐泳池玩具参考图；玩家是猫，画面只留水景） ============
+     亮蓝池水纵向渐变 + 阳光辉光/光柱 + 网状焦散光网（不规则格点缓漂连网，
+     青白细线双层 + 亮斑呼吸）+ 四角星芒闪烁 */
+  const vhash = (i, j, k) => {                    // 确定性格点杂湊（焦散网顶点漂移相位）
+    const s = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453;
+    return s - Math.floor(s);
+  };
+  function drawPoolSea(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    // 池水：纵向渐变（浅亮天蓝 → 钴蓝，阳光泳池）
+    let g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#41b7ee"); g.addColorStop(0.36, "#1e8fdc");
+    g.addColorStop(0.72, "#1560b8"); g.addColorStop(1, "#0e4a9e");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 顶部阳光辉光
+    g = ctx.createRadialGradient(W * 0.5, -H * 0.3, 0, W * 0.5, -H * 0.3, Math.max(W, H) * 0.95);
+    g.addColorStop(0, "rgba(255,255,255,.28)"); g.addColorStop(0.45, "rgba(255,255,255,.10)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 阳光光柱（泳池比海域更透亮）
+    for (let i = 0; i < 3; i++) {
+      const lx = W * (0.16 + i * 0.31) + Math.sin(t * 0.3 + i) * 14;
+      const lg = ctx.createLinearGradient(lx, 0, lx + 60, H);
+      lg.addColorStop(0, "rgba(215,245,255,.20)"); lg.addColorStop(1, "rgba(215,245,255,0)");
+      ctx.fillStyle = lg;
+      ctx.beginPath();
+      ctx.moveTo(lx, 0); ctx.lineTo(lx + 56, 0); ctx.lineTo(lx + 132, H); ctx.lineTo(lx + 30, H);
+      ctx.closePath(); ctx.fill();
+    }
+    drawPoolCaustics(ctx, t, W, H);               // 网状焦散光网 + 光斑
+    drawPoolStars(ctx, t);                        // 四角星芒（最上层的闪亮光点）
+  }
+
+  /* 网状焦散：格点随时间正弦合成缓漂（无状态、确定性），连成不规则网格；
+     每条边两遍描边（宽柔光 + 细亮线），透明度按各自相位呼吸 → 光网流动闪烁。
+     性能：整层画到离屏 canvas，每 ~1/24s 才重绘一次（2~3 帧一换），主循环只做一次 drawImage */
+  const poolCausticsCache = { cv: null, ctx: null, frame: -1 };
+  function drawPoolCaustics(ctx, t, W, H) {
+    const dpr = G.platform.dpr || 2;
+    if (!poolCausticsCache.cv) {
+      const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
+      poolCausticsCache.cv = mk();
+      poolCausticsCache.cv.width = Math.ceil(W * dpr);
+      poolCausticsCache.cv.height = Math.ceil(H * dpr);
+      poolCausticsCache.ctx = poolCausticsCache.cv.getContext("2d");
+    }
+    const f = Math.floor(t * 24);
+    if (f !== poolCausticsCache.frame) {
+      poolCausticsCache.frame = f;
+      const c2 = poolCausticsCache.ctx;
+      c2.setTransform(1, 0, 0, 1, 0, 0);
+      c2.clearRect(0, 0, poolCausticsCache.cv.width, poolCausticsCache.cv.height);
+      c2.scale(dpr, dpr);
+      const S = G.scene;
+      const cs = (S.poolNet && S.poolNet.cs) || 76;
+      const cols = Math.ceil(W / cs), rows = Math.ceil(H / cs);
+      const vx = (i, j) => i * cs + Math.sin(t * 0.30 + vhash(i, j, 1) * 6.283 + j * 0.53) * cs * 0.30
+                          + Math.sin(t * 0.16 + vhash(i, j, 3) * 6.283) * cs * 0.12;
+      const vy = (i, j) => j * cs + Math.cos(t * 0.26 + vhash(i, j, 2) * 6.283 + i * 0.47) * cs * 0.30
+                          + Math.cos(t * 0.13 + vhash(i, j, 4) * 6.283) * cs * 0.12;
+      const edge = (x1, y1, x2, y2) => {
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1;
+        const bow = Math.sin(t * 0.7 + mx * 0.028 + my * 0.02) * cs * 0.09;
+        c2.beginPath();
+        c2.moveTo(x1, y1);
+        c2.quadraticCurveTo(mx - dy / L * bow, my + dx / L * bow, x2, y2);
+        c2.stroke();
+      };
+      c2.save();
+      c2.globalCompositeOperation = "lighter";
+      c2.lineCap = "round";
+      // 亮斑：格内四边形淡填充（呼吸），对比度压低（长时间看不疲劳）
+      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+        const sh = 0.5 + 0.5 * Math.sin(t * 1.1 + vhash(i, j, 5) * 6.283);
+        const a = 0.012 + 0.034 * sh * sh;
+        const p = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(q => ({ x: vx(q[0], q[1]), y: vy(q[0], q[1]) }));
+        const mid = (a2, b2) => ({ x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 });
+        const m = mid(p[3], p[0]);
+        c2.beginPath(); c2.moveTo(m.x, m.y);
+        for (let k = 0; k < 4; k++) { const n = mid(p[k], p[(k + 1) % 4]); c2.quadraticCurveTo(p[k].x, p[k].y, n.x, n.y); }
+        c2.closePath();
+        c2.fillStyle = "rgba(170,235,255," + a.toFixed(3) + ")";
+        c2.fill();
+      }
+      // 网线：两遍（宽柔光打底 + 细亮线提神），透明度整体压低
+      for (let pass = 0; pass < 2; pass++) {
+        c2.strokeStyle = pass ? "rgba(200,245,255,.85)" : "rgba(120,210,255,.35)";
+        c2.lineWidth = pass ? 1.5 : 4.2;
+        for (let i = 0; i <= cols; i++) for (let j = 0; j <= rows; j++) {
+          const sh = 0.55 + 0.45 * Math.sin(t * 1.25 + vhash(i, j, 6) * 6.283);
+          c2.globalAlpha = (pass ? 0.22 : 0.15) * (0.35 + 0.65 * sh);
+          const x1 = vx(i, j), y1 = vy(i, j);
+          if (i < cols) edge(x1, y1, vx(i + 1, j), vy(i + 1, j));
+          if (j < rows) edge(x1, y1, vx(i, j + 1), vy(i, j + 1));
+        }
+      }
+      c2.globalAlpha = 1;
+      c2.restore();
+    }
+    ctx.drawImage(poolCausticsCache.cv, 0, 0, W, H);
+  }
+
+  /* 四角星芒：全屏稀疏的十字星光点，呼吸闪烁 + 缓慢漂移（lighter 叠加） */
+  function drawPoolStars(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    (S.poolStars || []).forEach(st => {
+      const tw = 0.5 + 0.5 * Math.sin(t * st.f + st.ph);
+      const a = (0.38 + 0.62 * tw * tw) * 0.95;
+      const r = st.r * (0.68 + 0.42 * tw);
+      const x = st.x * W + Math.sin(t * 0.22 + st.ph) * st.dx;
+      const y = st.y * H + Math.cos(t * 0.17 + st.ph * 1.3) * st.dx * 0.6;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r * 2.6);
+      rg.addColorStop(0, "rgba(215,246,255," + (a * 0.45).toFixed(2) + ")");
+      rg.addColorStop(1, "rgba(215,246,255,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(240,252,255," + a.toFixed(2) + ")";
+      const dia = (rx, ry) => {                   // 细长菱形（十字星的一支）
+        ctx.beginPath();
+        ctx.moveTo(x - rx, y); ctx.lineTo(x, y - ry); ctx.lineTo(x + rx, y); ctx.lineTo(x, y + ry);
+        ctx.closePath(); ctx.fill();
+      };
+      dia(r, r * 0.18); dia(r * 0.18, r);
+    });
+    ctx.restore();
+  }
+
   function drawGarden(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
     // 天空：原型 linear-gradient(180deg, #bfe3f5 0%, #e8f4d8 70%, #f5f0c8 100%)
@@ -518,7 +686,7 @@ module.exports = function (G) {
     if (S.type === "fish") drawSea(ctx, t);
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
-    else if (S.type === "mouse" && S.mouseBg === "neon") { drawNeonFloor(ctx, t); drawHoles(ctx); }
+    else if (S.type === "mouse" && S.mouseBg === "swarm") { drawSwarmFloor(ctx, t); }
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
   };
@@ -562,49 +730,25 @@ module.exports = function (G) {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
-  /* ============ 霓虹格毯（更黑更粗的格纹 + 彩色微光点） ============
-     对齐参考图：粗格暗毯做底，地毯上散着零星青/粉/黄霓虹反光；
-     老鼠自带柔光（见 prey.js render）、命中撒多彩光点 */
-  function drawNeonFloor(ctx, t) {
+  /* ============ 群鼠乱窜地板：深色斑驳石地（俯视群鼠模式，参考猫抓老鼠玩具） ============ */
+  function drawSwarmFloor(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
-    const cell = (S.neon && S.neon.cell) || 130;
-    ctx.fillStyle = "#0b100b"; ctx.fillRect(0, 0, W, H);
-    // 织纹（粗格布，斜纹更明显）
-    ctx.strokeStyle = "rgba(190,210,175,.06)"; ctx.lineWidth = 1.1;
-    for (let i = -H; i < W + H; i += 9) {
-      ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + H, H); ctx.stroke();
-    }
-    // 交替格（深橄榄 vs 纯黑，明暗要看得出来，否则整片糊黑）
-    for (let ix = 0, gx = 0; gx < W; ix++, gx += cell) {
-      for (let iy = 0, gy = 0; gy < H; iy++, gy += cell) {
-        ctx.fillStyle = (ix + iy) % 2 === 0 ? "rgba(0,0,0,.34)" : "rgba(118,132,92,.17)";
-        ctx.fillRect(gx, gy, cell, cell);
-      }
-    }
-    // 格线（更粗）
-    ctx.strokeStyle = "rgba(0,0,0,.55)"; ctx.lineWidth = 2.2;
-    for (let x = 0; x <= W; x += cell) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
-    for (let y = 0; y <= H; y += cell) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-    // 彩色微光点：呼吸 + 轻微漂移（地毯上的霓虹反光）
-    (S.neon ? S.neon.dots : []).forEach(d => {
-      const a = 0.4 + 0.5 * (0.5 + 0.5 * Math.sin(t * d.f + d.ph));
-      const dx = d.x + Math.sin(t * d.f * 0.5 + d.ph) * 6;
-      const dy = d.y + Math.cos(t * d.f * 0.4 + d.ph * 1.4) * 4;
-      const rg = ctx.createRadialGradient(dx, dy, 0, dx, dy, d.r * 4.4);
-      rg.addColorStop(0, "rgba(" + d.rgb + "," + (a * 0.85).toFixed(2) + ")");
-      rg.addColorStop(0.4, "rgba(" + d.rgb + "," + (a * 0.3).toFixed(2) + ")");
-      rg.addColorStop(1, "rgba(" + d.rgb + ",0)");
-      ctx.fillStyle = rg;
-      ctx.beginPath(); ctx.arc(dx, dy, d.r * 4.4, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(" + d.rgb + "," + a.toFixed(2) + ")";
-      ctx.beginPath(); ctx.arc(dx, dy, d.r, 0, Math.PI * 2); ctx.fill();
+    let g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#28312a"); g.addColorStop(1, "#141a15");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 大块暗斑/浅斑：斑驳石地质感
+    (S.swarmSpots || []).forEach(s => {
+      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot);
+      ctx.fillStyle = s.lite ? "rgba(255,255,240," + (s.a * 0.35).toFixed(3) + ")" : "rgba(0,0,0," + s.a.toFixed(3) + ")";
+      ctx.beginPath(); ctx.ellipse(0, 0, s.rx, s.ry, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     });
-    // 顶部压暗（HUD 可读）+ 暗角
+    // 顶部压暗（HUD 可读）+ 四周暗角
     const tg = ctx.createLinearGradient(0, 0, 0, H * 0.3);
-    tg.addColorStop(0, "rgba(0,0,0,.6)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+    tg.addColorStop(0, "rgba(0,0,0,.5)"); tg.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.3);
-    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.25, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
-    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.45)");
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.3, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.4)");
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
@@ -639,11 +783,26 @@ module.exports = function (G) {
       // 边缘受光细线
       path(p, Math.max(8, w0 * 0.10));
       ctx.strokeStyle = s.hi; ctx.lineWidth = 1.6; ctx.stroke();
-      // 碎石裂线
+      // 碎石裂线（低对比，弱化密集纹理）
       if (s.cracks && s.cracks.length) {
-        ctx.strokeStyle = "rgba(0,0,0,.30)"; ctx.lineWidth = 1.3;
+        ctx.strokeStyle = "rgba(0,0,0,.18)"; ctx.lineWidth = 1.1;
         s.cracks.forEach(k => { ctx.beginPath(); ctx.moveTo(k[0], k[1]); ctx.lineTo(k[2], k[3]); ctx.stroke(); });
       }
+    });
+    // 背景萤尘：缓慢上漂 + 左右正弦摆 + 呼吸发光（环境动效，衬托猎物但不抢戏）
+    (S.poolDust || []).forEach(d => {
+      let y = (d.y - t * d.sp) % (H + 40);
+      if (y < 0) y += H + 40;
+      const x = d.x + Math.sin(t * 0.5 + d.ph) * d.amp;
+      const a = 0.20 + 0.16 * Math.sin(t * 1.6 + d.ph);
+      if (a <= 0.02) return;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, d.r * 4.2);
+      rg.addColorStop(0, "rgba(" + d.hue + "," + (a * 0.85).toFixed(2) + ")");
+      rg.addColorStop(1, "rgba(" + d.hue + ",0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, d.r * 4.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(" + d.hue + "," + a.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
     });
     // 全局暗角：四周压暗，中心留亮（让猎物所在的中部更醒目）
     const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, Math.min(W, H) * 0.18, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
@@ -655,7 +814,7 @@ module.exports = function (G) {
   const fx = {
     bubbles: [], dust: [], pollen: [], scales: [], sparks: [], ripples: [],
     trails: [], scorches: [], petals: [], paws: [], floats: [], ambientT: 0,
-    droplets: [], shockwaves: [], flash: 0
+    droplets: [], shockwaves: [], flash: 0, confetti: []
   };
   G.fx = fx;
   const PUSH = (arr, o, cap) => { arr.push(o); if (arr.length > cap) arr.splice(0, arr.length - cap); };
@@ -665,27 +824,74 @@ module.exports = function (G) {
   G.pollenBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.pollen, { x: x + rand(-12, 12), y: y + rand(-12, 12), vx: rand(-24, 24), vy: rand(-34, -6), r: rand(1.5, 3.4), life: rand(0.7, 1.4) }, 80); };
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
   G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55), c: color }, 90); } fx.sparkColor = color; };
-  /* 夸张光爆（暗夜萤光专用）：发光碎点四溅 + 双层冲击环 + 闪白 + 大光波 */
-  G.splashBurst = (x, y, big) => {
+  /* 彩纸屑爆炸（鱼群巡游命中特效）：多彩小纸条四溅 + 金色扩散环（参考图的彩虹 confetti + 金圈） */
+  G.confettiBurst = (x, y) => {
+    const COLS = ["#ff5e8a", "#ffe45e", "#5ef0c0", "#5eb8ff", "#c07aff", "#ff9a4d", "#7dff8a"];
+    for (let i = 0; i < 18; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(120, 380);
+      PUSH(fx.confetti, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(40, 160),
+        rot: rand(0, 6.28), vr: rand(-9, 9), len: rand(6, 12), w: rand(2.4, 3.6),
+        life: rand(0.5, 0.95), c: COLS[i % COLS.length]
+      }, 60);
+    }
+    // 金色扩散环（细圈、慢扩）
+    PUSH(fx.shockwaves, { x, y, r: 14, life: 0.65, speed: 300, w: 3.5, color: "rgba(255,202,96,.95)" }, 12);
+  };
+  /* 群鼠命中爆彩：彩虹纸屑 + 外圈发光彩点 + 白色星芒点（对齐参考图"拍中炸出一圈彩色亮点"） */
+  G.swarmPopBurst = (x, y) => {
+    G.confettiBurst(x, y);
+    const COLS = [["#ffffff", "#7dff8a"], ["#ffffff", "#ffe45e"], ["#ffffff", "#5eb8ff"],
+                  ["#ffffff", "#c07aff"], ["#ffffff", "#ff7ad1"], ["#ffffff", "#7dffd4"]];
+    for (let i = 0; i < 18; i++) {
+      const a = (i / 18) * Math.PI * 2 + rand(-0.18, 0.18), sp = rand(110, 300);
+      const c = COLS[i % COLS.length];
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, r: rand(2.2, 4.6),
+        life: rand(0.45, 0.9), c0: c[0], c1: c[1], c2: "rgba(0,0,0,0)"
+      }, 90);
+    }
+    for (let i = 0; i < 7; i++) {
+      const a = rand(0, Math.PI * 2), rr = rand(18, 58);
+      PUSH(fx.sparks, {
+        x: x + Math.cos(a) * rr, y: y + Math.sin(a) * rr,
+        vx: rand(-14, 14), vy: rand(-14, 14), life: rand(0.35, 0.6), c: "#ffffff"
+      }, 90);
+    }
+  };
+
+  /* 夸张光爆/水花（暗夜萤光默认黄绿盘；泳池传 "gold" 金橙水花盘）：
+     发光碎点四溅 + 双层冲击环 + 闪白 + 大光波 */
+  const SPLASH_PAL = {
+    lime: { drop: ["#ffffff", "#f2ff9c", "rgba(150,240,130,.5)"], ring1: "rgba(255,248,190,.95)", ring2: "rgba(160,244,190,.9)",
+            glow: "rgba(240,255,150,.95)", spark: "#f4ffa8", rip: "rgba(226,255,140,.95)" },
+    gold: { drop: ["#ffffff", "#ffe27a", "rgba(255,150,40,.5)"], ring1: "rgba(255,236,170,.95)", ring2: "rgba(255,196,90,.9)",
+            glow: "rgba(255,220,120,.95)", spark: "#ffd76a", rip: "rgba(255,224,130,.95)" },
+    silver: { drop: ["#ffffff", "#d8f2ff", "rgba(140,200,255,.5)"], ring1: "rgba(238,250,255,.95)", ring2: "rgba(168,220,250,.9)",
+            glow: "rgba(205,238,255,.95)", spark: "#cfeaff", rip: "rgba(205,238,255,.95)" }
+  };
+  G.splashBurst = (x, y, big, pal) => {
+    const P = SPLASH_PAL[pal] || SPLASH_PAL.lime;
     const n = big ? 26 : 16;
     for (let i = 0; i < n; i++) {
       const a = rand(0, Math.PI * 2), sp = rand(140, big ? 520 : 360);
       const up = rand(90, big ? 300 : 210);                 // 垂直上抛分量（假 3D 迸溅）
       PUSH(fx.droplets, {
         x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - up,
-        r: rand(2.2, big ? 7.5 : 5.5), life: rand(0.55, 1.05)
+        r: rand(2.2, big ? 7.5 : 5.5), life: rand(0.55, 1.05),
+        c0: P.drop[0], c1: P.drop[1], c2: P.drop[2]
       }, 90);
     }
     // 双层冲击环（外环快、内环慢）
-    PUSH(fx.shockwaves, { x, y, r: 10, life: 1, speed: big ? 560 : 420, w: big ? 7 : 5, color: "rgba(255,248,190,.95)" }, 12);
-    PUSH(fx.shockwaves, { x, y, r: 6, life: 1, speed: big ? 330 : 250, w: big ? 4.5 : 3.5, color: "rgba(160,244,190,.9)" }, 12);
+    PUSH(fx.shockwaves, { x, y, r: 10, life: 1, speed: big ? 560 : 420, w: big ? 7 : 5, color: P.ring1 }, 12);
+    PUSH(fx.shockwaves, { x, y, r: 6, life: 1, speed: big ? 330 : 250, w: big ? 4.5 : 3.5, color: P.ring2 }, 12);
     // 命中点爆闪（半径快速外扩的实心光斑）
-    PUSH(fx.shockwaves, { x, y, r: 4, life: 1, speed: 240, w: 22, color: "rgba(240,255,150,.95)", glow: true }, 12);
+    PUSH(fx.shockwaves, { x, y, r: 4, life: 1, speed: 240, w: 22, color: P.glow, glow: true }, 12);
     fx.flash = Math.max(fx.flash, big ? 0.26 : 0.16);       // 全屏闪白（短暂，峰值压低护眼）
     // 大光波
-    PUSH(fx.ripples, { x, y, r: 8, life: 1, miss: false, color: "rgba(226,255,140,.95)", big: true }, 30);
+    PUSH(fx.ripples, { x, y, r: 8, life: 1, miss: false, color: P.rip, big: true }, 30);
     PUSH(fx.ripples, { x, y, r: 20, life: 0.85, miss: false, color: "rgba(255,255,255,.8)", big: true }, 30);
-    G.sparkBurst(x, y, "#f4ffa8", big ? 12 : 8);
+    G.sparkBurst(x, y, P.spark, big ? 12 : 8);
   };
   G.ripple = (x, y, miss) => {
     if (G.scene.type !== "fish" && G.scene.type !== "pool") return;
@@ -760,6 +966,12 @@ module.exports = function (G) {
       p.w = Math.max(0.6, p.w - d * (p.glow ? 30 : 10));
     });
     if (fx.flash > 0) fx.flash = Math.max(0, fx.flash - dt * 3.2);   // 闪白 ~0.3s 衰减完
+    /* 彩纸屑：抛物线飘落 + 自旋（鱼群命中） */
+    step(fx.confetti, (p, d) => {
+      p.x += p.vx * d; p.y += p.vy * d;
+      p.vx *= 0.985; p.vy = p.vy * 0.985 + 260 * d;
+      p.rot += p.vr * d;
+    });
     step(fx.trails, () => {});
     step(fx.scorches, () => {});
     step(fx.petals, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vy += 60 * d; p.rot += 3 * d; });
@@ -809,14 +1021,14 @@ module.exports = function (G) {
       ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
     });
-    /* 光爆碎点：黄绿发光小球（暗底上高亮） */
+    /* 光爆碎点：发光小球（黄绿=暗夜萤光默认，泳池金橙水花走逐粒自带色） */
     fx.droplets.forEach(p => {
       const a = Math.min(p.life * 1.5, 0.95);
       ctx.globalAlpha = a;
       const rg = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 0, p.x, p.y, p.r);
-      rg.addColorStop(0, "#ffffff");
-      rg.addColorStop(0.5, "#f2ff9c");
-      rg.addColorStop(1, "rgba(150,240,130,.5)");
+      rg.addColorStop(0, p.c0 || "#ffffff");
+      rg.addColorStop(0.5, p.c1 || "#f2ff9c");
+      rg.addColorStop(1, p.c2 || "rgba(150,240,130,.5)");
       ctx.fillStyle = rg;
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
     });
@@ -869,6 +1081,15 @@ module.exports = function (G) {
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.dir > 0 ? -0.3 : 0.3);
       ctx.beginPath(); ctx.ellipse(0, 0, 3.2, 4, 0, 0, Math.PI * 2); ctx.fill();
       for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.arc(i * 2.8, -5.4, 1.3, 0, Math.PI * 2); ctx.fill(); }
+      ctx.restore();
+    });
+    ctx.globalAlpha = 1;
+    /* 彩纸屑：多彩小纸条自旋飘落（鱼群命中） */
+    fx.confetti.forEach(p => {
+      ctx.globalAlpha = Math.min(p.life * 1.6, 0.95);
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.strokeStyle = p.c; ctx.lineWidth = p.w; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-p.len / 2, 0); ctx.lineTo(p.len / 2, 0); ctx.stroke();
       ctx.restore();
     });
     ctx.globalAlpha = 1;

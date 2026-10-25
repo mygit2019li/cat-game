@@ -4,6 +4,19 @@ module.exports = function (G) {
   const rand = G.rand, clamp = G.clamp;
   let preys = [];
   G.preys = preys;
+  /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
+  const inPoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "pool");
+  /* 鱼群信息：其他鱼的平均位置（聚拢目标），无同伴时返回 null */
+  const schoolInfo = (self) => {
+    let n = 0, sx = 0, sy = 0;
+    preys.forEach(q => {
+      if (q === self || q.type !== "fish" || q.vanishT > 0) return;
+      n++; sx += q.x; sy += q.y;
+    });
+    return n ? { n, x: sx / n, y: sy / n } : null;
+  };
+  /* 鱼群模式判定：捕鱼 + 当前海域为鱼群巡游（boids 结群游动，鱼不出屏） */
+  const inSchoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "school");
 
   /* 选洞：优先「未被占用 且 非蹲守热点」；不可用时依次放宽 */
   G.pickHoleIdx = (prey, excludeIdx) => {
@@ -92,9 +105,11 @@ module.exports = function (G) {
       this.applySize();
       this.spawn();
     }
-    /* 抽取鱼品种（forced 指定品种用于开局去重；复活/补点时重抽保证一局内种类丰富） */
+    /* 抽取鱼品种（forced 指定品种用于开局去重；复活/补点时重抽保证一局内种类丰富）
+       泳池追鱼由 fishSpeciesList 返回专属鱼种（与深海完全区分），其余海域取全表 */
     pickFishSpecies(forced) {
-      this.species = forced || G.FISH_SPECIES[Math.floor(rand(0, G.FISH_SPECIES.length))];
+      const list = (G.fishSpeciesList && G.fishSpeciesList()) || G.FISH_SPECIES;
+      this.species = forced || list[Math.floor(rand(0, list.length))];
       // 海域主题游速差异（只乘游速不动命中盒：深海慢幽、冰海快滑）
       this.speciesSpeed = this.species.speed * ((G.seaThemeNow && G.seaThemeNow().speed) || 1);
       this.baseW = this.species.w || this.def.w;
@@ -140,6 +155,18 @@ module.exports = function (G) {
       if (this.type === "laser" || this.type === "pool") {
         const s0 = this.laserSpot();
         this.x = s0.x; this.y = s0.y;
+        if (this.type === "pool") {
+          // pool 出生点压进固定容器内，直接以爬行状态入场
+          const pad = 26 * Math.pow(G.platform.S || 1, 0.4);
+          this.x = Math.min(Math.max(this.x, b.x + pad), b.x + b.w - pad);
+          this.y = Math.min(Math.max(this.y, b.y + pad), b.y + b.h - pad);
+          this.crawlAng = rand(0, Math.PI * 2);
+          this.straight = Math.random() < 0.5;        // 一半虫子走直线（撞边反射），一半蛇行
+          this.state = "crawl"; this.stateT = 0;
+          this.stateDur = rand(0.65, 1.1);
+          this.fade = 1;
+          return;
+        }
         this.baseY = this.y;
         this.state = "dart"; this.stateT = 0;
         this.stateDur = rand(this.def.dartMin, this.def.dartMax);
@@ -150,6 +177,18 @@ module.exports = function (G) {
         return;
       }
       if (this.type === "mouse") {
+        // 群鼠模式：无洞口——随机落位（互不重叠）+ 随机初始航向
+        if (G.scene.mouseBg === "swarm") {
+          for (let attempt = 0; attempt < 6; attempt++) {
+            this.x = b.x + rand(0.08, 0.92) * b.w;
+            this.y = b.y + rand(0.12, 0.88) * b.h;
+            if (!preys.some(q => q !== this && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
+          }
+          this.swimAng = rand(0, Math.PI * 2);
+          this.state = "scurry"; this.stateT = 0; this.stateDur = rand(0.7, 1.6);
+          this.fade = 1;
+          return;
+        }
         const idx0 = G.pickHoleIdx(this, -1);
         if (idx0 >= 0) this.setHole(idx0);
         else this.hole = { x: b.x + b.w / 2, y: b.y + b.h * 0.7 };
@@ -167,16 +206,46 @@ module.exports = function (G) {
       this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
       this.baseY = this.y;
     }
+    /* 平滑泳姿：朝目标点转向——转向速率有上限（慢鱼更缓），近边提前缓弯，
+       位置强制夹在屏内。鱼不会突然调头、也不会游出去淡出消失 */
+    steerFish(dt, MS, b, sp, tx, ty) {
+      if (this.headAng == null) this.headAng = this.dirX === 1 ? 0 : Math.PI;
+      const speedK = clamp((this.speciesSpeed || 1) * 1.15, 0.5, 1.8);
+      const rate = 1.9 * speedK;                                  // rad/s
+      let want = Math.atan2(ty - this.y, tx - this.x);
+      // 软边界：进入边缘缓冲带且朝外时，期望航向提前弯回屏内（缓弯，不是折返）
+      const pad = 68 * MS;
+      const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
+      if (this.x < L && Math.cos(want) < 0) want = 0;
+      else if (this.x > R && Math.cos(want) > 0) want = Math.PI;
+      if (this.y < T && Math.sin(want) < 0) want = Math.PI * 0.5;
+      else if (this.y > B && Math.sin(want) > 0) want = -Math.PI * 0.5;
+      // 转向速率上限
+      let da = want - this.headAng;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      const maxTurn = rate * dt;
+      this.headAng += clamp(da, -maxTurn, maxTurn);
+      // 游动 + 硬夹屏内
+      this.x += Math.cos(this.headAng) * sp * dt * MS;
+      this.y += Math.sin(this.headAng) * sp * dt * MS;
+      this.x = clamp(this.x, b.x + 10, b.x + b.w - 10);
+      this.y = clamp(this.y, b.y + 10, b.y + b.h - 10);
+      this.faceDir = Math.cos(this.headAng) >= 0 ? 1 : -1;
+      // 阶段①②沿泳道：完成调头后翻转前进方向，避免目标点来回拉扯（转向本身仍是缓弯）
+      if (this.stage < 3 && Math.cos(this.headAng) * (this.dirX || 1) < -0.55) this.dirX = -this.dirX;
+    }
     newWaypoint() {
       const b = G.bounds();
-      if (this.stage === 3 && Math.random() < 0.34) {   // 后期 1/3 航点在屏外，引诱游出
-        const side = Math.floor(rand(0, 4));
-        const m = rand(90, 170);
-        if (side === 0)      { this.wx = b.x - m;       this.wy = b.y + rand(this.def.yMin, this.def.yMax) * b.h; }
-        else if (side === 1) { this.wx = b.x + b.w + m; this.wy = b.y + rand(this.def.yMin, this.def.yMax) * b.h; }
-        else if (side === 2) { this.wx = b.x + rand(0.05, 0.95) * b.w; this.wy = b.y - m; }
-        else                 { this.wx = b.x + rand(0.05, 0.95) * b.w; this.wy = b.y + b.h + m; }
-        return;
+      // 航点永远在屏内（鱼不出屏、不淡出消失）
+      // 鱼群聚拢：航点围绕鱼群中心取点（不再满屏随机），让整群鱼一起移动
+      if (this.type === "fish") {
+        const g = schoolInfo(this);
+        if (g) {
+          this.wx = clamp(g.x + rand(-165, 165), b.x + 0.04 * b.w, b.x + 0.96 * b.w);
+          this.wy = clamp(g.y + rand(-120, 120), b.y + this.def.yMin * b.h, b.y + this.def.yMax * b.h);
+          return;
+        }
       }
       this.wx = b.x + rand(0.04, 0.96) * b.w;
       this.wy = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
@@ -193,22 +262,21 @@ module.exports = function (G) {
       if (!this.behavior) return 1;
       const b = this.behavior;
       if (b === "pulse") {
-        // 忽快忽慢：速度在 0.55×~1.6× 间正弦波动，像被逗弄的小鱼一惊一乍
-        return 0.55 + 1.05 * (0.5 + 0.5 * Math.sin(t * 1.15 + this.phase));
+        // 忽快忽慢：速度在 0.72×~1.28× 间正弦波动（收敛到均值 1×，对齐 23 日前的整体游速）
+        return 0.72 + 0.56 * (0.5 + 0.5 * Math.sin(t * 1.15 + this.phase));
       }
       if (b === "zigzag") {
-        // 突然转向：周期性甩头换向 + 短促加速（猎物最勾猫的"不可预测"）
+        // 灵活换线：周期性换泳道 / 换航点（不再瞬间翻转方向，靠光滑转向完成）
         this.behT -= dt;
         if (this.behT <= 0) {
-          this.behT = rand(0.8, 1.7);
-          this.burstT = Math.max(this.burstT, 0.32);
+          this.behT = rand(1.4, 2.6);
           if (this.stage === 3) this.newWaypoint();
           else {
-            this.dirX = -(this.dirX || this.faceDir || 1);
             const b2 = G.bounds();
             const top = b2.y + this.def.yMin * b2.h, bot = b2.y + this.def.yMax * b2.h;
-            if (this.stage === 2 && this.vAmp) this.midY = clamp(this.midY + rand(-70, 70), top + this.vAmp, bot - this.vAmp);
-            else this.baseY = clamp(this.baseY + rand(-50, 50), top, bot);
+            const lane = this.stage === 2 ? this.midY : this.baseY;
+            const shifted = clamp(lane + rand(-95, 95), top + 12, bot - 12);
+            if (this.stage === 2) this.midY = shifted; else this.baseY = shifted;
           }
         }
         return 1.05;
@@ -232,7 +300,7 @@ module.exports = function (G) {
           this.trail[i].life = (this.trail[i].life || 1) - dt * 1.15;
           if (this.trail[i].life <= 0) this.trail.splice(i, 1);
         }
-        return 0.92 + 0.22 * Math.abs(Math.cos(this.hopPhase));
+        return 1.05 - 0.05 * (1 - Math.abs(Math.cos(this.hopPhase)));
       }
       if (b === "stalk") {
         // 潜伏突进：慢速巡游 2s 上下 → 0.9s 爆发突进，鲨鱼捕猎节奏
@@ -256,6 +324,42 @@ module.exports = function (G) {
       if (this.type === "butterfly") { this.butterflyEnter(); return; }
       const b = G.bounds(), m = 110, FD = 120;
       const top = b.y + this.def.yMin * b.h, bot = b.y + this.def.yMax * b.h;
+      // 泳池模式：直接在屏内随机点入场（淡入），不从屏外游入
+      if (this.type === "fish" && inPoolMode()) {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          this.x = b.x + rand(0.08, 0.92) * b.w;
+          this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
+          if (!preys.some(q => q !== this && Math.hypot(q.x - this.x, q.y - this.y) < 90)) break;
+        }
+        this.swimAng = rand(0, Math.PI * 2);          // 入场即带随机航向
+        this._visAng = this.swimAng;
+        this.dirX = Math.cos(this.swimAng) >= 0 ? 1 : -1;
+        this.faceDir = this.dirX;
+        this.baseY = this.y;
+        if (this.stage === 2) this.midY = clamp(this.y, top + this.vAmp, bot - this.vAmp);
+        this.newWaypoint();
+        this.fade = 1;
+        return;
+      }
+      // 鱼群模式：第一条随机落位，后续贴着同伴入群（出生即在群里）
+      if (this.type === "fish" && inSchoolMode()) {
+        const mates = preys.filter(q => q !== this && q.type === "fish" && q.x != null);
+        if (mates.length) {
+          const m = mates[Math.floor(rand(0, mates.length))];
+          this.x = clamp(m.x + rand(-80, 80), b.x + 30, b.x + b.w - 30);
+          this.y = clamp(m.y + rand(-80, 80), b.y + 30, b.y + b.h - 30);
+        } else {
+          this.x = b.x + rand(0.15, 0.85) * b.w;
+          this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
+        }
+        const a = rand(0, Math.PI * 2);
+        this.vx = Math.cos(a) * this.def.speed;
+        this.vy = Math.sin(a) * this.def.speed;
+        this._visAng = a;
+        this.faceDir = Math.cos(a) >= 0 ? 1 : -1;
+        this.fade = 1;
+        return;
+      }
       const sides = this.stage === 3 ? [0, 1, 2, 3]
         : this.type === "butterfly"
           ? (Math.random() > 0.5 ? [2, 0, 1] : [1, 0, 2])   // 蝴蝶：上/左/右三向飞入
@@ -270,11 +374,154 @@ module.exports = function (G) {
         if (!crowded) break;
       }
       if (this.dirX) this.faceDir = this.dirX;
+      if (this.type === "fish") this.headAng = this.dirX === 1 ? 0 : Math.PI;   // 入场朝向与前进方向一致
       this.baseY = this.y;
       if (this.stage === 2) this.midY = clamp(this.y, top + this.vAmp, bot - this.vAmp);
       this.newWaypoint();
       this.fade = clamp(1 - m / FD, 0, 1);
     }
+    /* 鱼群巡游：鲸鱼捕猎式"饵球"——全体小鱼聚成一个致密鱼团，
+       群心缓慢漂移（共享虚拟引点），球内鱼群绕心旋转（漩涡），
+       叠加局部 boids（质心/对齐/近距分离）与法线漫游，边界软反弹，朝向平滑跟随速度 */
+    updateSchoolSwim(dt, t, sp, MS, b) {
+      if (this.vx == null) {
+        const a = rand(0, Math.PI * 2);
+        this.vx = Math.cos(a) * sp; this.vy = Math.sin(a) * sp;
+        this._visAng = a;
+      }
+      // 共享群心（漂移引点）：每帧只由第一条鱼推进（lastT 戳去重）
+      const S = G.scene;
+      if (!S.schoolC) {
+        S.schoolC = {
+          x: b.x + b.w * 0.5, y: b.y + b.h * 0.45,
+          tx: b.x + b.w * 0.5, ty: b.y + b.h * 0.45,
+          cd: 0, dir: Math.random() < 0.5 ? 1 : -1, flipCd: rand(5, 9), lastT: -1
+        };
+      }
+      const C = S.schoolC;
+      if (C.lastT !== t) {
+        C.lastT = t;
+        C.cd -= dt; C.flipCd -= dt;
+        if (C.flipCd <= 0) { C.flipCd = rand(5, 9); C.dir = -C.dir; }   // 漩涡定期换向
+        const dcx = C.tx - C.x, dcy = C.ty - C.y;
+        const dc = Math.hypot(dcx, dcy);
+        if (dc < 24 || C.cd <= 0) {                                      // 到点/超时 → 换漂移目标
+          C.tx = b.x + rand(0.26, 0.74) * b.w;                           // 目标收在屏幕中部，鱼群不散到边缘
+          C.ty = b.y + rand(0.24, 0.66) * b.h;
+          C.cd = rand(4, 7);
+        } else {
+          C.x += dcx / dc * 52 * dt; C.y += dcy / dc * 52 * dt;          // 群心缓慢漂移（过快会拖散队形）
+        }
+      }
+      // 局部 boids：质心 + 对齐 + 近距分离（22px，致密饵球）
+      let cx = 0, cy = 0, ax = 0, ay = 0, n = 0, sx = 0, sy = 0;
+      preys.forEach(q => {
+        if (q === this || q.type !== "fish" || q.vx == null) return;
+        const dx = q.x - this.x, dy = q.y - this.y;
+        const d2 = dx * dx + dy * dy;
+        cx += q.x; cy += q.y; ax += q.vx; ay += q.vy; n++;
+        if (d2 < 22 * 22 && d2 > 1) {
+          const dd = Math.sqrt(d2);
+          sx -= dx / dd * (22 - dd); sy -= dy / dd * (22 - dd);
+        }
+      });
+      let steerX = 0, steerY = 0;
+      if (n > 0) {
+        steerX += (cx / n - this.x) * 0.55 + (ax / n - this.vx) * 1.2 + sx * 2.6;
+        steerY += (cy / n - this.y) * 0.55 + (ay / n - this.vy) * 1.2 + sy * 2.6;
+      }
+      // 群心聚拢（越远拉力越大）+ 绕心漩涡（饵球旋转，方向随 C.dir 定期翻转）
+      const dxc = C.x - this.x, dyc = C.y - this.y;
+      const dc = Math.hypot(dxc, dyc) || 1;
+      const pull = sp * 2.2 * Math.min(1, dc / 130);           // 聚拢力加强：远处也被快速拉回（鱼群更紧）
+      steerX += dxc / dc * pull + -dyc / dc * sp * 0.5 * C.dir;   // 漩涡减弱 → 绕行半径变小
+      steerY += dyc / dc * pull + dxc / dc * sp * 0.5 * C.dir;
+      // 侧向漫游：球内个体微摆，避免机械同步
+      const wob = Math.sin(t * 1.3 + this.phase) * 0.26 * sp;
+      steerX += -Math.sin(this._visAng) * wob;
+      steerY += Math.cos(this._visAng) * wob;
+      // 转向 + 速度钳制
+      this.vx += steerX * dt; this.vy += steerY * dt;
+      const v = Math.hypot(this.vx, this.vy) || 1;
+      const cap = sp, min = sp * 0.65;
+      if (v > cap) { this.vx *= cap / v; this.vy *= cap / v; }
+      else if (v < min) { this.vx *= min / v; this.vy *= min / v; }
+      this.x += this.vx * dt * MS;
+      this.y += this.vy * dt * MS;
+      // 边界软反弹（不出屏）
+      const pad = 16 * MS;
+      const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
+      if (this.x < L) { this.x = L; this.vx = Math.abs(this.vx); }
+      else if (this.x > R) { this.x = R; this.vx = -Math.abs(this.vx); }
+      if (this.y < T) { this.y = T; this.vy = Math.abs(this.vy); }
+      else if (this.y > B) { this.y = B; this.vy = -Math.abs(this.vy); }
+      // 朝向平滑跟随速度方向
+      const ta = Math.atan2(this.vy, this.vx);
+      let d = ta - this._visAng;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this._visAng += d * Math.min(1, dt * 8);
+      this.faceDir = Math.cos(ta) >= 0 ? 1 : -1;
+    }
+
+    /* 泳池巡游：任意方向直线游动——随机航向 + 撞边反射 + 低频随机换向（直线段更长）；
+       贴边换向只选"朝池内"的角度、长时间位移不足自动朝池心纠偏（角落不卡死）；
+       视觉朝向平滑追赶航向（转身不瞬跳），帶极轻微摆动保持"活"感 */
+    updatePoolSwim(dt, t, sp, MS, b) {
+      if (this.swimAng == null) { this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng; }
+      // 换向计时：间隔拉长（3.2~5.6s）→ 直线段更长；贴边时只允许朝池内的航向
+      this.swimTurnCd = (this.swimTurnCd || rand(3.2, 5.6)) - dt;
+      if (this.swimTurnCd <= 0) { this.swimTurnCd = rand(3.2, 5.6); this.swimAng = this.pickPoolHeading(b); }
+      // 视觉角平滑追赶航向（按最短弧；限速 4.2rad/s，贴边反射时不至于原地猛甩尾）
+      let dAng = this.swimAng - this._visAng;
+      while (dAng > Math.PI) dAng -= Math.PI * 2;
+      while (dAng < -Math.PI) dAng += Math.PI * 2;
+      this._visAng += clamp(dAng * Math.min(1, dt * 9), -4.2 * dt, 4.2 * dt);
+      // 直线游动 + 极轻微正弦摆动
+      const ang = this._visAng + Math.sin(t * 3 + this.phase) * 0.05;
+      this.x += Math.cos(ang) * sp * dt * MS;
+      this.y += Math.sin(ang) * sp * dt * MS;
+      // 撞边反射：只在「确实朝墙外游」时翻转航向（否则贴边会每帧反复翻转 → 尾巴抖动闪动）；
+      // 位置无论如何都夹回池内
+      const pad = 14 * MS;
+      const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
+      if (this.x < L && Math.cos(this.swimAng) < 0)      this.swimAng = Math.PI - this.swimAng;
+      else if (this.x > R && Math.cos(this.swimAng) > 0) this.swimAng = Math.PI - this.swimAng;
+      if (this.y < T && Math.sin(this.swimAng) < 0)      this.swimAng = -this.swimAng;
+      else if (this.y > B && Math.sin(this.swimAng) > 0) this.swimAng = -this.swimAng;
+      this.x = clamp(this.x, L, R);
+      this.y = clamp(this.y, T, B);
+      // 卡死保险：连续 0.5s 位移不足（被夹在角落）→ 立即朝池心纠偏
+      const moved2 = (this.x - (this._lx != null ? this._lx : this.x)) ** 2 + (this.y - (this._ly != null ? this._ly : this.y)) ** 2;
+      this._stuckT = moved2 < 0.04 ? (this._stuckT || 0) + dt : 0;
+      if (this._stuckT > 0.5) {
+        this._stuckT = 0;
+        this.swimAng = Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x);
+        this._visAng = this.swimAng;
+      }
+      this._lx = this.x; this._ly = this.y;
+      // 左右朝向：按视觉角的水平分量判断，并留死区（垂直游动时不再每帧来回镜像 → 修复鱼尾闪动）
+      const ca = Math.cos(this._visAng);
+      if (ca > 0.34) this.faceDir = 1;
+      else if (ca < -0.34) this.faceDir = -1;
+    }
+
+    /* 挑选航向：远离墙壁（90px 内）时纯随机；贴边时重 roll 到"分量朝池内"的角度，
+       roll 不中兜底直接朝池心——保证换向不会把鱼抵在墙上/角落 */
+    pickPoolHeading(b) {
+      const nearL = this.x - b.x < 90, nearR = b.x + b.w - this.x < 90;
+      const nearT = this.y - b.y < 90, nearB = b.y + b.h - this.y < 90;
+      for (let i = 0; i < 10; i++) {
+        const a = rand(0, Math.PI * 2);
+        if (nearL && Math.cos(a) < 0.25) continue;
+        if (nearR && Math.cos(a) > -0.25) continue;
+        if (nearT && Math.sin(a) < 0.25) continue;
+        if (nearB && Math.sin(a) > -0.25) continue;
+        return a;
+      }
+      return Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x);
+    }
+
     vanish() {
       if (this.type === "butterfly" && this.state === "STARTLED") return;   // 惊飞中防重入
       this.vanishT = 0.3;
@@ -286,10 +533,22 @@ module.exports = function (G) {
         this.vy = -rand(80, 140);
         return;
       }
-      if (this.type === "mouse") {
+      if (this.type === "mouse" && !(G.scene && G.scene.mouseBg === "swarm")) {
         this.scared = true;
         this.state = "hole"; this.stateT = 0; this.mT = 0;
         this.x = this.hole.x; this.y = this.hole.y;
+      }
+      // 鱼群模式：被捕一条 → 邻近小鱼受惊四散（饵球被咬一口的炸开反应），速度上限会自然带回
+      if (this.type === "fish" && inSchoolMode()) {
+        preys.forEach(q => {
+          if (q === this || q.type !== "fish" || q.vx == null) return;
+          const dx = q.x - this.x, dy = q.y - this.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 1) {
+            const kk = (130 - Math.min(d, 130)) / 130 * 360 + 90;   // 全群拍散：近炸远也推
+            q.vx += dx / d * kk; q.vy += dy / d * kk;
+          }
+        });
       }
     }
     enterStage(n) {
@@ -302,11 +561,11 @@ module.exports = function (G) {
       if (n === 1) {
         if (!this.dirX) this.dirX = Math.random() > 0.5 ? 1 : -1;
         this.baseY = clamp(this.y, top, bot);
-        this.stageSpeed = 1.8;
+        this.stageSpeed = 1.1;                  // 开局放缓：让猫先抓到、再加速
       } else if (n === 2) {
         this.vAmp = Math.min((bot - top) * 0.28, Math.max(b.h * 0.16, 60));
         this.midY = clamp(this.y, top + this.vAmp, bot - this.vAmp);
-        this.stageSpeed = 1.1;
+        this.stageSpeed = 1.2;
       } else {
         this.stageSpeed = 1.0;
         this.newWaypoint();
@@ -318,13 +577,21 @@ module.exports = function (G) {
       const b = G.bounds();
       const MS = Math.pow(G.platform.S || 1, 0.5);   // 大屏下按比例略微提速，保持相对运动手感
       this.comboSpeed += ((this.comboSpeedTarget || 1) - this.comboSpeed) * Math.min(1, dt * 6);
-      if (this.type === "mouse")   { this.updateMouse(dt, t); return; }
+      if (this.type === "mouse")   {
+        if (G.scene.mouseBg === "swarm") { this.updateSwarmMouse(dt, t); return; }
+        this.updateMouse(dt, t); return;
+      }
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
-      if (this.type === "laser" || this.type === "pool") { this.updateLaser(dt, t); return; }
+      if (this.type === "pool") { this.updateCrawl(dt, t); return; }
+      if (this.type === "laser") { this.updateLaser(dt, t); return; }
       // ---- 鱼：三阶段 ----
       const d = this.def;
       this.dartCd -= dt; this.burstT -= dt;
-      if (this.cruiser) this.burstT = 0;
+      // 冲刺只给「游速快」的鱼种（鲨鱼/沙丁鱼）；慢鱼与普通鱼恒速巡游，不做突然加速
+      const canDash = !!(this.species && this.species.burst && this.species.speed >= 1.0);
+      // 泳池模式：定时冲刺移除——恒速巡游，节奏靠随机换向计时与撞边反射
+      if (this.type === "fish" && inPoolMode()) { this.burstT = 0; this.dartCd = 1; }
+      else if (this.cruiser || !canDash) this.burstT = 0;
       else if (this.dartCd <= 0) this.dartNow();
       if (this.stage !== G.session.stage) this.enterStage(G.session.stage);
       if (this.vanishT > 0) {
@@ -332,33 +599,26 @@ module.exports = function (G) {
         if (this.vanishT <= 0) { this.vanishT = 0; if (this.type === "fish") this.pickFishSpecies(); this.warpIn(); }
       }
       const behSp = this.behaviorTick(dt, t);   // Peppy Cat 式行为节奏（无 behavior 返回 1）
-      const sp = d.speed * this.speedMul * this.comboSpeed * this.adaptiveSlow * this.speciesSpeed * (this.cruiser ? 1.5 : 1) * this.stageSpeed * behSp * (this.burstT > 0 ? (this.speciesBurst || 3.1) : 1);
-      if (this.stage === 1) {
-        this.x += this.dirX * sp * dt * MS;
-        this.y = this.baseY + Math.sin(t * 2 + this.phase) * 3;
-        this.faceDir = this.dirX;
-      } else if (this.stage === 2) {
-        this.x += this.dirX * sp * 0.8 * dt * MS;
-        this.y = this.midY + Math.sin(t * 2.0 + this.phase) * this.vAmp;
-        this.faceDir = this.dirX;
-      } else {
-        let ang = Math.atan2(this.wy - this.y, this.wx - this.x);
-        ang += Math.sin(t * d.wobF + this.phase) * d.wobA * (this.cruiser ? 0.3 : 1);
-        this.x += Math.cos(ang) * sp * dt * MS;
-        this.y += Math.sin(ang) * sp * dt * MS;
-        if (Math.abs(Math.cos(ang)) > 0.25) this.faceDir = Math.cos(ang) > 0 ? 1 : -1;
+      // 鱼群巡游：屏蔽单体冲刺（burst 会把个别小鱼甩出鱼团，导致队形散开）
+      const burstMul = (this.burstT > 0 && canDash && !inSchoolMode()) ? (this.speciesBurst || 3.1) : 1;
+      const sp = d.speed * this.speedMul * this.comboSpeed * this.adaptiveSlow * this.speciesSpeed * (this.cruiser ? 1.5 : 1) * this.stageSpeed * behSp * burstMul;
+      // 泳池模式：任意方向直线巡游（随机航向 + 撞边反射 + 定时/冲刺换向），不走三阶段
+      if (this.type === "fish" && inPoolMode()) {
+        this.updatePoolSwim(dt, t, sp, MS, b);
+      } else if (this.type === "fish" && inSchoolMode()) {
+        this.updateSchoolSwim(dt, t, sp, MS, b);       // 鱼群模式：boids 结群游动
+      } else if (this.stage === 3) {
+        // 阶段③：朝航点平滑转向（转向速率有上限，绝不瞬间调头）
+        this.steerFish(dt, MS, b, sp, this.wx, this.wy);
         const dx = this.wx - this.x, dy = this.wy - this.y;
         if (dx * dx + dy * dy < 3600) this.newWaypoint();
+      } else {
+        // 阶段①②：沿泳道前进，纵向缓慢收敛到泳道高度（同样的平滑转向模型）
+        const laneY = this.stage === 1 ? this.baseY : this.midY;
+        this.steerFish(dt, MS, b, sp, this.x + this.dirX * 320, laneY);
       }
-      // 边界渐隐
-      const FD = 120;
-      let past = 0;
-      if (this.x < b.x) past = b.x - this.x;
-      else if (this.x > b.x + b.w) past = this.x - (b.x + b.w);
-      if (this.y < b.y) past = Math.max(past, b.y - this.y);
-      else if (this.y > b.y + b.h) past = Math.max(past, this.y - (b.y + b.h));
-      this.fade = clamp(1 - past / FD, 0, 1);
-      if (past >= FD && this.vanishT <= 0) this.warpIn();
+      // 边界：位置已在 steerFish 内夹在屏内，鱼不会游出屏幕淡出消失
+      this.fade = 1;
     }
 
     /* ============ 老鼠：peek → dart → hole ============ */
@@ -392,6 +652,79 @@ module.exports = function (G) {
       this.state = "dart";
       G.dustBurst(this.x, this.dartFromY + 6, 2);
     }
+    /* ============ 群鼠乱窜：俯视群鼠状态机 ============
+       无洞口——scurry 直线疾走（随机航向+撞边反射）→ 随机换向或短暂停顿（停顿=主要命中窗口）；
+       被拍中走 vanish 动画，结束后随机换位重生，满屏数量恒定 */
+    updateSwarmMouse(dt, t) {
+      const b = G.bounds(), MS = Math.pow(G.platform.S || 1, 0.5);
+      if (this.swimAng == null) this.swimAng = rand(0, Math.PI * 2);
+      if (this._visAng == null) this._visAng = this.swimAng;   // 朝向单独初始化（spawn 只给了 swimAng）
+      // 消失动画：倒计时结束随机换位重生
+      if (this.vanishT > 0) {
+        this.vanishT -= dt;
+        if (this.vanishT <= 0) {
+          this.vanishT = 0;
+          for (let attempt = 0; attempt < 5; attempt++) {
+            this.x = b.x + rand(0.1, 0.9) * b.w;
+            this.y = b.y + rand(0.14, 0.86) * b.h;
+            if (!preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
+          }
+          this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng;
+          this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8);
+          this.fade = 1;
+        }
+        return;                                   // 消失期间不移动
+      }
+      if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+
+      const pad = 20 * MS;
+      const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
+
+      // 节奏：直爬一段 → 偶尔停一下；换向只做小幅调整（不画圈）
+      this.stateT += dt;
+      if (this.state === "pause") {
+        if (this.stateT >= this.stateDur) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+      } else if (this.stateT >= this.stateDur) {
+        this.stateT = 0;
+        if (Math.random() < 0.45) { this.state = "pause"; this.stateDur = 0.4; }   // 停驻嗅探 0.4s = 命中窗口
+        else { this.stateDur = rand(1.4, 2.8); this._turnTo = this.swimAng + rand(-0.45, 0.45); }   // 小幅转向也平滑过渡
+      }
+
+      if (this.state !== "pause") {
+        const sp = this.def.speed * this.speedMul * (1 + ((G.session.stage || 1) - 1) * 0.16)
+          * (this.adaptiveSlow || 1) * (this.comboSpeed || 1);
+        // 撞墙后的新航向：逐步转过去（沿墙滑行），不瞬间甩头
+        if (this._turnTo != null) {
+          let da = this._turnTo - this.swimAng;
+          while (da > Math.PI) da -= Math.PI * 2;
+          while (da < -Math.PI) da += Math.PI * 2;
+          const step = 3.6 * dt;
+          this.swimAng += clamp(da, -step, step);
+          if (Math.abs(da) < 0.06) this._turnTo = null;
+        }
+        // 直线前进（位移沿当前朝向，不绕目标点转圈）
+        this.x += Math.cos(this.swimAng) * sp * dt * MS;
+        this.y += Math.sin(this.swimAng) * sp * dt * MS;
+        // 撞墙：夹回屏内 + 指定一个朝屏内的新航向（下面逐步转过去）
+        let bumped = false;
+        if (this.x < L)      { this.x = L; this._turnTo = rand(-0.7, 0.7); bumped = true; }
+        else if (this.x > R) { this.x = R; this._turnTo = Math.PI + rand(-0.7, 0.7); bumped = true; }
+        if (this.y < T)      { this.y = T; this._turnTo = Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
+        else if (this.y > B) { this.y = B; this._turnTo = -Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
+        if (bumped) { this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+      }
+
+      // 位置兜底夹在屏内
+      this.x = clamp(this.x, b.x + 16 * MS, b.x + b.w - 16 * MS);
+      this.y = clamp(this.y, b.y + 16 * MS, b.y + b.h - 16 * MS);
+      // 渲染朝向快速对齐实际航向（撞墙换向时也不会长时间背对前进方向）
+      let dv = this.swimAng - this._visAng;
+      while (dv > Math.PI) dv -= Math.PI * 2;
+      while (dv < -Math.PI) dv += Math.PI * 2;
+      this._visAng += clamp(dv, -9 * dt, 9 * dt);
+      this.faceDir = Math.cos(this.swimAng) >= 0 ? 1 : -1;
+    }
+
     updateMouse(dt, t) {
       if (this.stage !== G.session.stage) this.enterStage(G.session.stage);
       if (this.vanishT > 0) {
@@ -591,9 +924,8 @@ module.exports = function (G) {
         if (p >= 1) {
           this.vanishT = 0;
           this.warpIn();
-          this.state = "FLAP"; this.stateT = 0;
-          this.flapDur = rand(0.16, 0.26);
-          this.applyFlapImpulse();
+          this.state = "HOVER"; this.stateT = 0;
+          this.hoverDur = 0.3;                  // 惊飞后先悬停 0.3s 再加速（给猫反应窗口）
         }
         return;
       }
@@ -740,8 +1072,93 @@ module.exports = function (G) {
       }
       return best || { x: b.x + rand(0.03, 0.97) * b.w, y: b.y + rand(0.03, 0.97) * b.h };
     }
-    laserTeleport() {
-      const s0 = this.laserSpot();
+    /* 暗夜萤光：虫子在石板地上爬行（慢速爬 → 停驻命中窗口 → 原地转向再爬），
+       全程在固定容器内连续移动，不瞬移不消失 */
+    updateCrawl(dt, t) {
+      const b = G.bounds();
+      if (this.stage !== G.session.stage) this.stage = G.session.stage;
+      const P = G.POOL_PARAMS[this.stage] || G.POOL_PARAMS[1];
+      if (this.vanishT > 0) {
+        this.vanishT -= dt;
+        if (this.vanishT <= 0) {
+          this.vanishT = 0;
+          const s0 = this.laserSpot();
+          this.x = s0.x; this.y = s0.y;
+          this.crawlAng = rand(0, Math.PI * 2);
+          this.straight = Math.random() < 0.5;        // 一半虫子走直线（撞边反射），一半蛇行
+          this.state = "crawl"; this.stateT = 0;
+          this.stateDur = rand(P.dart[0], P.dart[1]);
+        }
+        return;
+      }
+      const MS = Math.pow(G.platform.S || 1, 0.5);
+      const inset = 26 * Math.pow(G.platform.S || 1, 0.4);   // 只留极窄边距防裁切，虫子可爬到屏幕边缘
+      const L = b.x + inset, Rt = b.x + b.w - inset, T = b.y + inset, Bm = b.y + b.h - inset;
+      if (this.crawlAng == null) this.crawlAng = rand(0, Math.PI * 2);
+      this.stateT += dt;
+      if (this.state === "crawl") {
+        // 爬行：前进 + 行为分流——直线虫走直线撞边才转向，蛇行虫带正弦微摆
+        const stage = G.session.stage || 1;
+        const sp = (195 + (stage - 1) * 72) * MS * this.speedMul * (this.adaptiveSlow || 1);   // 连击只加光效不加速度
+        if (!this.straight) this.crawlAng += Math.sin(t * 3.1 + this.phase) * 1.5 * dt;
+        // 同伴避让：靠近其他虫子时平滑转向离开（避免重叠）
+        const keepOut = 115 * MS;
+        preys.forEach(q => {
+          if (q === this || q.type !== "pool" || q.vanishT > 0) return;
+          const dx = this.x - q.x, dy = this.y - q.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.01 && d < keepOut) {
+            let da = Math.atan2(dy, dx) - this.crawlAng;
+            while (da > Math.PI) da -= Math.PI * 2;
+            while (da < -Math.PI) da += Math.PI * 2;
+            this.crawlAng += da * Math.min(1, (1 - d / keepOut) * 6) * dt * 6;
+          }
+        });
+        this.x += Math.cos(this.crawlAng) * sp * dt;
+        this.y += Math.sin(this.crawlAng) * sp * dt;
+        // 边界处理：直线虫像台球一样沿边反射（撞边才改变方向）；蛇行虫朝中心折返
+        if (this.x < L || this.x > Rt || this.y < T || this.y > Bm) {
+          this.x = Math.min(Math.max(this.x, L), Rt);
+          this.y = Math.min(Math.max(this.y, T), Bm);
+          if (this.straight) {
+            if (this.x <= L || this.x >= Rt) this.crawlAng = Math.PI - this.crawlAng;
+            if (this.y <= T || this.y >= Bm) this.crawlAng = -this.crawlAng;
+          } else {
+            this.crawlAng = Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x) + rand(-0.5, 0.5);
+          }
+        }
+        // 爬行留下荧光足迹
+        this.trailAcc += Math.hypot(this.x - (this.lastTrailX || this.x), this.y - (this.lastTrailY || this.y));
+        if (this.trailAcc > 26) { this.trailAcc = 0; G.laserTrail(this.x, this.y, "pool"); }
+        this.lastTrailX = this.x; this.lastTrailY = this.y;
+        if (this.stateT >= this.stateDur) {
+          this.state = "pause"; this.stateT = 0;
+          this.stateDur = rand(P.hold[0], P.hold[1]) * 1.5;   // 停驻 = 主要命中窗口
+        }
+      } else {
+        // 停驻：原地不动，触角轻摆；被同伴逼近时缓慢挪开（避免叠在一起）
+        this.crawlAng += Math.sin(t * 1.7 + this.phase) * 0.25 * dt;
+        const keepOut2 = 95 * MS;
+        preys.forEach(q => {
+          if (q === this || q.type !== "pool" || q.vanishT > 0) return;
+          const dx = this.x - q.x, dy = this.y - q.y;
+          const d = Math.hypot(dx, dy);
+          if (d > 0.01 && d < keepOut2) {
+            const push = 55 * MS * dt * (1 - d / keepOut2);
+            this.x = Math.min(Math.max(this.x + dx / d * push, L), Rt);
+            this.y = Math.min(Math.max(this.y + dy / d * push, T), Bm);
+          }
+        });
+        if (this.stateT >= this.stateDur / Math.sqrt(Math.max(this.comboSpeed || 1, 1))) {
+          this.stateT = 0;
+          this.state = "crawl";
+          this.stateDur = rand(P.dart[0], P.dart[1]);
+          if (!this.straight) this.crawlAng += rand(-1.3, 1.3);   // 蛇行虫起步前原地转向；直线虫保持原方向
+        }
+      }
+      this.fade = 1;
+    }
+    laserTeleport() {      const s0 = this.laserSpot();
       this.x = s0.x; this.y = s0.y;
       if (this.type === "pool") {
         // 萤光瞬移：只散几点萤火碎屑，不出冲击环——环留给真实命中（防满屏圆环抢戏）
@@ -751,6 +1168,7 @@ module.exports = function (G) {
         G.laserFlash(this.x, this.y, this.laserVar && this.laserVar.key);
       }
       this.laserNewWaypoint();
+      if (this.type === "pool") this._headAng = Math.atan2(this.vy, this.vx);   // 瞬移后立即朝向新航向
     }
     updateLaser(dt, t) {
       const d = this.def, b = G.bounds();
@@ -769,16 +1187,31 @@ module.exports = function (G) {
         return;
       }
       this.stateT += dt;
+      // 瞬移预警：原地高频闪烁 0.3s（渲染层按 preTele 处理闪烁），结束后瞬移
+      if (this.state === "preTele") {
+        if (this.stateT >= 0.3) { this.state = "dart"; this.stateT = 0; this.laserTeleport(); }
+        this.fade = 1;
+        return;
+      }
+      // pool 专属固定容器：飞行/悬停都约束在这块内缩区域里（不贴边、不瞬移出容器）
+      const inset = isPool ? 46 * Math.pow(G.platform.S || 1, 0.4) : 10;
+      const L = b.x + inset, Rt = b.x + b.w - inset, T = b.y + inset, B = b.y + b.h - inset;
       if (this.state === "dart") {
         const sp = d.speed * this.speedMul * this.comboSpeed * (this.adaptiveSlow || 1) * (this.speciesSpeed || 1);
         const MS = Math.pow(G.platform.S || 1, 0.5);
         this.x += this.vx * sp * dt * MS;
         this.y += this.vy * sp * dt * MS;
+        if (isPool) {
+          // 飞行侧摆：沿速度法线做正弦摆动（S 形飘飞，像扇着翅膀滑翔，替代直线乱窜）
+          const sway = Math.sin(t * 4.6 + this.phase) * 30 * dt * MS;
+          this.x += -this.vy * sway;
+          this.y += this.vx * sway;
+        }
         let bounced = false;
-        if (this.x < b.x + 10)            { this.x = b.x + 10;            this.vx = Math.abs(this.vx); bounced = true; }
-        else if (this.x > b.x + b.w - 10) { this.x = b.x + b.w - 10;      this.vx = -Math.abs(this.vx); bounced = true; }
-        if (this.y < b.y + 10)            { this.y = b.y + 10;            this.vy = Math.abs(this.vy); bounced = true; }
-        else if (this.y > b.y + b.h - 10) { this.y = b.y + b.h - 10;      this.vy = -Math.abs(this.vy); bounced = true; }
+        if (this.x < L)         { this.x = L;             this.vx = Math.abs(this.vx); bounced = true; }
+        else if (this.x > Rt)   { this.x = Rt;            this.vx = -Math.abs(this.vx); bounced = true; }
+        if (this.y < T)         { this.y = T;             this.vy = Math.abs(this.vy); bounced = true; }
+        else if (this.y > B)    { this.y = B;             this.vy = -Math.abs(this.vy); bounced = true; }
         if (bounced) {
           G.playBounce();
           this.wx = this.x + this.vx * 260; this.wy = this.y + this.vy * 260;
@@ -797,8 +1230,9 @@ module.exports = function (G) {
         if (near || this.stateT >= this.stateDur * 2.2) {
           this.state = "hold"; this.stateT = 0;
           this.stateDur = rand(P.hold[0], P.hold[1]);
-        } else if (Math.random() < P.tele * dt * 8) {
-          this.laserTeleport();
+        } else if (!isPool && Math.random() < P.tele * dt * 8) {
+          // pool 不瞬移：只在固定容器内连续飞行（避免"突然消失"）；激光瞬移前先闪烁预警 0.3s
+          this.state = "preTele"; this.stateT = 0;
         }
       } else {
         // hold 停留（主要命中窗口）
@@ -806,9 +1240,8 @@ module.exports = function (G) {
         this.y += Math.cos(t * 8.3 + this.phase) * 2 * dt;
         if (this.stateT >= this.stateDur / Math.sqrt(Math.max(this.comboSpeed || 1, 1))) {
           this.stateT = 0;
-          this.state = "dart";
-          if (Math.random() < P.tele) this.laserTeleport();
-          else this.laserNewWaypoint();
+          if (!isPool && Math.random() < P.tele) { this.state = "preTele"; }
+          else { this.state = "dart"; this.laserNewWaypoint(); }
         }
       }
       this.fade = 1;
@@ -818,13 +1251,23 @@ module.exports = function (G) {
     hittable(x, y) {
       if (this.vanishT > 0) return false;
       // 蝴蝶移动快、入场频繁：宽容判定（外扩 1.7 倍 ≈ 可见翅膀再加大圈容错边；半透明期放宽到 0.25）
-      const bPad = this.type === "butterfly" ? 1.7 : 1;
+      // 鱼群小鱼太小：外扩 1.5 倍保证猫拍得中
+      const bPad = this.type === "butterfly" ? 1.7
+        : (this.type === "fish" && inSchoolMode()) ? 1.5
+        : this.type === "laser" ? 1.25 : 1;              // 激光光点小：命中区外扩 25% 好拍
       const fMin = this.type === "butterfly" ? 0.25 : 0.4;
       if (this.fade < fMin) return false;
       const hw = this.baseW * this.sc * (this.sxMul || 1) / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
       const cy = this.y - (this.hopOff || 0);       // hop 弹跳偏移：命中跟着视觉走
       if (Math.abs(x - this.x) > hw || Math.abs(y - cy) > hh) return false;
-      if (this.type === "mouse") return (this.state === "peek" || this.state === "dart") && this.lift < 48;
+      if (this.type === "mouse") {
+        if (G.scene && G.scene.mouseBg === "swarm") {
+          // 群鼠：加高命中盒覆盖头+耳（视觉 120×100,命中 116×86 中心略偏上）
+          const hw2 = this.baseW * this.sc * 0.42, hh2 = this.baseH * this.sc * 0.74;
+          return Math.abs(x - this.x) <= hw2 && Math.abs(y - this.y - this.baseH * this.sc * 0.08) <= hh2;
+        }
+        return (this.state === "peek" || this.state === "dart") && this.lift < 48;
+      }
       if (this.type === "butterfly") return this.state !== "TAKEOFF" && this.state !== "STARTLED";
       return true;
     }
@@ -837,24 +1280,32 @@ module.exports = function (G) {
       ctx.save();
       ctx.globalAlpha = clamp(alpha, 0, 1);
       if (this.type === "mouse") {
-        // 裁剪到猎物包围盒（模拟 overflow:hidden 的洞口钻出效果）
-        const hw = this.baseW * this.sc / 2, hh = this.baseH * this.sc / 2;
-        ctx.translate(this.x, this.y);
-        // 霓虹格毯：老鼠自带柔光（参考图的"发光白鼠"）；必须先于裁剪，否则光晕被裁成方块
-        if (G.scene && G.scene.mouseBg === "neon") {
-          const gr = ctx.createRadialGradient(0, -6 * this.sc, 0, 0, -6 * this.sc, 50 * this.sc);
-          gr.addColorStop(0, "rgba(255,248,240,.42)");
-          gr.addColorStop(0.45, "rgba(255,226,236,.14)");
-          gr.addColorStop(1, "rgba(255,200,220,0)");
+        if (G.scene && G.scene.mouseBg === "swarm") {
+          // 群鼠乱窜：俯视鼠——柔光 + 随游动轻微倾斜，无洞口裁剪
+          ctx.translate(this.x, this.y);
+          const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, 66 * this.sc);
+          gr.addColorStop(0, "rgba(255,248,244,.45)");
+          gr.addColorStop(0.5, "rgba(255,236,240,.16)");
+          gr.addColorStop(1, "rgba(255,236,240,0)");
           ctx.fillStyle = gr;
-          ctx.beginPath(); ctx.arc(0, -6 * this.sc, 50 * this.sc, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(0, 0, 66 * this.sc, 0, Math.PI * 2); ctx.fill();
+          // 整只鼠按爬行方向旋转（头朝行进方向）+ 极轻的待机晃动，动作与移动方向一致
+          ctx.rotate((this._visAng || 0) + Math.PI / 2 + Math.sin(t * 1.7 + (this.phase || 0)) * 0.03);
+          const s = this.sc * vs;
+          ctx.scale(s, s);
+          ctx.translate(-60, -50);
+          G.draw.mouseTop(ctx, this, t);
+        } else {
+          // 裁剪到猎物包围盒（模拟 overflow:hidden 的洞口钻出效果）
+          const hw = this.baseW * this.sc / 2, hh = this.baseH * this.sc / 2;
+          ctx.translate(this.x, this.y);
+          ctx.beginPath(); ctx.rect(-hw, -hh + this.lift * this.sc, hw * 2, hh * 2); ctx.clip();
+          ctx.translate(0, this.lift * this.sc);
+          const s = this.sc;
+          ctx.scale(s * (this.def.face ? this.faceDir : 1), s);
+          ctx.translate(-60, -39);
+          G.draw.mouse(ctx, this, t);
         }
-        ctx.beginPath(); ctx.rect(-hw, -hh + this.lift * this.sc, hw * 2, hh * 2); ctx.clip();
-        ctx.translate(0, this.lift * this.sc);
-        const s = this.sc;
-        ctx.scale(s * (this.def.face ? this.faceDir : 1), s);
-        ctx.translate(-60, -39);
-        G.draw.mouse(ctx, this, t);
       } else if (this.type === "butterfly") {
         const tilt = this.state === "FLAP" ? -12 : this.state === "GLIDE" ? 6 : this.state === "LANDING" ? -8 : 0;
         ctx.translate(this.x, this.y);
@@ -868,6 +1319,21 @@ module.exports = function (G) {
         if (this.type === "pool") G.draw.poolLight(ctx, this, t);
         else G.draw.laser(ctx, this, t);
       } else {
+        // 泳池模式：鱼身柔光（泳池玩具截图里的发光小鱼）；鱼群模式：银白小鱼光
+        if (this.type === "fish" && inPoolMode()) {
+          const gr = ctx.createRadialGradient(this.x, this.y - (this.hopOff || 0), 0, this.x, this.y - (this.hopOff || 0), 62 * (this.sc || 1));
+          gr.addColorStop(0, "rgba(255,236,150,.30)");
+          gr.addColorStop(0.55, "rgba(255,210,110,.12)");
+          gr.addColorStop(1, "rgba(255,210,110,0)");
+          ctx.fillStyle = gr;
+          ctx.beginPath(); ctx.arc(this.x, this.y - (this.hopOff || 0), 62 * (this.sc || 1), 0, Math.PI * 2); ctx.fill();
+        } else if (this.type === "fish" && inSchoolMode()) {
+          const gr = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, 26 * (this.sc || 1));
+          gr.addColorStop(0, "rgba(225,246,255,.42)");
+          gr.addColorStop(1, "rgba(205,238,255,0)");
+          ctx.fillStyle = gr;
+          ctx.beginPath(); ctx.arc(this.x, this.y, 26 * (this.sc || 1), 0, Math.PI * 2); ctx.fill();
+        }
         // hop 绒线拖尾（毛线球式轨迹）：画在鱼身后面
         if (this.trail && this.trail.length > 1) {
           const col = (this.speciesColors && this.speciesColors.fin) || "#d9a83f";
@@ -888,7 +1354,18 @@ module.exports = function (G) {
         }
         ctx.translate(this.x, this.y - (this.hopOff || 0));
         const s = this.sc * vs * (this.speciesScale || 1);
-        ctx.scale(s * (this.def.face ? this.faceDir : 1) * (this.sxMul || 1), s);
+        if (this.type === "fish" && (inPoolMode() || inSchoolMode()) && this._visAng != null) {
+          // 泳池/鱼群：鱼头朝实际航向旋转；向左游时沿航向轴翻肚回正（背鳍始终朝上）
+          // 翻面加死区：航向接近垂直时不再每帧正/反来回切（修复贴边时鱼尾闪动）
+          const ca2 = Math.cos(this._visAng);
+          if (ca2 > 0.12) this._flip = 0;
+          else if (ca2 < -0.12) this._flip = 1;
+          ctx.rotate(this._visAng);
+          if (this._flip) ctx.scale(1, -1);
+          ctx.scale(s * (this.sxMul || 1), s);
+        } else {
+          ctx.scale(s * (this.def.face ? this.faceDir : 1) * (this.sxMul || 1), s);
+        }
         ctx.translate(-60, -36);
         G.draw.fish(ctx, this, t);
       }
@@ -906,13 +1383,14 @@ module.exports = function (G) {
     if (G.scene.holeHeat) G.scene.holeHeat = G.scene.holeHeat.map(() => []);
     const n = Number(G.config.preyCount) === 1 ? 1 : 3;
     if (G.config.targetType === "fish" && n > 1) {
-      // 开局鱼种去重：洗牌后按序取，保证同时在场鱼互不相同
-      const idxs = G.FISH_SPECIES.map((_, i) => i);
+      // 开局鱼种去重：洗牌后按序取，保证同时在场鱼互不相同（泳池走限定鱼种表）
+      const list = (G.fishSpeciesList && G.fishSpeciesList()) || G.FISH_SPECIES;
+      const idxs = list.map((_, i) => i);
       for (let i = idxs.length - 1; i > 0; i--) {
         const j = Math.floor(rand(0, i + 1));
         const tmp = idxs[i]; idxs[i] = idxs[j]; idxs[j] = tmp;
       }
-      for (let i = 0; i < n; i++) preys.push(new Prey("fish", G.FISH_SPECIES[idxs[i % idxs.length]]));
+      for (let i = 0; i < n; i++) preys.push(new Prey("fish", list[idxs[i % idxs.length]]));
     } else {
       for (let i = 0; i < n; i++) preys.push(new Prey(G.config.targetType));
     }
@@ -922,6 +1400,10 @@ module.exports = function (G) {
   /* 多只模式：猎物同时在场数量随阶段循序渐进（①3 → ②5 → ③7，上限 7）；单只模式不变。
      捕鼠按洞口数封顶（至少留 1 个空洞供轮换）。 */
   G.stageTargetCount = () => {
+    // 群鼠乱窜：固定数量（4/5/6），不受「猎物数量」设置影响（俯视群鼠玩法本身即多只）
+    if (G.config.targetType === "mouse" && G.scene && G.scene.mouseBg === "swarm") {
+      return ({ 1: 4, 2: 5, 3: 6 })[G.session.stage] || 4;
+    }
     if (Number(G.config.preyCount) === 1) return 0;
     const base = ({ 1: 3, 2: 5, 3: 7 })[G.session.stage] || 3;
     if (G.config.targetType === "mouse") {
@@ -930,16 +1412,21 @@ module.exports = function (G) {
     }
     // 水面追光：光斑太多会满屏乱闪，封顶 3→4→5
     if (G.config.targetType === "pool") return ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3;
+    // 鱼群巡游：极小的鱼聚成发光"饵球"，数量（24→32→40）——太多会看花也更费电
+    if (G.config.targetType === "fish" && G.session.sea && G.session.sea.key === "school") {
+      return ({ 1: 24, 2: 32, 3: 40 })[G.session.stage] || 24;
+    }
     return base;
   };
   G.topUpPreys = () => {
     const target = G.stageTargetCount();
     while (target && preys.length < target) {
       if (G.config.targetType === "fish") {
-        // 补点时避开已在场品种（10 种 > 上限 7，可全程不重样）
+        // 补点时避开已在场品种（限定表 5 种 < 上限 7，池内允许复现；海域 10 种可全程不重样）
         const used = {};
         preys.forEach(p => { if (p.type === "fish" && p.species) used[p.species.key] = 1; });
-        const pool = G.FISH_SPECIES.filter(s => !used[s.key]);
+        const list = (G.fishSpeciesList && G.fishSpeciesList()) || G.FISH_SPECIES;
+        const pool = list.filter(s => !used[s.key]);
         preys.push(new Prey("fish", pool.length ? pool[Math.floor(rand(0, pool.length))] : undefined));
       } else {
         preys.push(new Prey(G.config.targetType));

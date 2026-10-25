@@ -11,14 +11,15 @@
      只有 buildShareCard / saveShareCard 依赖 wx。
    ──────────────────────────────────────────────────────────────── */
 module.exports = function (G) {
-  /* ⚠️ 改成你线上小游戏的正式名称（用户在微信里搜的就是这个名字，必须一字不差） */
-  const APP_NAME = "逗猫触屏玩具";
+  /* 与小游戏名称保持一致：不在卡片里另存一份硬编码名字，避免改名后仍印旧名 */
+  const APP_NAME = G.GAME_NAME || "逗猫触屏玩具";
 
   const CW = 750, CH = 600;          // 5:4，微信转发卡片推荐比例
   const TYPE_NAME = {
     fish: "深海捕鱼", butterfly: "蝴蝶花园", mouse: "捕鼠行动", laser: "激光暗室", pool: "暗夜萤光"
   };
-  const TYPE_SHORT = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" };
+  // 「最常玩」格里的短名要能独立看懂：写「花园」「萤光」读者不知道指的是什么玩法
+  const TYPE_SHORT = { fish: "捕鱼", butterfly: "蝴蝶", mouse: "捕鼠", laser: "激光", pool: "萤光虫" };
 
   /* ---------- 绘制小工具（不依赖 G.rr，避免和主 UI 坐标耦合） ---------- */
   function rr(ctx, x, y, w, h, r) {
@@ -158,10 +159,16 @@ module.exports = function (G) {
     ctx.moveTo(PAD, 442); ctx.lineTo(W - PAD, 442);
     ctx.stroke();
 
-    // 底部：游戏名 + 玩法
+    // 底部：游戏名 + 玩法（+ 单局时长）
     ctx.font = "bold 23px sans-serif";
     ctx.fillStyle = W1;
-    ctx.fillText((d.appName || "") + " · " + (d.typeName || ""), PAD, 484);
+    const head = (d.appName || "") + " · " + (d.typeName || "") + (d.durText ? " · " + d.durText : "");
+    // 长文案（带海域名时）按可用宽度自动降字号，避免压到右边缘
+    let hfs = 23;
+    while (hfs > 16 && ctx.measureText(head).width > W - PAD * 2) {
+      hfs -= 1; ctx.font = "bold " + hfs + "px sans-serif";
+    }
+    ctx.fillText(head, PAD, 484);
 
     // 底部：搜索引导（抖音/小红书引流的落点，名字必须可搜）
     ctx.font = "19px sans-serif";
@@ -231,8 +238,15 @@ module.exports = function (G) {
     else {
       const beat = prev.filter(l => hits > Number(l.hits)).length;
       rankText = beat === prev.length
-        ? "超过了此前 " + prev.length + " 局中的全部"
+        ? "超过此前全部 " + prev.length + " 局"
         : "超过了此前 " + prev.length + " 局中的 " + beat + " 局";
+    }
+
+    // 玩法名：捕鱼再带上海域名，和自己刚玩的画面能对上（结算页也是这个写法）
+    let typeName = TYPE_NAME[type] || "深海捕鱼";
+    if (type === "fish" && G.SEA_THEMES && G.currentBg) {
+      const sea = G.SEA_THEMES.find(t => t.key === G.currentBg());
+      if (sea) typeName += " · " + sea.name;
     }
 
     return {
@@ -246,9 +260,10 @@ module.exports = function (G) {
         [String(arch.hits), "累计捕获", 34]
       ],
       rankText,
-      typeName: TYPE_NAME[type] || "深海捕鱼",
+      typeName,
       appName: APP_NAME,
       durMin,
+      durText: (G.config && G.config.infinite) ? "不限时" : durMin + " 分钟",
       dateText
     };
   }
@@ -276,28 +291,20 @@ module.exports = function (G) {
   };
   G.SHARE_CARD_SIZE = { w: CW, h: CH };
 
-  /* 导出链路：① 同步 toTempFilePathSync  ② toDataURL + writeFileSync 兜底
-     两条都失败才返回 ""，由调用方弹提示 —— 绝不出现"点了没反应"。 */
-  function exportPath() {
-    try {
-      if (offCanvas && typeof offCanvas.toTempFilePathSync === "function") {
-        const p = offCanvas.toTempFilePathSync({
-          x: 0, y: 0, width: CW, height: CH,
-          destWidth: CW, destHeight: CH,
-          fileType: "jpg", quality: 0.92
-        });
-        if (p) return p;
-      }
-    } catch (e) {
-      console.log("[catToy] toTempFilePathSync failed", e && e.message);
-    }
-    // 兜底：部分机型/低版本基础库没有同步导出，用 toDataURL 落盘到用户目录（同样可存相册）
+  /* 导出链路（存相册比转发更重要，所以做了三层兜底）：
+     ① Canvas.toTempFilePathSync   同步，最快，但开发者工具/部分机型不实现
+     ② Canvas.toTempFilePath       官方异步接口，兼容性最好
+     ③ toDataURL + writeFileSync   前两者都不可用时的最后兜底
+     任一层拿到路径即返回，全失败才给 ""，由调用方弹提示 —— 绝不出现"点了没反应"。 */
+  const EXPORT_OPTS = { x: 0, y: 0, width: CW, height: CH, destWidth: CW, destHeight: CH, fileType: "jpg", quality: 0.92 };
+
+  function dataUrlPath() {
     try {
       if (offCanvas && typeof offCanvas.toDataURL === "function"
         && typeof wx !== "undefined" && typeof wx.getFileSystemManager === "function"
         && wx.env && wx.env.USER_DATA_PATH) {
         const url = offCanvas.toDataURL("image/jpeg", 0.92);
-        const b64 = String(url).replace(/^data:image\/\w+;base64,/, "");
+        const b64 = String(url || "").replace(/^data:image\/\w+;base64,/, "");
         if (b64.length > 256) {
           const fp = wx.env.USER_DATA_PATH + "/catToyShare.jpg";
           wx.getFileSystemManager().writeFileSync(fp, b64, "base64");
@@ -308,6 +315,41 @@ module.exports = function (G) {
       console.log("[catToy] toDataURL fallback failed", e && e.message);
     }
     return "";
+  }
+
+  /* 同步导出：wx.shareAppMessage 的 imageUrl 必须在调用时就有路径，只能用这条 */
+  function exportPath() {
+    try {
+      if (offCanvas && typeof offCanvas.toTempFilePathSync === "function") {
+        const p = offCanvas.toTempFilePathSync(EXPORT_OPTS);
+        if (p) return p;
+      }
+    } catch (e) {
+      console.log("[catToy] toTempFilePathSync failed", e && e.message);
+    }
+    return dataUrlPath();
+  }
+
+  /* 异步导出：存相册走这条。同步接口不可用时（工具/新机型）还能靠它拿到文件 */
+  function exportPathAsync(cb) {
+    try {
+      if (offCanvas && typeof offCanvas.toTempFilePath === "function") {
+        offCanvas.toTempFilePath(Object.assign({}, EXPORT_OPTS, {
+          success: (r) => {
+            const p = (r && r.tempFilePath) || "";
+            cb(p || exportPath());
+          },
+          fail: (err) => {
+            console.log("[catToy] toTempFilePath fail:", (err && (err.errMsg || err)) || "");
+            cb(exportPath());
+          }
+        }));
+        return;
+      }
+    } catch (e) {
+      console.log("[catToy] toTempFilePath threw", e && e.message);
+    }
+    cb(exportPath());
   }
 
   /* 生成临时图片路径；失败返回 ""。mode: "single" | "archive" */
@@ -324,6 +366,24 @@ module.exports = function (G) {
     const p = exportPath();
     if (!p) console.log("[catToy] export image failed, path empty");
     return p;
+  };
+
+  /* 异步版：存相册用。先画好再走异步导出链，拿到路径回调（可能同步回调，也可能异步） */
+  G.buildShareCardAsync = (mode, cb) => {
+    if (!ensureCanvas()) { cb(""); return; }
+    try {
+      offCtx.setTransform(1, 0, 0, 1, 0, 0);
+      offCtx.clearRect(0, 0, CW, CH);
+      drawCard(offCtx, CW, CH, collect(mode));
+    } catch (e) {
+      console.log("[catToy] draw card failed", e && e.message);
+      cb("");
+      return;
+    }
+    exportPathAsync((p) => {
+      if (!p) console.log("[catToy] async export failed, path empty");
+      cb(p || "");
+    });
   };
 
   /* 保存到相册。
@@ -368,32 +428,50 @@ module.exports = function (G) {
       } catch (e) { onConfirm(); }
     };
 
-    busy(true);
-    const path = G.buildShareCard();
-    if (!path) {
-      busy(false);
-      tip("图片生成失败，请更新微信到最新版后重试。");
-      return;
-    }
-
     const rememberOk = () => { try { st && st.set(OK_KEY, "1"); } catch (e) {} };
 
+    /* 去系统设置页：开启「保存到相册」后清掉 DENY 标记，用户回来再点一次即可保存。
+       openSetting 必须是用户点击直接触发，所以这里放在「去设置」确认框的回调里。 */
+    const openSettingPage = () => {
+      try {
+        if (typeof wx.openSetting !== "function") {
+          tip("请在右上角「···」→「设置」里打开「保存到相册」后再试。");
+          return;
+        }
+        wx.openSetting({
+          success: (r) => {
+            const on = !!(r && r.authSetting && r.authSetting["scope.writePhotosAlbum"]);
+            if (on) {
+              try { st && st.set(DENY_KEY, "0"); } catch (e) {}
+              tip("相册权限已开启，再点一次「存成图片」就能保存。", "已开启");
+            }
+          },
+          fail: () => tip("请在右上角「···」→「设置」里打开「保存到相册」后再试。")
+        });
+      } catch (e) { tip("请在右上角「···」→「设置」里打开「保存到相册」后再试。"); }
+    };
     const guideSetting = () => {
       try {
-        if (typeof wx.openSetting === "function") {
+        if (typeof wx.openSetting === "function" && typeof wx.showModal === "function") {
           wx.showModal({
             title: "需要相册权限",
             content: "开启「保存到相册」后，就能把测评图存进相册发朋友圈。",
             confirmText: "去设置",
-            success: (r) => { if (r && r.confirm) wx.openSetting({}); }
+            success: (r) => { if (r && r.confirm) openSettingPage(); }
           });
         } else {
-          tip("需要相册权限才能保存。请在右上角「···」→「设置」里打开「保存到相册」。");
+          openSettingPage();
         }
-      } catch (e) { tip("需要相册权限才能保存。"); }
+      } catch (e) { openSettingPage(); }
     };
 
-    const doSave = () => {
+    /* 失败提示只保留「原因」部分：errMsg 往往很长，原来截尾会把真正的原因截掉 */
+    const brief = (msg) => {
+      const m = String(msg || "").replace(/^saveImageToPhotosAlbum:fail\s*/i, "").trim();
+      return m.length > 70 ? m.slice(0, 70) + "…" : (m || "未知原因");
+    };
+
+    const doSave = (path) => {
       try {
         wx.saveImageToPhotosAlbum({
           filePath: path,
@@ -409,9 +487,9 @@ module.exports = function (G) {
             // 用户主动取消授权弹窗：不打扰
             if (msg.indexOf("cancel") >= 0) return;
             // errno 104 / "privacy permission is not authorized"：
-            //   后台《用户隐私保护指引》里「相册（仅写入）」没填或审核未过，属配置问题。
+            //   后台《用户隐私保护指引》里「相册（仅写入）」没填/未过审，或用户拒绝过隐私授权
             if (msg.indexOf("privacy") >= 0 || msg.indexOf("104") >= 0) {
-              tip("相册权限还没开通成功，通常是《用户隐私保护指引》审核未完成，过一两天再试。", "暂时无法保存");
+              tip("相册权限还没开通：请在微信「设置 → 隐私」里允许本游戏访问相册；若刚提交《隐私保护指引》，等审核通过后再试。", "暂时无法保存");
               return;
             }
             // 拒绝过（auth deny / auth denied）：记住，下次直接引导去设置页，不再弹我们的"允许"框
@@ -420,7 +498,7 @@ module.exports = function (G) {
               guideSetting();
               return;
             }
-            tip("保存失败：" + (msg.length > 60 ? msg.slice(-60) : msg));
+            tip("保存失败：" + brief(msg));
           }
         });
       } catch (e) {
@@ -429,19 +507,56 @@ module.exports = function (G) {
       }
     };
 
+    /* 生成图片 → 保存。用异步导出链，同步接口在工具/部分机型上不可用时也能拿到文件 */
+    const prepareAndSave = () => {
+      busy(true);
+      G.buildShareCardAsync(null, (path) => {
+        if (!path) {
+          busy(false);
+          tip("图片生成失败，请更新微信到最新版后重试。", "无法保存");
+          return;
+        }
+        busy(false);
+        doSave(path);
+      });
+    };
+
+    /* 新增版基础库把「保存到相册」纳入隐私接口：未同意《隐私保护指引》时调用会直接 104 失败。
+       先查是否需要授权，需要就走官方授权流程，再继续保存（拒绝则让 save 的真实报错兜底提示）。 */
+    const withPrivacy = (fn) => {
+      try {
+        if (typeof wx.getPrivacySetting === "function" && typeof wx.requirePrivacyAuthorize === "function") {
+          wx.getPrivacySetting({
+            success: (r) => {
+              if (!r || r.needAuthorization === false) { fn(); return; }
+              wx.requirePrivacyAuthorize({
+                success: () => fn(),
+                fail: (err) => {
+                  console.log("[catToy] privacy authorize fail:", (err && err.errMsg) || "");
+                  fn();
+                }
+              });
+            },
+            fail: () => fn()
+          });
+          return;
+        }
+      } catch (e) {}
+      fn();
+    };
+
     // 已同意过 → 直接保存，不再弹确认框；曾拒绝过系统授权 → 直接引导设置，也不重复问
     let agreed = false, denied = false;
     try { agreed = st && st.get(OK_KEY) === "1"; denied = st && st.get(DENY_KEY) === "1"; } catch (e) {}
-    if (agreed) { doSave(); return; }
-    if (denied) { busy(false); guideSetting(); return; }
+    if (agreed) { withPrivacy(prepareAndSave); return; }
+    if (denied) { guideSetting(); return; }
 
-    // 首次：先关掉 loading 再弹我们的友好确认框，避免遮罩盖住弹窗
-    busy(false);
+    // 首次：先弹我们的友好确认框（不占用 loading），同意后再生成图片
     confirmPopup(
       "保存测评图",
       "把「猫咪反应测评图」存进相册，方便你发朋友圈炫耀～",
       "允许",
-      doSave,
+      () => withPrivacy(prepareAndSave),
       () => {}   // 暂不允许：本次不保存，下次再点仍会问（没同意就不记）
     );
   };

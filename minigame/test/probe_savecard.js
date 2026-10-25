@@ -18,9 +18,11 @@ function stubCtx() {
 
 function boot(opts) {
   const store = {};
-  const log = { modals: [], toasts: [], loading: 0, saves: 0, files: [], openSetting: 0 };
+  const log = { modals: [], toasts: [], loading: 0, saves: 0, files: [], openSetting: 0, privacyAuth: 0 };
   const canvas = { width: 0, height: 0, getContext: () => stubCtx() };
-  if (!opts.noSyncExport) canvas.toTempFilePathSync = () => "wxfile://tmp/catToy.jpg";
+  if (!opts.noSyncExport && !opts.asyncExport) canvas.toTempFilePathSync = () => "wxfile://tmp/catToy.jpg";
+  // 模拟同步导出缺失、只剩异步 Canvas.toTempFilePath 的机型/开发者工具
+  if (opts.asyncExport) canvas.toTempFilePath = (o) => setTimeout(() => o.success && o.success({ tempFilePath: "wxfile://tmp/async.jpg" }), 0);
   if (!opts.noDataURL) canvas.toDataURL = () => "data:image/jpeg;base64," + "A".repeat(512);
   const cur = { saveFail: opts.saveFail || "" };
   global.wx = {
@@ -45,6 +47,11 @@ function boot(opts) {
     }
   };
   global.__curSaveFail = cur;
+  // 新版基础库的隐私授权流程（相册属于隐私接口）
+  if (opts.privacy) {
+    global.wx.getPrivacySetting = (o) => o.success && o.success({ needAuthorization: true });
+    global.wx.requirePrivacyAuthorize = (o) => { log.privacyAuth++; o.success && o.success({}); };
+  }
 
   const G = {
     platform: { storage: {
@@ -105,4 +112,18 @@ function check(name, cond, extra) { console.log((cond ? "✅ " : "❌ ") + name 
   check("T5 取消后未记任何标志（下次仍会问）", !r.store["catToyAlbumOk"] && !r.store["catToyAlbumDenied"]);
 }
 
-console.log(bad ? "\n有 " + bad + " 项未通过" : "\n全部通过：授权弹窗 + 同意后保持 行为正确");
+/* ---- T6 / T7：导出兜底与隐私授权（异步，等一拍再断言） ---- */
+(async () => {
+  const r = boot({ modalAllow: true, asyncExport: true });
+  r.G.saveShareCard();
+  await new Promise(res => setTimeout(res, 20));
+  check("T6 同步导出缺失时走异步 toTempFilePath 仍能保存", r.log.saves === 1, "saves=" + r.log.saves);
+
+  const r2 = boot({ modalAllow: true, privacy: true });
+  r2.G.saveShareCard();
+  await new Promise(res => setTimeout(res, 20));
+  check("T7 需要隐私授权时先 requirePrivacyAuthorize 再保存", r2.log.privacyAuth === 1 && r2.log.saves === 1,
+    "auth=" + r2.log.privacyAuth + " saves=" + r2.log.saves);
+
+  console.log(bad ? "\n有 " + bad + " 项未通过" : "\n全部通过：授权弹窗 + 同意后保持 + 导出兜底 行为正确");
+})();

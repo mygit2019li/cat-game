@@ -23,9 +23,10 @@ function findChrome() {
   const page = await browser.newPage({ viewport: { width: 852, height: 393 } });
   const errors = [];
   page.on("pageerror", e => errors.push(String(e)));
-  page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
+  // HD 蝴蝶贴图探测失败会走矢量回退，属预期行为，不计入错误
+  page.on("console", m => { if (m.type() === "error" && m.text().indexOf("ERR_FILE_NOT_FOUND") < 0) errors.push(m.text()); });
 
-  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./game.js"];
+  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./js/sharecard.js", "./game.js"];
   const modules = {};
   for (const n of modNames) modules[n] = fs.readFileSync(path.join(ROOT, n), "utf8");
 

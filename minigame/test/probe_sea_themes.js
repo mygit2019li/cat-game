@@ -77,7 +77,7 @@ function check(name, ok, extra) {
 
   // 2) 四主题逐个渲染：背景色不同、装饰生成、环境粒子类型正确
   const themes = ["reef", "abyss", "ice", "kelp"];
-  const ambExpect = { reef: "bubble", abyss: "plankton", ice: "snow", kelp: "spore" };
+  const ambExpect = { reef: "bubble", abyss: "plankton", ice: "snow", kelp: "bubble" };
   const shots = [];
   for (const key of themes) {
     const info = await page.evaluate((k) => {
@@ -135,9 +135,9 @@ function check(name, ok, extra) {
       check("[ice] 冰海背景偏亮冷色（R+G+B 较高）", px[0] + px[1] + px[2] > 180, "rgb=" + px.join(","));
     }
   }
-  // 四主题背景互不相同（reef vs abyss vs ice vs kelp 中心像素）
+  // 三主题背景互不相同（reef vs abyss vs ice；kelp 现与 reef 同为经典蓝海水色，属有意设计）
   const pix = [];
-  for (const key of themes) {
+  for (const key of ["reef", "abyss", "ice"]) {
     await page.evaluate((k) => {
       const G = window.G;
       G.session.sea = G.SEA_THEMES.find(t => t.key === k);
@@ -151,7 +151,8 @@ function check(name, ok, extra) {
       return d[0] * 65536 + d[1] * 256 + d[2];
     }));
   }
-  check("四主题背景色互不相同", new Set(pix).size === 4, pix.join(" / "));
+  check("三主题背景色互不相同（kelp 与 reef 同色为预期）",
+    new Set(pix).size === 3, pix.join(" / "));
 
   // 3) 命中特效主题色：sparkBurst 记录的 sparkColor 跟主题
   const hit = await page.evaluate(() => {
@@ -235,7 +236,11 @@ function check(name, ok, extra) {
   // 8) 重进小程序轮换进度读回（localStorage 共享）
   const persisted = await page.evaluate(() => window.G.platform.storage.get("catToySeaIdx"));
   const next = await page.evaluate(() => window.G.nextSeaTheme().key);
-  const expect = ["reef", "abyss", "ice", "kelp"][(Number(persisted) + 1) % 4];
+  // 主题表现为 5 个（含泳池），轮换取模按表长动态算
+  const expect = await page.evaluate((p) => {
+    const G = window.G;
+    return G.SEA_THEMES[(Number(p) + 1) % G.SEA_THEMES.length].key;
+  }, persisted);
   check("重启后轮换从本地进度续接", next === expect, "stored=" + persisted + " next=" + next + " expect=" + expect);
 
   check("无运行时错误", errs.length === 0, errs.slice(0, 3).join(" | "));
