@@ -16,15 +16,25 @@ module.exports = function (G) {
     vibrate: true,           // 震动默认开
     adaptive: true,          // 自适应辅助默认开（猫更容易抓到）
     bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
-    bg_fish: "kelp"          // 捕鱼可选海域（水草森林 / 泳池追鱼）
+    bg_fish: "kelp",         // 捕鱼可选海域（水草森林 / 泳池追鱼）
+    /* 电子猫粮机：feedNextAt 存的是「下次出粮的绝对时刻(ms)」，离开本页也照走真实时间；
+       feedBowl = 盆中颗数，feedHopper = 储粮桶余量百分比 */
+    feedMode: "manual", feedPortion: 3, feedIntervalMin: 1,
+    feedNextAt: 0, feedBowl: 0, feedHopper: 100
   };
   /* ===== 召唤猫咪：按性格归类（小字为该性格的代表品种）=====
      img 为真实猫咪照片（assets/cats/），audioPath 为本地真实喵叫（assets/audio/）：
      由用户提供的四段实拍视频（懒惰/活泼/温柔/高冷.mp4）提取音轨，去首尾静音后
      循环平铺到 15s 以上（7s/6s 的短素材平铺 3 遍），循环点做 0.15s 交叉淡化，
      统一响度到 -16 LUFS、96kbps 单声道 —— 音频可直接 loop 无缝续播。
-     mews 为合成"喵"声兜底参数 [起始Hz, 滑向Hz, 时长s]（本地音频不可用时启用），gap 为合成声间隔毫秒 */
+     mews 为合成"喵"声兜底参数 [起始Hz, 滑向Hz, 时长s]（本地音频不可用时启用），gap 为合成声间隔毫秒
+     第一张「猫粮开饭」不是猫叫而是真实出粮录音（用户实拍猫粮.mp4 的音轨平铺 4 遍、
+     每遍之间留 1.2s 静默，循环点落在静默里）——开饭声对猫是最直接的召唤信号；
+     它没有照片素材，icon: "food" 走矢量粮盆插画（见 ui.js drawKindArt） */
   G.CAT_KINDS = [
+    { key: "food",   name: "猫粮开饭", breed: "真实出粮声 · 一响就到", icon: "food",
+      color: "#f0c26a", audioPath: "assets/audio/summon_food.mp3",
+      mews: [[300, 250, 0.05], [340, 280, 0.05], [270, 230, 0.04], [320, 260, 0.05]], gap: 70 },
     { key: "lazy",   name: "慵懒慢喵", breed: "橘猫 · 布偶猫", img: "assets/cats/lazy.jpg",
       color: "#e8944a", audioPath: "assets/audio/cat_lazy.mp3",
       mews: [[420, 660, 0.7], [380, 600, 0.62]], gap: 700 },
@@ -38,6 +48,44 @@ module.exports = function (G) {
       color: "#9fb2c4", audioPath: "assets/audio/cat_cool.mp3",
       mews: [[1300, 1750, 0.16], [1400, 1850, 0.15], [1350, 1800, 0.16], [1450, 1900, 0.18]], gap: 600 }
   ];
+
+  /* ===== 自定义召唤卡（召唤页左上角「自定义」录入）=====
+     { name, img, audio } 三项都可留空：图片和音频由 platform 复制进 USER_DATA_PATH 后
+     只存路径，整条记录写进本地 storage（catCustomSummon），杀进程重开依然在。
+     列表里永远排第一：用户自己录的召唤声要比任何内置卡都更好找。 */
+  G.customSummon = null;
+  G.loadCustomSummon = () => {
+    let o = null;
+    try {
+      const raw = G.platform.storage.get("catCustomSummon");
+      if (raw) { o = JSON.parse(raw); if (!o || typeof o !== "object") o = null; }
+    } catch (e) { o = null; }
+    G.customSummon = o && (o.name || o.img || o.audio) ? o : null;
+    return G.customSummon;
+  };
+  /* 传入 null 即删除；旧素材文件由调用方（ui.js）负责清盘，这里只管内存与存储 */
+  G.saveCustomSummon = (o) => {
+    G.customSummon = o && (o.name || o.img || o.audio) ? {
+      name: String(o.name || "").slice(0, 12), img: String(o.img || ""), audio: String(o.audio || "")
+    } : null;
+    try {
+      G.platform.storage.set("catCustomSummon", G.customSummon ? JSON.stringify(G.customSummon) : "");
+    } catch (e) {}
+    return G.customSummon;
+  };
+  /* 召唤卡牌的唯一数据源：自定义卡（若有）+ 内置卡。绘制/翻页/播放都走这里，
+     否则三处各自数 CAT_KINDS，加了自定义卡后索引会错位 */
+  G.summonKinds = () => {
+    const list = G.CAT_KINDS || [];
+    const c = G.customSummon;
+    if (!c) return list;
+    return [{
+      key: "custom", name: c.name || "我的召唤", breed: "自定义召唤卡", custom: true,
+      img: c.img || "", icon: c.img ? "" : "custom", color: "#7fc9bd",
+      audioPath: c.audio || "",
+      mews: [[520, 900, 0.5], [460, 820, 0.45]], gap: 650
+    }].concat(list);
+  };
 
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
@@ -91,6 +139,15 @@ module.exports = function (G) {
       const arr = G.TYPE_BGS[k];
       if (!arr || !arr.some(b => b.key === c["bg_" + k])) c["bg_" + k] = arr && arr[0] ? arr[0].key : "";
     });
+    /* 电子猫粮机：存档同样可能被写脏（份量 null、间隔 "abc"、桶量越界），
+       逐项收敛——出粮逻辑依赖这些数值，NaN 会让份量与倒计时一起失效 */
+    c.feedMode = c.feedMode === "timer" ? "timer" : "manual";
+    c.feedPortion = clamp(Math.round(Number(c.feedPortion) || 3), 1, 5);
+    c.feedIntervalMin = [0.5, 1, 5, 30].indexOf(Number(c.feedIntervalMin)) >= 0 ? Number(c.feedIntervalMin) : 1;
+    c.feedNextAt = Number(c.feedNextAt) > 0 ? Number(c.feedNextAt) : 0;
+    c.feedBowl = clamp(Math.floor(Number(c.feedBowl) || 0), 0, 86);
+    c.feedHopper = clamp(Number(c.feedHopper), 0, 100);
+    if (!isFinite(c.feedHopper)) c.feedHopper = 100;
     return c;
   }
   G.saveConfig = () => G.platform.storage.set("catToyConfig", JSON.stringify(G.config));

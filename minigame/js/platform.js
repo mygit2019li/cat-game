@@ -144,7 +144,9 @@ module.exports = function (G) {
         img.ok = false;
         img.onload = () => { img.ok = true; };
         img.onerror = () => { img.ok = false; };
-        img.src = inWx ? src : "../" + src;
+        // dataURL / 绝对路径（自定义召唤图存到 USER_DATA_PATH）不能再拼 ../
+        const abs = /^(?:data:|blob:|https?:|\/|wxfile:\/\/)/i.test(src);
+        img.src = inWx || abs ? src : "../" + src;
         P.assets[src] = img;
         return img;
       } catch (e) { return null; }
@@ -205,6 +207,244 @@ module.exports = function (G) {
         }
       } catch (e) {}
       fallback();
+    },
+
+    /* ================= 自定义召唤素材：文本 / 图片 / 音频 =================
+       真机：小游戏没有输入框组件，文本靠 wx.showKeyboard 弹系统键盘，把 onKeyboardInput
+       的实时值回填到自绘的行里；图片按渠道走 chooseMedia(sourceType) 或
+       chooseMessageFile(type=image)，音频按渠道走录音 / chooseMessageFile；选回来的都是
+       临时路径，重启就没了，所以统一由 saveAsset 复制进 USER_DATA_PATH 才算“保存在本地”。
+       浏览器垫片没这些 API：文本回落到 prompt，文件类渠道回落到 <input type=file> +
+       FileReader（拿到 dataURL，给 Image / Audio 都能直接用，不必再落盘），录音回落到
+       getUserMedia + MediaRecorder。 */
+    promptText(title, def, cb) {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; try { cb(v); } catch ( e) {} };
+      try {
+        if (typeof wx !== "undefined" && typeof wx.showKeyboard === "function") {
+          let val = def || "";
+          const onInput = (r) => { if (r && r.value != null) val = r.value; };
+          const onComplete = (r) => {
+            if (r && r.value != null) val = r.value;
+            try { wx.offKeyboardComplete && wx.offKeyboardComplete(onComplete); } catch (e) {}
+            try { wx.offKeyboardInput && wx.offKeyboardInput(onInput); } catch (e) {}
+            try { wx.hideKeyboard({}); } catch (e) {}
+            finish(val);
+          };
+          try { wx.onKeyboardInput && wx.onKeyboardInput(onInput); } catch (e) {}
+          try { wx.onKeyboardComplete && wx.onKeyboardComplete(onComplete); } catch (e) {}
+          wx.showKeyboard({ defaultValue: val, maxLength: 12, multiple: false, confirmHold: false, confirmType: "done" });
+          return;
+        }
+      } catch (e) {}
+      try {
+        if (typeof window !== "undefined" && typeof window.prompt === "function") {
+          finish(window.prompt(title, def || ""));
+          return;
+        }
+      } catch (e) {}
+      finish("");
+    },
+    /* 素材来源渠道（录入面板里先选渠道，再调对应的 API，跟用户点“照片 App”的习惯一致）：
+         image: album(相册) / chat(微信聊天) / camera(拍照)
+         audio: record(现场录音) / chat(微信聊天) / file(文件，电脑端微信会直接开系统文件框)
+       cb(path, why)：拿到时 why 为空；拿不到时 why =
+         cancel(用户取消) | unsupported(基础库太低) | badtype(选的东西类型不对) | denied(麦克风权限)
+       source 省略时按各类型的默认渠道走（老调用方不用改）。 */
+    pickAsset(kind, source, cb) {
+      if (typeof source === "function") { cb = source; source = ""; }
+      const isAudio = kind === "audio";
+      const src = source || (isAudio ? "chat" : "album");
+      const AUDIO_EXT = ["mp3", "m4a", "aac", "wav", "ogg", "amr"];
+      let done = false;
+      const finish = (v, why) => { if (done) return; done = true; try { cb(v || "", v ? "" : (why || "cancel")); } catch ( e) {} };
+      const isAudioFile = (p) => !p || new RegExp("\\.(" + AUDIO_EXT.join("|") + ")$", "i").test(p);
+      try {
+        /* 现场录音不是“选一下”就能拿到路径的，得有个 start/stop 过程，
+           所以真正的入口在 recordAsset；这里只是给直接调 pickAsset 的写法兜个底 */
+        if (isAudio && src === "record") {
+          const h = P.recordAsset({
+            onDone: (p) => finish(p),
+            onFail: (why) => finish("", why)
+          });
+          if (h) return;
+          finish("", "unsupported");
+          return;
+        }
+      } catch (e) {}
+      try {
+        /* 聊天/文件都走 chooseMessageFile（小游戏里这是唯一能拿到任意文件的口子，要 2.23.0+）：
+           “从聊天选音频”用 type=file + 后缀过滤，系统直接挡掉非音频；
+           “从文件选”用 type=all（电脑端这才是真正的系统文件选择器），拿到路径后自己验后缀 */
+        if (isAudio && (src === "chat" || src === "file") && typeof wx.chooseMessageFile === "function") {
+          const opt = { count: 1, type: src === "chat" ? "file" : "all" };
+          if (src === "chat") opt.extension = AUDIO_EXT;
+          opt.success = r => {
+            const p = ((r.tempFiles || [])[0] || {}).path || "";
+            if (src === "file" && !isAudioFile(p)) { finish("", "badtype"); return; }
+            finish(p);
+          };
+          opt.fail = () => finish("", "cancel");
+          wx.chooseMessageFile(opt);
+          return;
+        }
+        if (!isAudio && src === "chat" && typeof wx.chooseMessageFile === "function") {
+          wx.chooseMessageFile({
+            count: 1, type: "image",
+            success: r => finish(((r.tempFiles || [])[0] || {}).path),
+            fail: () => finish("", "cancel")
+          });
+          return;
+        }
+        const st = [src === "camera" ? "camera" : "album"];
+        if (!isAudio && typeof wx.chooseMedia === "function") {
+          wx.chooseMedia({
+            count: 1, mediaType: ["image"], sourceType: st, sizeType: ["compressed"],
+            success: r => finish(((r.tempFiles || [])[0] || {}).tempFilePath),
+            fail: () => finish("", "cancel")
+          });
+          return;
+        }
+        if (!isAudio && typeof wx.chooseImage === "function") {
+          wx.chooseImage({
+            count: 1, sizeType: ["compressed"], sourceType: st,
+            success: r => finish((r.tempFilePaths || [])[0]),
+            fail: () => finish("", "cancel")
+          });
+          return;
+        }
+      } catch (e) { /* 落到下面的网页回落 */ }
+      try {
+        /* 浏览器测试环境：拍照补个 capture 属性，其余一律文件框（拿到 dataURL 自包含，不必落盘） */
+        if (typeof document !== "undefined" && document.createElement) {
+          const el = document.createElement("input");
+          el.type = "file";
+          el.accept = isAudio ? "audio/*" : "image/*";
+          if (!isAudio && src === "camera") el.capture = "environment";
+          el.onchange = () => {
+            const f = el.files && el.files[0];
+            if (!f) { finish("", "cancel"); return; }
+            const fr = new FileReader();
+            fr.onload = () => finish(String(fr.result || ""));
+            fr.onerror = () => finish("", "cancel");
+            fr.readAsDataURL(f);
+          };
+          el.click();
+          return;
+        }
+      } catch (e) {}
+      finish("", "unsupported");
+    },
+    /* 现场录音（自定义召唤音：录猫叫 / 录摇粮桶的声音）。
+       真机走 RecorderManager（format=mp3，16k 单声道，到 duration 自动停），浏览器走
+       getUserMedia + MediaRecorder。录音产物是临时路径 / blob，靠 saveAsset 落盘才能抗重启。
+       hooks: { onStart(), onDone(path), onFail(why, msg) }；why = cancel | denied | interrupted
+       返回句柄 { stop(), cancel() }；当前环境根本没录音能力时返回 null（调用方据此提示）。
+       注意：录音会抢麦克风，小游戏里内层音频会被干掉，调用前先把召唤 BGM 停下。 */
+    recordAsset(hooks, maxMs) {
+      hooks = hooks || {};
+      const limit = Math.max(2000, Math.min(60000, maxMs || 15000));
+      let fin = false, timer = 0, rec = null, stream = null, mr = null, chunks = [];
+      const release = () => {
+        try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+        stream = null;
+      };
+      const bail = (why, msg) => {
+        if (fin) return;
+        fin = true; clearTimeout(timer); release();
+        try { hooks.onFail(why, msg || ""); } catch (e) {}
+      };
+      const take = (p) => {
+        if (fin) return;
+        fin = true; clearTimeout(timer); release();
+        try { p ? hooks.onDone(p) : hooks.onFail("cancel", ""); } catch (e) {}
+      };
+      try {
+        if (typeof wx !== "undefined" && typeof wx.getRecorderManager === "function") {
+          rec = wx.getRecorderManager();
+          if (rec.onStart) rec.onStart(() => { try { hooks.onStart && hooks.onStart(); } catch (e) {} });
+          if (rec.onStop) rec.onStop((r) => take((r && r.tempFilePath) || ""));
+          if (rec.onError) rec.onError((r) => bail(/deny|auth|permission/i.test((r && r.errMsg) || "") ? "denied" : "interrupted", (r && r.errMsg) || ""));
+          rec.start({ duration: limit, sampleRate: 16000, numberOfChannels: 1, encodeBitRate: 96000, format: "mp3" });
+          /* duration 到点微信自己会停并回调 onStop，这里只是万一它没回调时兜个底 */
+          timer = setTimeout(() => take(""), limit + 1500);
+          return {
+            stop() { if (fin) return; try { rec.stop(); } catch (e) { bail("cancel", ""); } },
+            /* 作废也要先把机器停下来，不然只是不再接结果、麦克风还开着 */
+            cancel() { if (!fin) { try { rec.stop(); } catch (e) {} } take(""); }
+          };
+        }
+      } catch (e) {}
+      try {
+        const md = typeof navigator !== "undefined" && navigator.mediaDevices;
+        if (md && md.getUserMedia && typeof window !== "undefined" && window.MediaRecorder) {
+          md.getUserMedia({ audio: true }).then((s) => {
+            stream = s;
+            mr = new window.MediaRecorder(s);
+            mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+            mr.onstop = () => {
+              const type = (mr.mimeType || "audio/webm").split(";")[0];
+              take(URL.createObjectURL(new window.Blob(chunks, { type: type })));
+              chunks = [];
+            };
+            mr.start();
+            try { hooks.onStart && hooks.onStart(); } catch (e) {}
+            timer = setTimeout(() => { try { mr.stop(); } catch (e) { take(""); } }, limit);
+          }).catch((err) => bail(err && err.name === "NotAllowedError" ? "denied" : "interrupted", (err && err.name) || ""));
+          return {
+            /* start 是异步的：麦克风还没拿到就点停，直接作废这一次 */
+            stop() { if (fin) return; if (!mr) { take(""); return; } try { mr.stop(); } catch (e) { take(""); } },
+            cancel() {
+              if (!fin && mr) { try { mr.stop(); } catch (e) {} }
+              take("");
+            }
+          };
+        }
+      } catch (e) {}
+      return null;
+    },
+    /* 把选中的临时文件复制进 USER_DATA_PATH，返回可长期用的路径；
+       浏览器垫片刻不出 USER_DATA_PATH（dataURL 本身就能直接当 src）时原样返回 */
+    saveAsset(src, name) {
+      if (!src) return "";
+      try {
+        const dir = (wx.env && wx.env.USER_DATA_PATH) || "";
+        const fs = typeof wx.getFileSystemManager === "function" ? wx.getFileSystemManager() : null;
+        if (!fs || !dir || /^(?:data:|blob:|https?:)/i.test(src)) return src;
+        const to = dir + "/" + name;
+        if (src === to) return to;
+        fs.copyFileSync(src, to);
+        return to;
+      } catch (e) { return src; }
+    },
+    /* 只能删自己存进去的素材（按文件名），防止误删包内资源 */
+    removeAsset(path) {
+      try {
+        const dir = (wx.env && wx.env.USER_DATA_PATH) || "";
+        const fs = typeof wx.getFileSystemManager === "function" ? wx.getFileSystemManager() : null;
+        if (!fs || !dir || !path || path.indexOf(dir + "/") !== 0) return false;
+        fs.unlinkSync(path);
+        return true;
+      } catch (e) { return false; }
+    },
+    /* 试听一段本地音频（自定义卡保存前先听一下）；返回一个 stop() */
+    previewAsset(path) {
+      if (!path) return null;
+      try {
+        if (typeof wx !== "undefined" && wx.createInnerAudioContext) {
+          const a = wx.createInnerAudioContext();
+          a.src = path; a.volume = 1;
+          a.onError = () => { try { a.destroy(); } catch (e) {} };
+          a.play();
+          return { stop() { try { a.stop(); a.destroy(); } catch (e) {} } };
+        }
+        if (typeof window !== "undefined" && window.Audio) {
+          const a = new window.Audio(path);
+          a.play().catch(() => {});
+          return { stop() { try { a.pause(); a.currentTime = 0; } catch (e) {} } };
+        }
+      } catch (e) {}
+      return null;
     }
   };
 

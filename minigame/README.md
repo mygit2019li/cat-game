@@ -39,7 +39,7 @@ minigame/
 └── js/
     ├── platform.js    # 平台层（画布/触摸/存储/震动/屏幕常亮/音频）
     ├── config.js      # 全部玩法参数表（与原型 1:1）
-    ├── audio.js       # WebAudio 合成音效
+    ├── audio.js       # WebAudio 合成音效 + 本地真实录音（喵声/出粮声）
     ├── draw.js        # 矢量精灵（鱼/鼠/蝶/光点/洞）+ 蝴蝶 HD 皮肤
     ├── scenery.js     # 四套布景 + 粒子特效系统
     ├── prey.js        # 四套猎物状态机
@@ -53,6 +53,16 @@ test/harness.html     # 浏览器验证垫片（wx shim，不参与打包）
 按花色色相旋转生成 6 变体（`assets/bfly-hd*.png`）。运行时按身体中线切左右半，
 用与矢量版相同的开合度状态机做绕体轴压缩翻翅（收翅自动压暗）；贴图加载失败自动回退矢量绘制。
 烘焙管线与踩坑见 `小程序项目档案.md`。
+
+## 音频素材来源与署名
+
+- 出粮音效首选：`assets/audio/feeder_real.mp3` —— 用户实拍出粮视频（`猫粮.mp4`）提取音轨，截取连续出粮段，无授权限制。
+- 出粮备选（仅在首选加载失败时逐条尝试），来自 [Freesound](https://freesound.org)，许可 CC BY 4.0：
+  - 《Kibbles》by Bloomboi1 — https://freesound.org/s/762162/
+  - 《Cat Food Dispenser, Dispensing Dry Cat Food》by designerschoice (TDC) — https://freesound.org/s/808834/
+  - 《Cat_feeder》by Fred-o-saurus — https://freesound.org/s/766521/
+- 喵声音效（`assets/audio/cat_*.mp3`）：从实拍视频提取音轨自制，素材来自 Mixkit 免费音效。
+- 以上录音均经过去首尾静音、-16 LUFS 响度归一、96kbps 单声道处理。
 
 ## 与 H5 原型的差异
 

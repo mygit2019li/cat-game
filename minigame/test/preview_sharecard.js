@@ -21,7 +21,7 @@ function findChrome() {
 }
 
 const MODS = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js",
-  "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./js/sharecard.js", "./game.js"];
+  "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./js/sharecard.js", "./js/feeder.js", "./game.js"];
 
 const modules = {};
 for (const n of MODS) modules[n] = fs.readFileSync(path.join(ROOT, n), "utf8");

@@ -10,6 +10,8 @@ module.exports = function (G) {
   G.uiFX = { stagePop: 0, stageText: "", comboPop: 0 };
 
   const btn = (x, y, w, h, cb) => { ui.buttons.push({ x, y, w, h, cb }); };
+  /* 带 key 的命中区：给自动化测试一个不依赖坐标算式的查找入口 */
+  const btnKey = (x, y, w, h, key, cb) => { ui.buttons.push({ x, y, w, h, key, cb }); };
   const inBtn = (x, y, b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   G.hitButton = (x, y) => {
     for (let i = ui.buttons.length - 1; i >= 0; i--) {
@@ -85,6 +87,67 @@ module.exports = function (G) {
       ctx.beginPath(); ctx.moveTo(-r * 0.5, -r * 0.15); ctx.lineTo(-r * 0.72, -r * 0.68); ctx.lineTo(-r * 0.05, -r * 0.48); ctx.closePath(); ctx.fill();
       ctx.beginPath(); ctx.moveTo(r * 0.5, -r * 0.15); ctx.lineTo(r * 0.72, -r * 0.68); ctx.lineTo(r * 0.05, -r * 0.48); ctx.closePath(); ctx.fill();
       ctx.beginPath(); ctx.arc(0, r * 0.12, r * 0.52, 0, Math.PI * 2); ctx.fill();
+    } else if (key === "bowl") {
+      // 猫粮盆：盆体弧 + 盆沿 + 三颗露在外面的干粮
+      ctx.lineWidth = Math.max(1.5, s * 0.13);
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.86, -r * 0.02);
+      ctx.quadraticCurveTo(-r * 0.72, r * 0.78, 0, r * 0.78);
+      ctx.quadraticCurveTo(r * 0.72, r * 0.78, r * 0.86, -r * 0.02);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.95, -r * 0.1); ctx.lineTo(r * 0.95, -r * 0.1);
+      ctx.stroke();
+      [[-0.42, -0.38, 0.16], [0.0, -0.5, 0.17], [0.42, -0.36, 0.15]].forEach(([dx, dy, rr2]) => {
+        ctx.beginPath(); ctx.arc(r * dx, r * dy, r * rr2, 0, Math.PI * 2); ctx.fill();
+      });
+    } else if (key === "album") {
+      // 相册：相框 + 小太阳 + 一座山（线框用 rrPath，G.rr 会顺手把形状填成实心）
+      ctx.lineWidth = Math.max(1.4, s * 0.11);
+      rrPath(-r * 0.85, -r * 0.7, r * 1.7, r * 1.4, r * 0.22); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-r * 0.38, -r * 0.28, r * 0.17, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, r * 0.52); ctx.lineTo(-r * 0.18, -r * 0.06); ctx.lineTo(r * 0.2, r * 0.3);
+      ctx.lineTo(r * 0.46, r * 0.04); ctx.lineTo(r * 0.75, r * 0.52);
+      ctx.stroke();
+    } else if (key === "chat") {
+      // 聊天气泡：圆角框 + 小尾巴 + 三个点
+      ctx.lineWidth = Math.max(1.4, s * 0.11);
+      rrPath(-r * 0.85, -r * 0.72, r * 1.7, r * 1.16, r * 0.34); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.3, r * 0.42); ctx.lineTo(-r * 0.36, r * 0.78); ctx.lineTo(r * 0.02, r * 0.44);
+      ctx.closePath(); ctx.fill();
+      [-0.4, 0, 0.4].forEach((dx) => {
+        ctx.beginPath(); ctx.arc(r * dx, -r * 0.14, r * 0.12, 0, Math.PI * 2); ctx.fill();
+      });
+    } else if (key === "camera") {
+      // 相机：机身 + 镜头 + 顶上快门凸台
+      ctx.lineWidth = Math.max(1.4, s * 0.11);
+      rrPath(-r * 0.88, -r * 0.4, r * 1.76, r * 1.18, r * 0.22); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.42, -r * 0.4); ctx.lineTo(-r * 0.26, -r * 0.68); ctx.lineTo(r * 0.1, -r * 0.68); ctx.lineTo(r * 0.24, -r * 0.4);
+      ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, r * 0.18, r * 0.34, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, r * 0.18, r * 0.13, 0, Math.PI * 2); ctx.fill();
+    } else if (key === "mic") {
+      // 麦克风：拾音头 + 托架 + 底座
+      ctx.lineWidth = Math.max(1.4, s * 0.12);
+      G.rr(ctx, -r * 0.22, -r * 0.82, r * 0.44, r * 1.0, r * 0.22); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -r * 0.02, r * 0.55, Math.PI * 0.12, Math.PI * 0.88, false); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, r * 0.5); ctx.lineTo(0, r * 0.78); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * 0.36, r * 0.8); ctx.lineTo(r * 0.36, r * 0.8); ctx.stroke();
+    } else if (key === "file") {
+      // 文件：折角纸张 + 两行内容
+      ctx.lineWidth = Math.max(1.4, s * 0.11);
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.62, -r * 0.84); ctx.lineTo(r * 0.24, -r * 0.84); ctx.lineTo(r * 0.66, -r * 0.42);
+      ctx.lineTo(r * 0.66, r * 0.84); ctx.lineTo(-r * 0.62, r * 0.84);
+      ctx.closePath(); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(r * 0.22, -r * 0.8); ctx.lineTo(r * 0.24, -r * 0.44); ctx.lineTo(r * 0.64, -r * 0.42);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * 0.32, r * 0.02); ctx.lineTo(r * 0.34, r * 0.02); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-r * 0.32, r * 0.38); ctx.lineTo(r * 0.34, r * 0.38); ctx.stroke();
     }
     ctx.restore();
   }
@@ -192,61 +255,6 @@ module.exports = function (G) {
     { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
     { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" }
   ];
-  /* 首页常驻小字：适龄提示(12周岁) / 健康游戏忠告(标准原文) / 安全提示 / 免责声明（自动按宽度折行）
-     文案依据：《网络游戏适龄提示》团体标准 + 新闻出版署《健康游戏忠告》标准原文，逐字使用 */
-  const TIPS = [
-    "适龄提示：本游戏适合12周岁以上用户使用，建议未成年人在家长监护下使用本游戏",
-    "健康游戏忠告：抵制不良游戏，拒绝盗版游戏。注意自我保护，谨防受骗上当。适度游戏益脑，沉迷游戏伤身。合理安排时间，享受健康生活。",
-    "安全提示：请勿在行走、乘车或驾驶时游玩；长时间游玩请适当休息、注意用眼健康；游玩时请握稳设备，避免磕碰跌落",
-    "免责声明：本游戏为免费休闲玩具，不含付费、抽奖与任何商业推广"
-  ];
-  function wrapTips(maxW, fs) {
-    const lines = [];
-    ctx.font = (fs || 10) + "px sans-serif";
-    TIPS.forEach(s => {
-      let cur = "";
-      for (const ch of s) {
-        if (cur && ctx.measureText(cur + ch).width > maxW) { lines.push(cur); cur = ch; }
-        else cur += ch;
-      }
-      if (cur) lines.push(cur);
-    });
-    return lines;
-  }
-  function drawTips(x, y, maxW, lineH, align, fs) {
-    const lines = wrapTips(maxW, fs);
-    ctx.globalAlpha = 0.75;
-    lines.forEach((s, i) => text(s, x, y + 8 + i * lineH, (fs || 10) + "px sans-serif", C.ink3, align || "left"));
-    ctx.globalAlpha = 1;
-    return lines.length * lineH;
-  }
-  /* 横屏底部合规小字：四条合并后按宽度平衡折成两行，字号 10→7 自适应；
-     实在放不下（极窄屏）退回普通多行折行 */
-  function fitTips2(maxW) {
-    const all = TIPS.join("   ");
-    for (let fs = 10; fs >= 7; fs--) {
-      ctx.font = fs + "px sans-serif";
-      const chars = [...all];
-      const total = ctx.measureText(all).width;
-      let acc = 0, split = chars.length;
-      for (let i = 0; i < chars.length; i++) {
-        acc += ctx.measureText(chars[i]).width;
-        if (acc >= total / 2) { split = i + 1; break; }
-      }
-      // 在平衡切点附近找最近的句读（。；空格）断行，避免词语被拦腰截断
-      for (let d = 0; d <= 14; d++) {
-        for (const j of [split - d, split + d]) {
-          if (j > 0 && j < chars.length && "。； ".includes(chars[j - 1])) { split = j; d = 99; break; }
-        }
-      }
-      const l1 = chars.slice(0, split).join(""), l2 = chars.slice(split).join("");
-      if (Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width) <= maxW) {
-        return { lines: [l1, l2], fs, lh: fs + 5 };
-      }
-    }
-    return { lines: wrapTips(maxW, 9), fs: 9, lh: 13 };
-  }
-
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
      中心小鱼往返游动(swimDrift 3.4s) + 摆尾 + 上升气泡 + 整体呼吸(breath 2.8s) */
   ui.drawStartOrb = (cx, cy, D, label, cb) => {
@@ -357,34 +365,26 @@ module.exports = function (G) {
       const rightW = availW - leftW - gap * 2;
       const leftX = edgeL, rightX = leftX + leftW + gap * 2;
       const topY = safe.top;
-      // 左侧内容块（标题+圆形开始按钮）偏上放置：剩余空隙只取 30%，其余留在底部，为底部提示小字预留空间
-      const titleH = 62, subH = 44;
+      // 左侧内容块（标题+圆形开始按钮）偏上放置：剩余空隙只取 30%，其余留在底部
+      const titleH = 62;
       const tight = availH < 420;                     // SE 级小屏收紧间距
       const vgap = tight ? 10 : 16;
-      // 底部合规小字：通栏两行（自适应字号），左栏/卡片均不再为其堆叠预留
-      const tip2 = fitTips2(availW);
-      const tipsH = tip2.lines.length * tip2.lh + 10;
-      const orbD = Math.max(96, Math.min(148, Math.floor(availH - tipsH - 26 - titleH - vgap - m)));
+      const orbD = Math.max(96, Math.min(148, Math.floor(availH - 26 - titleH - vgap - m)));
       const blockH = titleH + orbD;
-      const blockTop = topY + Math.max(m, (availH - blockH - tipsH - 30) * 0.3);
+      const blockTop = topY + Math.max(m, (availH - blockH - 30) * 0.3);
       text(G.GAME_NAME, leftX + leftW / 2, blockTop + 16, "bold 28px sans-serif", C.ink);
       text("选一种猎物，开始今天的狩猎吧", leftX + leftW / 2, blockTop + 44, "14px sans-serif", C.ink2);
 
       const orbY = blockTop + titleH + orbD / 2;
       ui.drawStartOrb(leftX + leftW / 2, orbY, orbD, "开始游戏", () => G.requestStart());
 
-      // 适龄/健康忠告/安全/免责提示（底部通栏两行居中）
-      ctx.globalAlpha = 0.75;
-      const tipsTop = H - safe.bottom - tipsH;
-      tip2.lines.forEach((s, i) => text(s, edgeL, tipsTop + 6 + i * tip2.lh, tip2.fs + "px sans-serif", C.ink3, "left"));
-      ctx.globalAlpha = 1;
-
       // 右侧：单张「猎物选择」卡片
       const headH = 34, rowH = 46, pad = 12;
       // 底部通栏一行：设置/本周记录/好友排行（召唤猫咪入口按 SHOW_SUMMON 开关）
-      const rowY = tipsTop - rowH - 8;
+      const rowY = H - safe.bottom - rowH - 8;
       const rowBtns = [
         { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
+        { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
         { label: "设置", icon: "gear", cb: () => { G.switchScreen("settings"); } },
         { label: "本周记录", icon: "chart", cb: () => { G.switchScreen("records"); } },
         { label: "好友排行", icon: "trophy", cb: () => { G.switchScreen("leaderboard"); G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
@@ -500,17 +500,17 @@ module.exports = function (G) {
           G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
         });
       });
-      // 召唤猫咪入口（暂时隐藏，恢复时改回 SHOW_SUMMON）
+      // 召唤猫咪 / 电子猫粮 两个入口并排（半宽，给下方圆形开始按钮留高度）
       const cardBottom = cardY + cardH;
       let afterCard = cardBottom + 12;
       if (SHOW_SUMMON) {
-        drawBtn(edgeL, afterCard, availW, 46, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } });
-        afterCard += 46 + 14;
+        const halfW = (availW - 10) / 2;
+        drawBtn(edgeL, afterCard, halfW, 44, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } });
+        drawBtn(edgeL + halfW + 10, afterCard, halfW, 44, "电子猫粮", { icon: "bowl", cb: () => { G.feederEnter(); } });
+        afterCard += 44 + 12;
       }
       const by = afterCard;
-      const tipH2 = wrapTips(availW).length * 15;
-      const tipsTop2 = H - safe.bottom - tipH2 - 8;
-      const orbD2 = Math.max(96, Math.min(148, Math.floor(tipsTop2 - 14 - by - 84)));
+      const orbD2 = Math.max(96, Math.min(148, Math.floor(H - safe.bottom - 14 - by - 84)));
       ui.drawStartOrb(W / 2, by + orbD2 / 2, orbD2, "开始游戏", () => G.requestStart());
       const subY2 = by + orbD2 + 40;
       // 设置/本周记录/好友排行：按文案自适应宽度，整行水平居中
@@ -524,9 +524,6 @@ module.exports = function (G) {
       let subX = edgeL + Math.max(0, (availW - subSum) / 2);
       if (subSum > availW) { const eq = (availW - 20) / 3; subW.fill(eq); subX = edgeL; }
       subBtns.forEach((b, i) => { drawBtn(subX, subY2, subW[i], 44, b.label, { icon: b.icon, cb: b.cb }); subX += subW[i] + 10; });
-
-      // 适龄/健康忠告/安全/免责提示（底部居中，自动折行）
-      drawTips(edgeL, tipsTop2, availW, 15, "left");
     }
   };
 
@@ -1245,13 +1242,438 @@ module.exports = function (G) {
     btn(rx, row.by, row.half, row.bh, () => { ui.hideLB(); G.switchScreen("home"); });
   };
 
+  /* 卡面插画：有照片用照片；没照片（猫粮开饭 / 自定义还没传图）走矢量插画，
+     不能只铺一块纯色——那看着像没加载出来的占位框 */
+  function drawKindArt(k, x, y, w, h) {
+    const cached = k.img && G.platform.assets ? G.platform.assets[k.img] : null;
+    let drew = false;
+    if (cached && cached.ok) {
+      try { ctx.drawImage(cached, x, y, w, h); drew = true; } catch (e) { drew = false; }
+    } else if (k.img && G.platform.loadImage) {
+      G.platform.loadImage(k.img);            // 异步预加载，下一帧照片就绪后自然绘出
+    }
+    if (drew) return;
+    if (k.icon === "food") drawFoodArt(x, y, w, h);
+    else if (k.custom) drawCustomArt(x, y, w, h);
+    else drawPhotoFallback(k, x, y, w, h);
+  }
+
+  /* 照片卡但图还没解码出来：铺一层该性格的主色 + 一个爪印，
+     不能走自定义那张虚线加号占位（看上去像“这猫没传图”） */
+  function drawPhotoFallback(k, x, y, w, h) {
+    ctx.fillStyle = k.color || "#dfe8e4";
+    ctx.fillRect(x, y, w, h);
+    const cx = x + w / 2, cy = y + h / 2, s = Math.min(w, h) * 0.42;
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,.42)";
+    ctx.beginPath(); ctx.ellipse(cx, cy + s * 0.20, s * 0.34, s * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+    [[-0.40, -0.16, 0.15], [-0.15, -0.36, 0.16], [0.15, -0.36, 0.16], [0.40, -0.16, 0.15]].forEach(t => {
+      ctx.beginPath(); ctx.ellipse(cx + s * t[0], cy + s * t[1], s * t[2], s * t[2] * 0.92, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+  }
+
+  /* 猫粮开饭：上方出粮口 + 中间落粮 + 下方不锈钢盆，盆两侧配声波弧（声音才是这张卡的主角） */
+  function drawFoodArt(x, y, w, h) {
+    const cx = x + w / 2, bowlY = y + h * 0.74, rx = w * 0.30, ry = w * 0.085;
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, "#fdeecb"); g.addColorStop(0.6, "#f7d79a"); g.addColorStop(1, "#eeb95f");
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    // 声波：以盆心为圆心的三道弧，只画左右两侧
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineCap = "round";
+    for (let i = 0; i < 3; i++) {
+      const r = w * (0.34 + i * 0.09);
+      ctx.lineWidth = Math.max(1.6, w * (0.026 - i * 0.005));
+      ctx.globalAlpha = 0.9 - i * 0.26;
+      ctx.beginPath(); ctx.arc(cx, bowlY - h * 0.04, r, -1.05, -0.35); ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, bowlY - h * 0.04, r, Math.PI - 0.35, Math.PI + 1.05); ctx.stroke();
+    }
+    ctx.restore();
+    // 出粮口（白色小漏斗）
+    ctx.fillStyle = "#f4f8f6";
+    ctx.beginPath();
+    ctx.moveTo(cx - w * 0.10, y + h * 0.06); ctx.lineTo(cx + w * 0.10, y + h * 0.06);
+    ctx.lineTo(cx + w * 0.05, y + h * 0.21); ctx.lineTo(cx - w * 0.05, y + h * 0.21);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#2f4f4a";
+    G.rr(ctx, cx - w * 0.055, y + h * 0.035, w * 0.11, h * 0.035, w * 0.016); ctx.fill();
+    // 下落的粮粒（错开三列，越往下越大，读出“正在落”）
+    [[-0.055, 0.31, 0.030], [0.05, 0.41, 0.034], [-0.03, 0.52, 0.037], [0.06, 0.60, 0.036]].forEach(p => {
+      ctx.fillStyle = "#a8703a";
+      ctx.beginPath(); ctx.ellipse(cx + w * p[0], y + h * p[1], w * p[2], w * p[2] * 0.86, 0.5, 0, Math.PI * 2); ctx.fill();
+    });
+    // 不锈钢盆：先铺盆内，再画沿，最后堆粮
+    ctx.fillStyle = "#8e999f";
+    ctx.beginPath(); ctx.ellipse(cx, bowlY, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#5d686f";
+    ctx.beginPath(); ctx.ellipse(cx, bowlY + ry * 0.18, rx * 0.86, ry * 0.74, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#f7fbfa"; ctx.lineWidth = Math.max(2, w * 0.028);
+    ctx.beginPath(); ctx.ellipse(cx, bowlY, rx, ry, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = "#e3ecea"; ctx.lineWidth = Math.max(2, w * 0.05);
+    ctx.beginPath(); ctx.arc(cx, bowlY + ry * 0.2, rx * 0.98, 0.18, Math.PI - 0.18); ctx.stroke();
+    for (let i = 0; i < 7; i++) {
+      // 沿盆口横排铺开（上一版用 cos 做横坐标，七颗全挤到盆右边）
+      const u = (i - 3) / 3;                           // -1..1
+      const px2 = cx + u * rx * 0.60;
+      const py2 = bowlY - ry * 0.10 + Math.sqrt(Math.max(0, 1 - u * u)) * ry * 0.34;
+      ctx.fillStyle = i % 2 ? "#b8813f" : "#93611f";
+      ctx.beginPath();
+      ctx.ellipse(px2, py2, w * 0.032, w * 0.027, i * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  /* 自定义卡未传图：淡青底 + 虚线框 + 中间一个大加号（提示“这里可以放你自己的图”） */
+  function drawCustomArt(x, y, w, h) {
+    const g = ctx.createLinearGradient(x, y, x + w, y + h);
+    g.addColorStop(0, "#e7f7f3"); g.addColorStop(1, "#bfe6dc");
+    ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    ctx.save();
+    ctx.strokeStyle = "rgba(46,196,170,.55)"; ctx.lineWidth = Math.max(1.5, w * 0.012);
+    ctx.setLineDash([w * 0.05, w * 0.038]);
+    G.rr(ctx, x + w * 0.12, y + h * 0.12, w * 0.76, h * 0.76, w * 0.06); ctx.stroke();
+    ctx.restore();
+    const cx = x + w / 2, cy = y + h / 2, a = Math.min(w, h) * 0.13;
+    ctx.strokeStyle = "#2ec4aa"; ctx.lineCap = "round"; ctx.lineWidth = Math.max(2.5, w * 0.028);
+    ctx.beginPath(); ctx.moveTo(cx - a, cy); ctx.lineTo(cx + a, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - a); ctx.lineTo(cx, cy + a); ctx.stroke();
+  }
+
+  /* ---------- 自定义召唤卡录入弹窗 ----------
+     小游戏画布上没有原生输入框，文本走 platform.promptText（真机 = 系统键盘，
+     浏览器 = prompt）；图片和音频都不是“点一下就直调 API”，而是先弹一层渠道抽屉，
+     按用户熟悉的入口分：图片 = 相册 / 微信聊天 / 拍照，音频 = 现场录音 / 微信聊天 / 文件。
+     选回来的都是临时路径，只有 saveAsset 复制进 USER_DATA_PATH 才能抗住杀进程重启。 */
+  const SUMMON_SOURCES = {
+    image: {
+      title: "图片从哪里来",
+      items: [
+        { key: "album", icon: "album", label: "从相册选", hint: "手机相册里的现成照片" },
+        { key: "chat", icon: "chat", label: "从微信聊天选", hint: "聊天里发过的图，电脑端可选本地文件" },
+        { key: "camera", icon: "camera", label: "拍一张", hint: "用相机现拍，比如拍你家猫吃饭" }
+      ]
+    },
+    audio: {
+      title: "音频从哪里来",
+      items: [
+        { key: "record", icon: "mic", label: "现场录音", hint: "摇一下粮桶，最长 15 秒" },
+        { key: "chat", icon: "chat", label: "从微信聊天选", hint: "聊天里发过的音频文件" },
+        { key: "file", icon: "file", label: "从文件选", hint: "手机或电脑上的 mp3 / m4a / wav" }
+      ]
+    }
+  };
+  function openSummonEdit() {
+    const c = G.customSummon || {};
+    ui.summonEdit = {
+      name: c.name || "", img: c.img || "", audio: c.audio || "",
+      t0: performance.now(), msg: "", msgUntil: 0, preview: null, previewOn: false,
+      sheet: "", rec: null   // sheet：正在选渠道（"image"/"audio"）；rec：录音中的句柄
+    };
+  }
+  function closeSummonEdit() {
+    const E = ui.summonEdit;
+    if (E) { discardSummonRecord(E); stopPreview(E); }
+    ui.summonEdit = null;
+  }
+  /* 给切页面时用：game.js 直接置 null 会把麦克风漏在手里 */
+  ui.closeSummonEdit = closeSummonEdit;
+  function editMsg(E, s) { E.msg = s; E.msgUntil = performance.now() + 2000; }
+  /* 落盘文件名要带后缀：从 dataURL 的 mime 或路径尾部推，推不出用默认值 */
+  function assetExt(src, def) {
+    let m = /^data:[a-z]+\/([a-z0-9.+-]+)/i.exec(src);
+    if (m) {
+      const s = m[1].toLowerCase().split("+")[0];
+      return "." + (s === "jpeg" ? "jpg" : s);
+    }
+    m = /\.([a-z0-9]{2,4})(?:[?#]|$)/i.exec(src);
+    return m ? "." + m[1].toLowerCase() : def;
+  }
+  function stopPreview(E) {
+    if (E.preview) { try { E.preview.stop(); } catch (e) {} }
+    E.preview = null; E.previewOn = false;
+  }
+  /* 选不回来时分四种说法：自己取消 / 微信版本不支持这个渠道 / 选错了类型 / 麦克风被拒 */
+  function pickFailMsg(why, what, key) {
+    if (why === "unsupported") {
+      return key === "record"
+        ? "当前微信版本不支持录音，升级到最新版再试"
+        : "当前微信版本不支持从聊天/文件选" + what + "，升级到 2.23.0 以上再试";
+    }
+    if (why === "badtype") return "那个文件不是音频，换 mp3 / m4a / wav 试试";
+    if (why === "denied") return "麦克风权限被拒了，在微信设置里开一下再录";
+    return "没选" + what + "，保持原样";
+  }
+  /* 录音是个“过程”而不是“一下”：选完渠道就开始，音频行当场变成停止键；
+     到 15 秒微信自己会停（platform 里 duration + 万一没回调的兜底定时器） */
+  function startSummonRecord(E) {
+    G.stopSummonMusic();
+    stopPreview(E);   // 录音要抢麦克风，先把手里的试听关掉
+    const h = G.platform.recordAsset({
+      onStart() { if (E.rec) { E.rec.live = true; editMsg(E, "录音中…再点一下音频行就停"); } },
+      onDone(p) {
+        if (!E.rec) return;
+        E.rec = null;
+        if (!p) { editMsg(E, "录音取消了，保持原样"); return; }
+        E.audio = p;
+        editMsg(E, "这段录音已抓好，点保存生效");
+      },
+      onFail(why) {
+        if (!E.rec) return;
+        E.rec = null;
+        editMsg(E, why === "denied" ? "麦克风权限被拒了，在微信设置里开一下再录" : "录音断了，再试一次");
+      }
+    }, 15000);
+    if (!h) { editMsg(E, pickFailMsg("unsupported", "音频", "record")); return; }
+    E.rec = { t0: performance.now(), handle: h, live: false, stopping: false };
+  }
+  /* 停：保留 E.rec 等 onStop 回调把路径递回来（先清空会把刚录好的音频弄丢） */
+  function stopSummonRecord(E) {
+    if (!E.rec || E.rec.stopping) return;
+    E.rec.stopping = true;
+    try { E.rec.handle.stop(); } catch (e) { E.rec = null; }
+  }
+  /* 作废：关面板 / 删卡 / 切页面，这次录音直接扔 */
+  function discardSummonRecord(E) {
+    const r = E.rec;
+    if (!r) return;
+    E.rec = null;
+    try { r.handle.cancel(); } catch (e) {}
+  }
+  /* 渠道抽屉里点一项：录音走 recordAsset，其余走 pickAsset 的对应渠道 */
+  function chooseSummonSource(E, key) {
+    const kind = E.sheet;
+    E.sheet = "";
+    if (!kind) return;
+    if (kind === "audio" && key === "record") { startSummonRecord(E); return; }
+    G.platform.pickAsset(kind, key, (p, why) => {
+      if (!p) { editMsg(E, pickFailMsg(why, kind === "audio" ? "音频" : "图片", key)); return; }
+      stopPreview(E);
+      if (kind === "audio") { E.audio = p; editMsg(E, "音频已选好，点保存生效"); }
+      else {
+        E.img = p;
+        G.platform.loadImage(p);
+        editMsg(E, "图片已选好，点保存生效");
+      }
+    });
+  }
+  function commitSummonEdit(E) {
+    const P = G.platform, old = G.customSummon || {};
+    const name = String(E.name || "").trim().slice(0, 12);
+    if (!name && !E.img && !E.audio) { editMsg(E, "至少给个标题，或选一张图 / 一段音频"); return; }
+    G.stopSummonMusic();
+    stopPreview(E);
+    const ts = Date.now();
+    // 新选的素材才复制，沿用旧路径的不重复写盘；文件名带时间戳，避开 loadImage 的同路径缓存
+    let img = E.img, audio = E.audio;
+    if (img && img !== old.img) img = P.saveAsset(img, "summon-img-" + ts + assetExt(img, ".jpg"));
+    if (audio && audio !== old.audio) audio = P.saveAsset(audio, "summon-audio-" + ts + assetExt(audio, ".mp3"));
+    if (old.img && old.img !== img) P.removeAsset(old.img);
+    if (old.audio && old.audio !== audio) P.removeAsset(old.audio);
+    G.saveCustomSummon({ name: name, img: img, audio: audio });
+    if (img) P.loadImage(img);
+    if (G.summonPick) { G.summonPick.idx = 0; G.summonPick.off = 0; G.summonPick.relOff = 0; G.summonPick.t0 = performance.now(); }
+    closeSummonEdit();
+    G.playMilestone();
+  }
+  function removeCustomSummon(E) {
+    const old = G.customSummon || {};
+    G.stopSummonMusic();
+    discardSummonRecord(E);
+    stopPreview(E);
+    if (old.img) G.platform.removeAsset(old.img);
+    if (old.audio) G.platform.removeAsset(old.audio);
+    G.saveCustomSummon(null);
+    if (G.summonPick) { G.summonPick.idx = 0; G.summonPick.off = 0; G.summonPick.relOff = 0; }
+    closeSummonEdit();
+    G.playTick();
+  }
+
+  function drawSummonEdit(L) {
+    const E = ui.summonEdit, W = L.W, H = L.H;
+    // 万一 onStop 一直没回来（系统弹了个电话之类），17 秒硬收，别把用户锁在这页
+    if (E.rec && !E.rec.stopping && performance.now() - E.rec.t0 > 17000) stopSummonRecord(E);
+    const k = Math.min(1, (performance.now() - E.t0) / 240);
+    const ee = 1 - Math.pow(1 - k, 3);
+    ctx.fillStyle = "rgba(8,32,38," + (0.5 * ee).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+    btnKey(0, 0, W, H, "edit-scrim", () => { closeSummonEdit(); });
+
+    const rowH = 44, gap = 10, pad = 16;
+    const w = Math.min(W * 0.88, 372);
+    const h = 62 + (rowH + gap) * 3 + 54;
+    const x = (W - w) / 2, y = Math.max(L.safe.top + 8, (H - h) / 2 - 8);
+    ctx.save();
+    ctx.globalAlpha = ee;
+    ctx.shadowColor = "rgba(20,60,60,.2)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+    ctx.fillStyle = "#fff";
+    G.rr(ctx, x, y, w, h, 20); ctx.fill();
+    ctx.restore();
+
+    text("自定义召唤卡", x + pad, y + 24, "bold 17px sans-serif", C.ink, "left");
+    text("标题 / 图片 / 音频都存在本机，排在卡牌第一个", x + pad, y + 45, "11px sans-serif", C.ink3, "left");
+    // 右上角关闭叉
+    const ccx = x + w - pad - 4, ccy = y + 24;
+    ctx.strokeStyle = C.ink3; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(ccx - 7, ccy - 7); ctx.lineTo(ccx + 7, ccy + 7);
+    ctx.moveTo(ccx + 7, ccy - 7); ctx.lineTo(ccx - 7, ccy + 7);
+    ctx.stroke();
+    btnKey(ccx - 16, ccy - 16, 32, 32, "edit-close", () => { closeSummonEdit(); });
+
+    const fx = x + pad, fw = w - pad * 2;
+    const recOn = !!E.rec;
+    const recSec = recOn ? Math.min(15, (performance.now() - E.rec.t0) / 1000) : 0;
+    const rows = [
+      { label: "标题", value: E.name || "点这里输入（最多 12 字）", ok: !!E.name },
+      { label: "图片", value: E.img ? "已选择，再点可换来源" : "未选择 · 相册 / 聊天 / 拍照", ok: !!E.img },
+      {
+        label: "音频",
+        value: recOn ? ("录音中 " + recSec.toFixed(1) + "″ 点我停止")
+          : (E.audio ? "已选择，再点可换来源" : "未选择 · 录音 / 聊天 / 文件"),
+        ok: recOn ? true : !!E.audio
+      }
+    ];
+    rows.forEach((r, i) => {
+      const ry = y + 58 + i * (rowH + gap);
+      const hot = i === 2 && recOn;   // 录音中的音频行就是停止键，整行转成红态
+      ctx.fillStyle = hot ? "rgba(255,107,74,.08)" : "#f6faf9";
+      ctx.strokeStyle = hot ? "rgba(255,107,74,.5)" : C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, fx, ry, fw, rowH, 12); ctx.fill(); ctx.stroke();
+      text(r.label, fx + 12, ry + rowH / 2, "12px sans-serif", hot ? "#e2593a" : C.ink3, "left");
+      if (hot) {
+        // 跳动红点：麦克风是不是真的开着，一眼看得出来
+        const pulse = 0.55 + 0.45 * Math.sin((performance.now() - E.rec.t0) / 170);
+        ctx.globalAlpha = pulse; ctx.fillStyle = "#e2593a";
+        ctx.beginPath(); ctx.arc(fx + 46, ry + rowH / 2, 4.2, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      ctx.font = "bold 13px sans-serif";
+      const vw = ctx.measureText(r.value).width;
+      const pill = i === 2 && E.audio && !recOn ? 52 : 0;
+      const maxW = fw - 30 - pill - (hot ? 44 : 12);
+      text(vw > maxW ? String(r.value).slice(0, 10) + "…" : r.value,
+        fx + fw - 15 - pill, ry + rowH / 2, "bold 13px sans-serif",
+        hot ? "#e2593a" : (r.ok ? C.tealDeep : C.ink3), "right");
+      if (i === 0) {
+        btnKey(fx, ry, fw, rowH, "edit-name", () => {
+          if (E.rec) { editMsg(E, "先把录音停了再改别的"); return; }
+          G.platform.promptText("给这张召唤卡取个名字", E.name, (v) => {
+            if (v == null) return;
+            E.name = String(v).trim().slice(0, 12);
+            editMsg(E, E.name ? "标题已填好" : "标题已清空");
+          });
+        });
+      } else if (i === 1) {
+        // 不直接调 API：先弹渠道抽屉（相册 / 微信聊天 / 拍照）
+        btnKey(fx, ry, fw, rowH, "edit-img", () => {
+          if (E.rec) { editMsg(E, "先把录音停了再改别的"); return; }
+          E.sheet = "image"; G.playTick();
+        });
+      } else {
+        btnKey(fx, ry, fw, rowH, "edit-audio", () => {
+          if (E.rec) { stopSummonRecord(E); G.playTick(); return; }   // 录音中点这行 = 停
+          E.sheet = "audio"; G.playTick();
+        });
+        // 试听小胶囊（后 push，盖在整行命中区上面；录音中不出现）
+        if (E.audio && !recOn) {
+          const pw = 46, px2 = fx + fw - pw - 6, py2 = ry + (rowH - 26) / 2;
+          ctx.fillStyle = E.previewOn ? C.teal : "rgba(46,196,170,.14)";
+          G.rr(ctx, px2, py2, pw, 26, 13); ctx.fill();
+          text(E.previewOn ? "停止" : "试听", px2 + pw / 2, py2 + 13, "bold 12px sans-serif",
+            E.previewOn ? "#fff" : C.tealDeep);
+          btnKey(px2, py2, pw, 26, "edit-preview", () => {
+            if (E.previewOn) { stopPreview(E); return; }
+            E.preview = G.platform.previewAsset(E.audio);
+            E.previewOn = !!E.preview;
+            if (!E.previewOn) editMsg(E, "这段音频听不了，换个 mp3/m4a 试试");
+          });
+        }
+      }
+    });
+
+    // 底部：删除本卡（已有自定义卡时）+ 保存
+    const by = y + h - 46;
+    if (G.customSummon) {
+      const dw = 88;
+      ctx.fillStyle = "rgba(255,107,74,.10)"; ctx.strokeStyle = "rgba(255,107,74,.5)"; ctx.lineWidth = 1.2;
+      G.rr(ctx, fx, by, dw, 36, 18); ctx.fill(); ctx.stroke();
+      text("删除本卡", fx + dw / 2, by + 18, "bold 13px sans-serif", "#e2593a");
+      btnKey(fx, by, dw, 36, "edit-del", () => removeCustomSummon(E));
+    }
+    const sw = 132, sx2 = fx + fw - sw;
+    const sg = ctx.createLinearGradient(sx2, by, sx2, by + 36);
+    sg.addColorStop(0, C.startGrad0); sg.addColorStop(1, C.startGrad1);
+    ctx.save();
+    ctx.shadowColor = "rgba(20,160,147,.3)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4;
+    ctx.fillStyle = sg; G.rr(ctx, sx2, by, sw, 36, 18); ctx.fill();
+    ctx.restore();
+    text("保存到本机", sx2 + sw / 2, by + 18, "bold 14px sans-serif", "#fff");
+    btnKey(sx2, by, sw, 36, "edit-save", () => {
+      // 录音没收尾就按保存：先把手收住，免得把一条还在录的引用存进本地
+      if (E.rec) { stopSummonRecord(E); editMsg(E, "录音收尾中，再点一次保存"); return; }
+      commitSummonEdit(E);
+    });
+
+    if (E.msg && performance.now() < E.msgUntil) {
+      ctx.globalAlpha = Math.min(1, (E.msgUntil - performance.now()) / 400);
+      text(E.msg, x + w / 2, by - 12, "12px sans-serif", C.tealDeep);
+      ctx.globalAlpha = 1;
+    }
+    // 渠道抽屉画在最后：命中区后 push，天然压住背后的录入面板
+    drawSummonSources(E, L);
+  }
+
+  /* 渠道抽屉：从屏幕底边推上来的小白卡，一行一个入口，图标 + 主标题 + 说明 */
+  function drawSummonSources(E, L) {
+    const cfg = SUMMON_SOURCES[E.sheet];
+    if (!cfg) return;
+    const W = L.W, H = L.H, pad = 16;
+    ctx.fillStyle = "rgba(8,32,38,.45)";
+    ctx.fillRect(0, 0, W, H);
+    btnKey(0, 0, W, H, "edit-src-scrim", () => { E.sheet = ""; G.playTick(); });
+
+    const w = Math.min(W - 24, 372), x = (W - w) / 2;
+    const oh = 52;
+    const h = 46 + cfg.items.length * oh + 46;
+    const y = Math.max(L.safe.top + 8, H - h - 12 - (L.safe.bottom || 0));
+    ctx.save();
+    ctx.shadowColor = "rgba(20,60,60,.24)"; ctx.shadowBlur = 24; ctx.shadowOffsetY = -6;
+    ctx.fillStyle = "#fff";
+    G.rr(ctx, x, y, w, h, 20); ctx.fill();
+    ctx.restore();
+    text(cfg.title, x + w / 2, y + 26, "bold 15px sans-serif", C.ink);
+
+    cfg.items.forEach((it, i) => {
+      const ry = y + 46 + i * oh, cyc = ry + oh / 2, ix = x + pad + 14;
+      if (i) {
+        ctx.strokeStyle = "rgba(46,196,170,.14)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x + pad, ry); ctx.lineTo(x + w - pad, ry); ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(46,196,170,.12)";
+      ctx.beginPath(); ctx.arc(ix, cyc, 15, 0, Math.PI * 2); ctx.fill();
+      drawVecIcon(it.icon, ix, cyc, 17, C.tealDeep);
+      text(it.label, ix + 26, ry + 21, "bold 14px sans-serif", C.ink, "left");
+      text(it.hint, ix + 26, ry + 38, "11px sans-serif", C.ink3, "left");
+      btnKey(x, ry, w, oh, "edit-src-" + it.key, () => { G.playTick(); chooseSummonSource(E, it.key); });
+    });
+
+    const cy2 = y + h - 40;
+    ctx.fillStyle = "#f6faf9"; ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+    G.rr(ctx, x + pad, cy2, w - pad * 2, 32, 16); ctx.fill(); ctx.stroke();
+    text("取消", x + w / 2, cy2 + 16, "bold 13px sans-serif", C.ink3);
+    btnKey(x + pad, cy2, w - pad * 2, 32, "edit-src-cancel", () => { E.sheet = ""; G.playTick(); });
+  }
+
   /* ================= 召唤猫咪（猫种卡牌 + 专属召唤语音） =================
      展现形式为卡牌滑动切换，点击卡牌或下方大按钮播放语音 */
   ui.drawSummon = () => {
     const { W, H, land, m, safe } = layout();
-    const kinds = G.CAT_KINDS || [];
+    const kinds = G.summonKinds ? G.summonKinds() : (G.CAT_KINDS || []);
     const P = G.summonPick || { idx: 0, off: 0, t0: performance.now() };
     if (!G.summonPick) G.summonPick = P;
+    // 自定义卡被删除后索引会超出范围：先收回来，否则会画出一张空白卡
+    if (P.idx > kinds.length - 1) P.idx = Math.max(0, kinds.length - 1);
     
     const sel = P.idx;
     const kind = kinds[sel] || {};
@@ -1278,6 +1700,22 @@ module.exports = function (G) {
     ctx.moveTo(bX + bs * 0.6, bY + bs * 0.32); ctx.lineTo(bX + bs * 0.38, bY + bs * 0.5); ctx.lineTo(bX + bs * 0.6, bY + bs * 0.68);
     ctx.stroke();
     btn(bX, bY, bs, bs, () => { G.stopSummonMusic(); G.switchScreen("home"); });
+
+    /* 自定义召唤卡入口（左上角，紧跟返回键）：标题/图片/音频都可自己传，
+       存本机后永远排在卡牌列表第一个。图标-only 42×42，不挤居中标题 */
+    const eX = bX + bs + 10;
+    const hasCustom = !!G.customSummon;
+    ctx.fillStyle = hasCustom ? "rgba(46,196,170,.14)" : C.card;
+    ctx.strokeStyle = hasCustom ? C.teal : C.line;
+    ctx.lineWidth = hasCustom ? 1.6 : 1.2;
+    G.rr(ctx, eX, bY, bs, bs, 14); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = hasCustom ? C.tealDeep : C.ink2; ctx.lineCap = "round"; ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(eX + bs / 2, bY + 9); ctx.lineTo(eX + bs / 2, bY + 23);
+    ctx.moveTo(eX + bs / 2 - 7, bY + 16); ctx.lineTo(eX + bs / 2 + 7, bY + 16);
+    ctx.stroke();
+    text("自定义", eX + bs / 2, bY + 32, "bold 9px sans-serif", hasCustom ? C.tealDeep : C.ink2);
+    btnKey(eX, bY, bs, bs, "edit-open", () => { G.ensureAudio(); G.playTick(); openSummonEdit(); });
 
     text("召唤猫咪", W / 2, safe.top + 34, "bold 22px sans-serif", C.ink);
 
@@ -1348,24 +1786,7 @@ module.exports = function (G) {
         ctx.save();
         G.rr(ctx, imgX, imgY, imgS, imgH, 16);
         ctx.clip();
-        // 尝试从缓存加载真实照片，若无则显示占位色块
-        // 注意：这里取的是图片元素本身（.ok 只是就绪标记，曾经把 true 传给 drawImage 每帧抛错走占位分支）
-        const cached = G.platform.assets && G.platform.assets[k.img];
-        const realImg = cached && cached.ok ? cached : null;
-        if (realImg) {
-          try {
-            ctx.drawImage(realImg, imgX, imgY, imgS, imgH);
-          } catch (e) {
-            // 照片尚未完成解码（ok 标记竞态）：本帧跳过，下一帧照片就绪后自然绘出
-            ctx.fillStyle = k.color || "#eee";
-            ctx.fillRect(imgX, imgY, imgS, imgH);
-          }
-        } else {
-          ctx.fillStyle = k.color || "#eee";
-          ctx.fillRect(imgX, imgY, imgS, imgH);
-          // 异步预加载图片
-          if (G.platform.loadImage) G.platform.loadImage(k.img);
-        }
+        drawKindArt(k, imgX, imgY, imgS, imgH);
         ctx.restore();
         
         // 名字与品种小字（字号随卡宽收缩，保证不出卡边）
@@ -1444,6 +1865,9 @@ module.exports = function (G) {
     });
 
     ctx.restore();
+
+    // 自定义录入弹窗画在卡牌之上（命中区也后 push，优先于背面卡牌）
+    if (ui.summonEdit) drawSummonEdit({ W, H, safe });
   };
 
   /* ================= 游戏内 HUD =================

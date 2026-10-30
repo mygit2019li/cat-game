@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<!-- poster_food.html — 电子猫粮机宣传海报（1080×1440）
+     版式全部 CSS / 内联 SVG，配色取自游戏 js/config.js 的 G.COLORS；
+     手机屏是 test/shot_food_poster.js 用真实渲染截出来的图，二维码用用户提供的原图（不重绘，保证可扫）。
+     生成：NODE_PATH=<npm> node test/shot_food_poster.js -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --ink: #14313a; --ink2: #4a6b74; --ink3: #86a3a9;
+    --teal: #159a8c; --teal-deep: #0d6b7d;
+    --bg1: #eef7f3; --bg2: #cdefe4;
+    --amber: #ffb02e; --amber-deep: #f08c00;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1440px; overflow: hidden; }
+  body { font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; color: var(--ink); }
+  .poster {
+    position: relative; width: 1080px; height: 1440px; overflow: hidden;
+    background: linear-gradient(160deg, #ffffff 0%, var(--bg1) 44%, var(--bg2) 100%);
+    display: flex; flex-direction: column; padding: 52px 60px 54px;
+  }
+  /* ---------- 背景装饰 ---------- */
+  .blob { position: absolute; border-radius: 50%; }
+  .b1 { width: 640px; height: 640px; right: -240px; top: -190px; background: radial-gradient(circle at 35% 35%, rgba(70,214,192,.30), rgba(70,214,192,0) 68%); }
+  .b2 { width: 540px; height: 540px; left: -210px; top: 430px; background: radial-gradient(circle at 60% 40%, rgba(255,176,46,.22), rgba(255,176,46,0) 70%); }
+  .b3 { width: 480px; height: 480px; right: -130px; bottom: -170px; background: radial-gradient(circle at 50% 50%, rgba(21,154,140,.15), rgba(21,154,140,0) 70%); }
+  .paw { position: absolute; opacity: .09; }
+  .p1 { left: 40px; top: 286px; transform: rotate(-18deg) scale(1.05); }
+  .p2 { left: 470px; top: 214px; transform: rotate(22deg) scale(.62); }
+  .p3 { right: 60px; top: 640px; transform: rotate(30deg) scale(.8); }
+  .p4 { left: 250px; bottom: 250px; transform: rotate(-8deg) scale(.55); }
+
+  /* ---------- 顶部品牌条 ---------- */
+  .brand { position: relative; display: flex; align-items: center; gap: 14px; }
+  .brand .chip {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.9); border: 1.5px solid rgba(21,154,140,.26);
+    border-radius: 999px; padding: 9px 22px 9px 13px; box-shadow: 0 6px 18px rgba(20,60,60,.07);
+  }
+  .brand .chip span { font-size: 26px; font-weight: 600; letter-spacing: .5px; color: var(--teal-deep); }
+  .brand .ver { font-size: 23px; color: var(--ink3); letter-spacing: 1px; }
+
+  /* ---------- 标题区 ---------- */
+  .head { position: relative; margin-top: 34px; }
+  h1 { font-size: 84px; line-height: 1.14; font-weight: 700; letter-spacing: -1.5px; }
+  h1 em { font-style: normal; color: var(--teal); }
+  h1 .q { color: var(--amber-deep); }
+  .sub { margin-top: 24px; font-size: 28px; line-height: 1.6; color: var(--ink2); }
+  .sub b { color: var(--ink); font-weight: 600; }
+  .sub i { font-style: normal; color: var(--teal-deep); font-weight: 600; }
+  .cat { position: absolute; right: -8px; top: -14px; width: 244px; height: 244px; }
+
+  /* ---------- 中段：手机主图 + 卖点 ---------- */
+  .mid { position: relative; flex: 1; display: flex; align-items: center; gap: 44px; margin-top: 34px; }
+  .hero { position: relative; flex: none; width: 292px; }
+  .phone {
+    position: relative; width: 292px; background: #0c2a31; border-radius: 40px; padding: 11px;
+    box-shadow: 0 28px 56px rgba(12,42,49,.26), 0 0 0 6px rgba(255,255,255,.6);
+  }
+  .phone img { display: block; width: 270px; height: 478px; border-radius: 30px; }
+  .phone .notch {
+    position: absolute; left: 50%; top: 20px; transform: translateX(-50%);
+    width: 86px; height: 19px; border-radius: 12px; background: #0c2a31;
+  }
+  /* 声波：从手机右上往卖点方向扩散，控制在 hero 列内（右侧只溢出 26px，不压文字） */
+  .wave { position: absolute; right: -26px; top: 96px; width: 96px; height: 96px; }
+  .tag {
+    position: absolute; left: -6px; bottom: -20px; display: inline-flex; align-items: center; gap: 9px;
+    background: var(--amber); color: #4a2c00; font-size: 22px; font-weight: 600;
+    border-radius: 999px; padding: 10px 20px 10px 14px; box-shadow: 0 12px 26px rgba(240,140,0,.3); white-space: nowrap;
+  }
+  .tag i { width: 11px; height: 11px; border-radius: 50%; background: #4a2c00; }
+
+  .feats { flex: 1; display: flex; flex-direction: column; gap: 26px; }
+  .feat { display: flex; align-items: flex-start; gap: 22px; }
+  .feat .ic {
+    flex: none; width: 74px; height: 74px; border-radius: 24px;
+    background: rgba(255,255,255,.92); border: 1.5px solid rgba(21,154,140,.2);
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 22px rgba(20,60,60,.07);
+  }
+  .feat h3 { font-size: 30px; font-weight: 600; letter-spacing: -.4px; }
+  .feat h3 small { font-size: 20px; font-weight: 500; color: var(--teal); margin-left: 10px; letter-spacing: 0; }
+  .feat p { margin-top: 8px; font-size: 22px; line-height: 1.5; color: var(--ink2); max-width: 560px; }
+  .feat p b { color: var(--amber-deep); font-weight: 600; }
+
+  /* ---------- 底部：二维码 ---------- */
+  .foot {
+    position: relative; flex: none; display: flex; align-items: center; gap: 32px;
+    background: linear-gradient(115deg, var(--teal-deep) 0%, #14a093 60%, #46d6c0 100%);
+    border-radius: 34px; padding: 28px 34px; box-shadow: 0 24px 52px rgba(13,107,125,.3); overflow: hidden;
+  }
+  .foot::after {
+    content: ""; position: absolute; right: -90px; top: -120px; width: 330px; height: 330px;
+    border-radius: 50%; background: rgba(255,255,255,.09);
+  }
+  .qr { flex: none; width: 214px; height: 214px; background: #fff; border-radius: 26px; padding: 9px; position: relative; z-index: 1; }
+  .qr img { display: block; width: 196px; height: 196px; }
+  .foot .txt { position: relative; z-index: 1; }
+  .foot .big { font-size: 38px; font-weight: 700; color: #fff; letter-spacing: -.5px; }
+  .foot .big span {
+    display: inline-block; background: rgba(255,255,255,.22); border-radius: 10px; padding: 0 12px;
+    margin-right: 8px; font-size: 28px; font-weight: 600; vertical-align: 6px; letter-spacing: 0;
+  }
+  .foot .line { margin-top: 12px; font-size: 24px; line-height: 1.5; color: rgba(255,255,255,.92); }
+  .foot .line b { color: #fff; font-weight: 600; }
+  .foot .path {
+    margin-top: 14px; display: inline-flex; align-items: center; gap: 9px;
+    font-size: 21px; color: var(--teal-deep); background: #fff; border-radius: 999px; padding: 9px 20px; font-weight: 600;
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="paw" viewBox="0 0 100 100">
+    <ellipse cx="50" cy="63" rx="24" ry="20" fill="#0d6b7d"/>
+    <ellipse cx="22" cy="36" rx="10" ry="13" fill="#0d6b7d"/>
+    <ellipse cx="41" cy="24" rx="10" ry="14" fill="#0d6b7d"/>
+    <ellipse cx="61" cy="24" rx="10" ry="14" fill="#0d6b7d"/>
+    <ellipse cx="79" cy="37" rx="10" ry="13" fill="#0d6b7d"/>
+  </symbol>
+</svg>
+
+<div class="poster">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+  <svg class="paw p1" width="120" height="120"><use href="#paw"/></svg>
+  <svg class="paw p2" width="120" height="120"><use href="#paw"/></svg>
+  <svg class="paw p3" width="120" height="120"><use href="#paw"/></svg>
+  <svg class="paw p4" width="120" height="120"><use href="#paw"/></svg>
+
+  <div class="brand">
+    <div class="chip">
+      <!-- 猫粮盆小图标（与游戏 ui.js drawVecIcon("bowl") 同构） -->
+      <svg width="34" height="34" viewBox="-17 -17 34 34">
+        <path d="M-14.6 -0.3 Q-12.2 13.3 0 13.3 Q12.2 13.3 14.6 -0.3" fill="none" stroke="#0d6b7d" stroke-width="3" stroke-linecap="round"/>
+        <path d="M-16.2 -1.7 L16.2 -1.7" stroke="#0d6b7d" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="-6.8" cy="-6.4" r="2.7" fill="#ffb02e"/>
+        <circle cx="0" cy="-8.5" r="2.9" fill="#ffb02e"/>
+        <circle cx="6.8" cy="-6.2" r="2.6" fill="#ffb02e"/>
+      </svg>
+      <span>逗猫触屏玩具</span>
+    </div>
+    <div class="ver">电子猫粮机 · 新版本上线</div>
+  </div>
+
+  <div class="head">
+    <!-- 橘猫：几何构成照搬 ui.js drawCat（两三角耳 + 圆头 + 白眼珠 + 粉鼻头） -->
+    <svg class="cat" viewBox="-110 -110 220 220">
+      <circle cx="0" cy="6" r="100" fill="rgba(255,255,255,.74)"/>
+      <circle cx="0" cy="6" r="100" fill="none" stroke="rgba(21,154,140,.2)" stroke-width="2"/>
+      <path d="M-60 -18 L-94 -92 L-6 -61 Z" fill="#e8944a"/>
+      <path d="M60 -18 L94 -92 L6 -61 Z" fill="#e8944a"/>
+      <path d="M-58 -27 L-82 -78 L-22 -56 Z" fill="#ffd9b8"/>
+      <path d="M58 -27 L82 -78 L22 -56 Z" fill="#ffd9b8"/>
+      <circle cx="0" cy="9" r="72" fill="#f0a35a"/>
+      <path d="M-70 -6 A72 72 0 0 1 -20 -62 L-26 -2 Z" fill="#e8944a" opacity=".5"/>
+      <circle cx="-27" cy="4" r="13" fill="#fff"/>
+      <circle cx="27" cy="4" r="13" fill="#fff"/>
+      <circle cx="-25" cy="7" r="6.6" fill="#2b2b2b"/>
+      <circle cx="29" cy="7" r="6.6" fill="#2b2b2b"/>
+      <circle cx="-22.5" cy="3.5" r="2.3" fill="#fff"/>
+      <circle cx="31.5" cy="3.5" r="2.3" fill="#fff"/>
+      <path d="M0 27 L-13 15 L13 15 Z" fill="#ff9aa2"/>
+      <path d="M0 27 Q-9 41 -21 35" fill="none" stroke="#b96b2c" stroke-width="3" stroke-linecap="round"/>
+      <path d="M0 27 Q9 41 21 35" fill="none" stroke="#b96b2c" stroke-width="3" stroke-linecap="round"/>
+      <path d="M-46 20 L-76 13 M-46 31 L-76 36 M46 20 L76 13 M46 31 L76 36"
+            stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".92"/>
+      <!-- 两颗从上面掉下来的粮（一颗干粮 + 一块冻干）：放在两耳之间的空档，别贴着耳尖，不然像长在耳朵上 -->
+      <ellipse cx="-30" cy="-84" rx="11" ry="9" transform="rotate(-24 -30 -84)" fill="#a8752f"/>
+      <rect x="22" y="-92" width="17" height="13" rx="5" transform="rotate(18 30 -85)" fill="#e8c79a"/>
+    </svg>
+
+    <h1>
+      <div>屏幕上也会</div>
+      <div><span class="q">「哗啦」</span>倒<em>猫粮</em></div>
+    </h1>
+    <div class="sub">
+      <b>真实出粮录音</b> · 粮里混着冻干 · 到点自动开饭<br>
+      把<i>开饭</i>这件事，做成一场猫愿意扑上来的仪式。
+    </div>
+  </div>
+
+  <div class="mid">
+    <div class="hero">
+      <div class="phone">
+        <div class="notch"></div>
+        <img src="../generated-images/poster_phone.png" alt="电子猫粮机界面">
+      </div>
+      <svg class="wave" viewBox="0 0 96 96">
+        <g fill="none" stroke="#f08c00" stroke-linecap="round">
+          <path d="M10 24 A30 30 0 0 1 10 72" stroke-width="5"/>
+          <path d="M28 12 A46 46 0 0 1 28 84" stroke-width="5" opacity=".62"/>
+          <path d="M46 2 A62 62 0 0 1 46 94" stroke-width="5" opacity=".3"/>
+        </g>
+      </svg>
+      <div class="tag"><i></i>点一下机身，真·出粮声</div>
+    </div>
+
+    <div class="feats">
+      <div class="feat">
+        <div class="ic">
+          <svg width="42" height="42" viewBox="0 0 44 44">
+            <path d="M9 17 h7 l9 -8 v26 l-9 -8 h-7 z" fill="#159a8c"/>
+            <path d="M31 15 a9 9 0 0 1 0 14" fill="none" stroke="#ffb02e" stroke-width="3.4" stroke-linecap="round"/>
+            <path d="M36 10 a16 16 0 0 1 0 24" fill="none" stroke="#ffb02e" stroke-width="3.4" stroke-linecap="round" opacity=".6"/>
+          </svg>
+        </div>
+        <div>
+          <h3>实拍出粮录音<small>不是电子音</small></h3>
+          <p>粮落进桶里那阵<b>哗啦</b>声，平铺成 17 秒可循环音轨 —— 猫听得懂这个信号。</p>
+        </div>
+      </div>
+
+      <div class="feat">
+        <div class="ic">
+          <svg width="42" height="42" viewBox="0 0 44 44">
+            <path d="M5 20 q2 15 17 15 q15 0 17 -15" fill="none" stroke="#159a8c" stroke-width="3.4" stroke-linecap="round"/>
+            <path d="M3 18 h38" stroke="#159a8c" stroke-width="3.4" stroke-linecap="round"/>
+            <ellipse cx="15" cy="13" rx="4.2" ry="3.4" fill="#a8752f"/>
+            <ellipse cx="27" cy="11" rx="4.2" ry="3.4" fill="#7f5320"/>
+            <rect x="19" y="23" width="8" height="6" rx="2.4" fill="#e8c79a"/>
+          </svg>
+        </div>
+        <div>
+          <h3>粮堆里混着冻干</h3>
+          <p>每 10 颗左右混进 1 块冻干，按槽位固定分布；盆是嵌在白托座里的<b>浅口不锈钢碗</b>。</p>
+        </div>
+      </div>
+
+      <div class="feat">
+        <div class="ic">
+          <svg width="42" height="42" viewBox="0 0 44 44">
+            <ellipse cx="22" cy="28" rx="11" ry="9" fill="#159a8c"/>
+            <ellipse cx="9" cy="16" rx="4.6" ry="6" fill="#159a8c"/>
+            <ellipse cx="18" cy="11" rx="4.6" ry="6.4" fill="#159a8c"/>
+            <ellipse cx="27" cy="11" rx="4.6" ry="6.4" fill="#159a8c"/>
+            <ellipse cx="36" cy="17" rx="4.6" ry="6" fill="#159a8c"/>
+            <path d="M34 31 a7 7 0 0 1 8 7" fill="none" stroke="#ffb02e" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h3>猫拍一下，就「吃」掉一份</h3>
+          <p>点粮堆叼走 <b>16 颗</b>，粮堆回弹、颗粒扬起；盆见底时机器自己提醒补粮。</p>
+        </div>
+      </div>
+
+      <div class="feat">
+        <div class="ic">
+          <svg width="42" height="42" viewBox="0 0 44 44">
+            <circle cx="21" cy="24" r="14" fill="none" stroke="#159a8c" stroke-width="3.4"/>
+            <path d="M21 16 v8 l6 4" fill="none" stroke="#159a8c" stroke-width="3.4" stroke-linecap="round"/>
+            <path d="M33 7 a13 13 0 0 1 6 9" fill="none" stroke="#ffb02e" stroke-width="3.2" stroke-linecap="round"/>
+            <path d="M32 4 l2 4 l-4 1" fill="none" stroke="#ffb02e" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h3>定时、手动都能开饭</h3>
+          <p>间隔 <b>30 秒到 30 分钟</b>任选，一次 1 到 5 份；离开页面也照真实时间继续走。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="qr"><img src="../generated-images/qr-minigame.jpg" alt="小游戏码"></div>
+    <div class="txt">
+      <div class="big"><span>微信</span>长按识别，立即给猫开饭</div>
+      <div class="line">小游戏《逗猫触屏玩具》· 首页进 <b>电子猫粮机</b></div>
+      <div class="path"><svg width="22" height="22" viewBox="0 0 100 100"><use href="#paw"/></svg>还能上传你家猫的标题 / 照片 / 叫声，做成专属召唤卡</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

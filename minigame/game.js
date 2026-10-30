@@ -11,6 +11,11 @@ require("./js/scenery.js")(G);
 require("./js/prey.js")(G);
 require("./js/ui.js")(G);
 require("./js/sharecard.js")(G);   // 分享卡片 / 猫咪反应测评图
+require("./js/feeder.js")(G);     // 电子猫粮机（定时定量 / 手动出粮）
+
+/* 自定义召唤卡（标题/图片/音频都存在本机）：卡牌列表要在第一帧就把它排在第一，
+   所以模块装配完就先读一次存储 */
+G.loadCustomSummon();
 
 const ctx = G.platform.ctx;
 const clamp = G.clamp;
@@ -24,6 +29,8 @@ let countT = 0, lastInt = -1;
 
 G.switchScreen = (name) => {
   if (G.screen === name) return;
+  // 离开召唤页时收起自定义录入面板（面板只在 summon 页画，不收会在下次进页时错弹出来）
+  if (G.ui && G.ui.summonEdit && G.ui.closeSummonEdit) G.ui.closeSummonEdit();
   G.nextScreen = name;
   G.transitionT = 0;
 };
@@ -251,6 +258,7 @@ G.bgPickTouchEnd = (x) => {
 /* ================= 召唤猫咪交互 ================= */
 G.summonPickTouchStart = (x) => {
   const P = G.summonPick; if (!P) return;
+  if (G.ui && G.ui.summonEdit) return;      // 自定义录入弹窗开着：背面卡牌不跟手
   P.drag = true; P.x0 = x; P.off = 0; P.relOff = 0;
 };
 G.summonPickTouchMove = (x) => {
@@ -258,7 +266,7 @@ G.summonPickTouchMove = (x) => {
   P.off = x - P.x0;
 };
 G.summonPickTouchEnd = (x) => {
-  const P = G.summonPick, kinds = G.CAT_KINDS || [];
+  const P = G.summonPick, kinds = G.summonKinds ? G.summonKinds() : (G.CAT_KINDS || []);
   if (!P || !P.drag) return;
   P.drag = false;
   const threshold = P.cw * 0.35;
@@ -696,6 +704,11 @@ function loop(ts) {
   else if (G.screen === "records") uiScaleCtx(() => G.ui.drawRecords());
   else if (G.screen === "leaderboard") uiScaleCtx(() => G.ui.drawLeaderboard());
   else if (G.screen === "summon") uiScaleCtx(() => G.ui.drawSummon());
+  else if (G.screen === "feeder") {
+    // 猫粮机自带整屏绘制与粮粒物理：先推进状态（定时器 / 落粒），再画
+    G.feeder.update(dt);
+    uiScaleCtx(() => G.feeder.draw());
+  }
   else if (G.screen === "result") {
     // 结算页背景沿用当前玩法的场景：截图或存图时，一眼能看出这一局选的是哪种模式
     if (G.scene && G.scene.type) {

@@ -43,6 +43,55 @@
       postMessage: (msg) => { (window.__odcMsgs = window.__odcMsgs || []).push(msg); }
     }),
     createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
+    /* ===== 自定义召唤卡用到的 API 垫片 =====
+       测试里不弹系统面板：渠道返回值由 window.__pickStub 注入，给字符串就是所有渠道同一个
+       值（老测试不用改），也可以给分渠道对象 image:{album,chat,camera} /
+       audio:{record,chat,file}；文本由 window.__kbDone({value}) 收尾；录音由 window.__recStub
+       给 {path, err}，stop() 时按它回调，window.__recActive 用来断言麦克风有没有被释放；
+       USER_DATA_PATH 默认留空，让 dataURL 直接当路径用（截图里能看到自定义图），
+       要测落盘分支的测试自己把它改成非空即可走 copyFileSync。 */
+    env: { USER_DATA_PATH: "" },
+    getFileSystemManager: () => ({
+      copyFileSync(from, to) { (window.__fsStore = window.__fsStore || {})[to] = from; },
+      unlinkSync(p) { if (window.__fsStore) delete window.__fsStore[p]; }
+    }),
+    chooseMedia: (o) => {
+      const s = window.__pickStub || {};
+      const src = (o.sourceType || ["album"])[0];
+      const p = typeof s.image === "string" ? s.image : ((s.image || {})[src] || "");
+      window.__lastPick = { api: "chooseMedia", source: src, path: p };
+      o[p ? "success" : "fail"]({ tempFiles: [{ tempFilePath: p }] });
+    },
+    chooseMessageFile: (o) => {
+      const s = window.__pickStub || {};
+      /* type 就是渠道：image=聊天里的图，file=聊天里的文件，all=系统文件框 */
+      const p = o.type === "image"
+        ? (typeof s.image === "string" ? s.image : ((s.image || {}).chat || ""))
+        : (typeof s.audio === "string" ? s.audio : ((s.audio || {})[o.type === "all" ? "file" : "chat"] || ""));
+      window.__lastPick = { api: "chooseMessageFile", type: o.type, ext: (o.extension || []).join(","), path: p };
+      o[p ? "success" : "fail"]({ tempFiles: [{ path: p, name: String(p).split("/").pop() }] });
+    },
+    getRecorderManager: () => {
+      const h = {};
+      const set = (k) => (cb) => { h[k] = cb; };
+      window.__recH = h;
+      return {
+        onStart: set("onStart"), onStop: set("onStop"), onError: set("onError"),
+        start(o) { window.__recOpts = o; window.__recActive = true; if (h.onStart) h.onStart(); },
+        stop() {
+          window.__recActive = false;
+          const s = window.__recStub || {};
+          if (s.err) { if (h.onError) h.onError({ errMsg: s.err }); return; }
+          if (h.onStop) h.onStop({ tempFilePath: s.path || "wxfile://tmp/rec.mp3" });
+        },
+        pause() {}, resume() {}
+      };
+    },
+    showKeyboard: (o) => { window.__kbValue = (o && o.defaultValue) || ""; },
+    hideKeyboard: () => {},
+    onKeyboardInput: () => {}, offKeyboardInput: () => {},
+    onKeyboardComplete: (cb) => { window.__kbDone = cb; },
+    offKeyboardComplete: () => { window.__kbDone = null; },
     onWindowResize: (cb) => window.addEventListener("resize", cb),
     onShow: (cb) => showCbs.push(cb),
     onHide: (cb) => hideCbs.push(cb),
