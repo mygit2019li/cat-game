@@ -27,6 +27,62 @@ G.result = null;
 G.pauseHold = { active: false, t0: 0, progress: 0 };   // HUD 暂停按钮长按状态（600ms 触发）
 let countT = 0, lastInt = -1;
 
+/* 设置抽屉：从首页左上角滑出，直接切屏（不走整屏淡入淡出），关闭时同样直接回首页。
+   G.settings.t0 是抽屉的入场时间戳，绘制层据此算滑入进度。 */
+G.openSettings = () => {
+  // 先解锁音频再记 t0：ensureAudio 首次创建 WebAudio 上下文可能阻塞上百毫秒，
+  // 放在前面会把抽屉的入场时间戳"吃掉"，动画一帧都看不到
+  if (G.ensureAudio) G.ensureAudio();
+  G.settings = { t0: performance.now() };
+  G.screen = "settings"; G.nextScreen = null; G.transitionT = 0;
+};
+/* 关闭：先播反向滑出动画（200ms），动画结束后由 drawSettings 真正切回首页。
+   这里不立刻改 screen，否则抽屉会"啪"地消失 */
+/* 记录 / 排行弹窗：与设置抽屉同一套"先播动画、播完再切屏"的做法 */
+G.openModal = (key) => {
+  if (G.ensureAudio) G.ensureAudio();
+  G.modal = { key, t0: performance.now() };
+  G.screen = key === "lb" ? "leaderboard" : "records";
+  G.nextScreen = null; G.transitionT = 0;
+};
+
+/* ================= 好友排行授权 =================
+   读好友成绩必须先有 scope.WxFriendInteraction（官方要求）。
+   四种状态：unknown / asking / ok / denied；unsupported（浏览器、旧基础库）按 ok 处理。
+   授权成功后把「已展示」标记清掉，让 drawLeaderboard 下一帧重新 show 排行榜。 */
+G.friendAuthState = "unknown";
+G.askFriendAuth = (force) => {
+  if (!force && (G.friendAuthState === "ok" || G.friendAuthState === "asking")) return;
+  G.friendAuthState = "asking";
+  if (G.modal) { G.modal.lbShown = false; G.modal.lbHidden = false; }
+  G.platform.friendAuth((st) => {
+    const ok = st === "ok" || st === "unsupported";
+    G.friendAuthState = ok ? "ok" : (st === "denied" ? "denied" : "ok");
+    if (G.modal) { G.modal.lbShown = false; G.modal.lbHidden = false; }   // 重新拉一次
+    if (G.track) G.track("lb_auth", { state: G.friendAuthState });
+  });
+};
+/* 点了「去设置开启」：openSetting 回来后回读状态，成功就直接出榜 */
+G.grantFriendAuth = () => {
+  G.platform.openFriendSetting(() => {
+    G.friendAuthState = "unknown";
+    G.askFriendAuth(true);
+  });
+};
+G.closeModal = () => {
+  if (!G.modal) { G.screen = "home"; return; }
+  if (G.modal.closing) return;                 // 已在关闭动画中
+  G.modal.closing = { t0: performance.now() };
+  if (G.playTick) G.playTick();
+};
+
+G.closeSettings = () => {
+  if (!G.settings) { G.screen = "home"; return; }
+  if (G.settings.closing) return;               // 已在关闭动画中，忽略重复点击
+  G.settings.closing = { t0: performance.now() };
+  if (G.playTick) G.playTick();
+};
+
 G.switchScreen = (name) => {
   if (G.screen === name) return;
   // 离开召唤页时收起自定义录入面板（面板只在 summon 页画，不收会在下次进页时错弹出来）
@@ -118,6 +174,8 @@ G.platform.initShare(() => ({
 G.startGame = () => {
   G.stopSummonMusic();   // 召唤语音不串进对局
   G.ensureAudio();
+  // 青蛙跳：进局先把两段蛙鸣预取好，第一声"呱"就不用等下载
+  if (G.config.targetType === "frog" && G.preloadFrogVoices) G.preloadFrogVoices();
   const S = G.session;
   S.touches = 0; S.hits = 0; S.bonusHits = 0; S.combo = 0; S.maxCombo = 0;
   S.missStreak = 0; S.dartStreak = 0; S.dartHits = 0;
@@ -323,11 +381,13 @@ G.endGame = (fromPause) => {
   G.platform.keepScreen(false);
   const totalHits = S.hits + (S.bonusHits || 0);
   const acc = S.touches > 0 ? Math.min(100, Math.round((totalHits / S.touches) * 100)) : 0;
-  // 本地记录（最近 50 局）：走 G.getLogs() 做安全解析——存储里若是对象或含 null 元素，
+  // 本地记录：只留最近 7 天、最多 200 条（G.pruneLogs 负责裁剪）。
+  // 走 G.getLogs() 做安全解析——存储里若是对象或含 null 元素，
   // 直接 unshift/slice 会在结算时抛错，结算页出不来
   const logs = G.getLogs();
   const d = new Date();
   logs.unshift({
+    ts: d.getTime(),
     date: (d.getMonth() + 1) + "/" + d.getDate(),
     type: G.config.targetType,
     dur: Number(G.config.duration) || 180,
@@ -335,7 +395,7 @@ G.endGame = (fromPause) => {
     accuracy: acc, combo: S.maxCombo,
     dart: S.dartHits || 0, bonus: S.bonusHits || 0
   });
-  G.platform.storage.set("catToyLogs", JSON.stringify(logs.slice(0, 50)));
+  G.platform.storage.set("catToyLogs", JSON.stringify(G.pruneLogs(logs)));
   // 好友排行榜：本地历史最佳为基准，超过则更新，经 setUserCloudStorage 写入关系链（仅好友可见，无通讯录权限）
   let best = 0;
   try { best = Number(G.platform.storage.get("catToyBest")) || 0; } catch (e) {}
@@ -364,7 +424,7 @@ G.endGame = (fromPause) => {
   else if (hpm >= 9 || (interacted && hpm >= 6)) { title = "矫健猎手"; desc = "扑击精准、节奏稳健，状态很好。"; }
   else if (hpm >= 3.5 || interacted) { title = "灵巧学徒"; desc = "全程都有参与，正在建立信心。"; }
   else                { title = "慵懒观察员"; desc = "今天兴趣不大？换个猎物类型试试。"; }
-  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "光爆炸裂" : "奖励命中";
+  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "光爆炸裂" : G.config.targetType === "frog" ? "空中截击" : "奖励命中";
   G.result = {
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
     bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
@@ -412,9 +472,11 @@ function onHit(x, y, prey) {
   const isBfly = G.config.targetType === "butterfly";
   const isLaser = G.config.targetType === "laser";
   const isPool = G.config.targetType === "pool";
+  const isFrog = G.config.targetType === "frog";
   const chasing = isMouse && prey.state === "dart";
   const resting = isBfly && prey.state === "RESTING";
   const holding = (isLaser || isPool) && prey.state === "hold";
+  const aerial = isFrog && prey.fState === "leap";   // 空中截击：青蛙唯一的 +2 窗口
   S.touches++;
   S.hits++;
   S.combo++;
@@ -426,6 +488,8 @@ function onHit(x, y, prey) {
     ? "#eaf9ff"
     : isLaser
     ? ((G.laserColorSet && G.laserColorSet())[(prey.laserVar && prey.laserVar.key) || "red"] || {}).spark || "#ff8a8a"
+    : isFrog
+    ? "#bdf58a"
     : (isMouse || isBfly ? (prey.def.sparkColor || "#ffd76a") : (G.seaThemeNow().spark || prey.def.sparkColor || "#ffd76a"));
   G.sparkBurst(x, y, sparkC, 8);
   if (!isLaser) G.ripple(x, y, false);
@@ -467,6 +531,13 @@ function onHit(x, y, prey) {
     G.scorch(x, y);
     G.playLaserHit(holding);          // 新激光命中音：pew 下滑 + 玻璃双音（hold 加铃音）
     if (holding) S.bonusHits++;
+  } else if (isFrog) {
+    // 青蛙：荷叶绿爆开（专属特效）+ 被拍时"呱"一声 + 打击音，荷叶跟着晃
+    G.frogPop(x, y, aerial);
+    G.playFrogHitCroak();
+    G.playFrogHit(aerial);
+    if (G.padSway) G.padSway(prey.x, prey.y);
+    if (aerial) { S.bonusHits++; G.playMilestone(); }
   } else {
     // 捕鱼命中：泳池海域走夸张的金橙水花、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
     const seaKey = G.session.sea && G.session.sea.key;
@@ -489,6 +560,7 @@ function onHit(x, y, prey) {
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
     else if (isPool) G.floatText(x, y - 20, holding ? "+2 光爆连击！" : "光爆 +1", holding ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
+    else if (isFrog) G.floatText(prey.x, prey.y - (prey.jumpH || 0) - 62, aerial ? "空中截击 +2！" : "抓住！", aerial ? "big" : "");
     else G.floatText(x, y - 20, "+1");
   }
   G.pokeHud();
@@ -526,6 +598,11 @@ function onMiss(x, y) {
     // 拍偏：几点萤火碎屑（明显弱于命中，不抢戏）
     G.sparkBurst(x, y, "#e8ff9a", 3);
     G.dustBurst(x, y, 3);
+  }
+  else if (G.config.targetType === "frog") {
+    // 拍偏：水面溅几颗水珠 + 附近荷叶被拍得晃一下
+    G.bubbleBurst(x, y, 3);
+    if (G.padSway) G.padSway(x, y);
   }
   else G.bubbleBurst(x, y, 3);
   G.playMiss();
@@ -573,6 +650,12 @@ G.platform.onTouchStart = (e) => {
     return;
   }
   if (G.screen === "counting") return;
+  if (G.screen === "records") {
+    // 记录列表：落在列表区就先接管（拖动滚动），否则交给按钮（✕ / 面板外关闭）
+    if (G.ui.recTouchStart && G.ui.recTouchStart(vx, vy)) return;
+    G.hitButton(vx, vy);
+    return;
+  }
   G.hitButton(vx, vy);   // 其余界面：按钮优先
 };
 G.platform.onTouchMove = (e) => {
@@ -584,6 +667,8 @@ G.platform.onTouchMove = (e) => {
   } else if (G.screen === "summon") {
     const S = G.platform.S || 1;
     G.summonPickTouchMove(tp.clientX / S);
+  } else if (G.screen === "records") {
+    if (G.ui.recTouchMove) G.ui.recTouchMove(tp.clientY / (G.platform.S || 1));
   }
 };
 G.platform.onTouchEnd = (e) => {
@@ -596,6 +681,10 @@ G.platform.onTouchEnd = (e) => {
   if (G.screen === "summon") {
     const tp = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
     G.summonPickTouchEnd(tp ? tp.clientX / (G.platform.S || 1) : null);
+    return;
+  }
+  if (G.screen === "records") {
+    if (G.ui.recTouchEnd) G.ui.recTouchEnd();   // 松手：交给惯性滚动
     return;
   }
   if (G.pauseHold.active) { G.pauseHold.active = false; G.pauseHold.progress = 0; }   // 未满 600ms：取消，无惩罚

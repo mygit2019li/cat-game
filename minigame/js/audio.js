@@ -138,6 +138,59 @@ module.exports = function (G) {
     tone("sine", 2640, 0, 0.12, 0.1, 0.16);
   };
   G.playBounce = () => tone("triangle", 520, 760, 0.05, 0.08);
+  /* 青蛙跳音频：只有"蛙叫"，没有起跳音。
+     - 落地：呱呱（双声，assets/sfx/frog-land.wav）
+     - 静坐偶发：单声呱（两段轮播）
+     素材由 tools/cut_frog_voice.py 从真实录音切出（22.05kHz 单声道 wav）。
+     用 wav 而非 mp3：微信开发者工具处理 mp3 时会先转出同名 .wav 再读，某些版本这一步会失败并报
+     `ENOENT ... frog-croak-2.wav`；短音效直接给 wav 就没有这层转换了。
+     播放不了（旧基础库 / 无音频能力）时回落到合成音，保证每次都有反馈 */
+  const FROG_CROAKS = ["assets/sfx/frog-croak-1.wav", "assets/sfx/frog-croak-2.wav"];
+  const FROG_LAND = "assets/sfx/frog-land.wav";
+  const FROG_HIT = "assets/sfx/frog-hit.wav";
+  let croakI = 0, lastCroakAt = 0, lastLandAt = 0, lastHitAt = 0;
+  G.playFrogCroak = () => {
+    if (!G.config.sound) return;
+    // 全场限流：满屏 5 只青蛙各叫各的会变成噪音，1.1 秒内只允许一声
+    // （lastCroakAt=0 用来标记"还没叫过"：否则开局前 1.1 秒里的第一声会被误吞）
+    const now = performance.now();
+    if (lastCroakAt && now - lastCroakAt < 1100) return;
+    lastCroakAt = now;
+    const src = FROG_CROAKS[croakI++ % FROG_CROAKS.length];
+    if (G.platform.sfx && G.platform.sfx(src, 0.40)) return;
+    tone("sine", 420, 300, 0.16, 0.12);
+    tone("triangle", 210, 160, 0.16, 0.05);
+  };
+  /* 落地"呱呱"：300ms 内只叫一次（多只同时落地不叠成一团），且不受静坐限流压制 */
+  G.playFrogLandCroak = () => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (lastLandAt && now - lastLandAt < 300) return;
+    lastLandAt = now;
+    lastCroakAt = now;
+    if (G.platform.sfx && G.platform.sfx(FROG_LAND, 0.50)) return;
+    tone("sine", 440, 320, 0.14, 0.12);
+    tone("sine", 400, 290, 0.14, 0.1, 0.16);
+  };
+  /* 拍中时的"惊叫"：140ms 内只响一次（连击时不会变成机关枪） */
+  G.playFrogHitCroak = () => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (lastHitAt && now - lastHitAt < 140) return;
+    lastHitAt = now;
+    lastCroakAt = now;
+    if (G.platform.sfx && G.platform.sfx(FROG_HIT, 0.55)) return;
+    tone("sine", 480, 320, 0.12, 0.16);
+  };
+  G.preloadFrogVoices = () => {
+    if (!G.platform.preloadSfx) return;
+    FROG_CROAKS.concat([FROG_LAND, FROG_HIT]).forEach(src => G.platform.preloadSfx(src));
+  };
+  G.playFrogHit = (aerial) => {
+    tone("sine", 2200, 1500, 0.06, 0.15);
+    tone("sine", 720, 170, 0.13, 0.19, 0.02);
+    if (aerial) tone("sine", 1320, 0, 0.14, 0.12, 0.07);
+  };
   G.tierDrop = () => tone("sine", 520, 260, 0.22, 0.1);
 
   /* ================= 电子猫粮机：步进电机 + 粮粒落盆 =================

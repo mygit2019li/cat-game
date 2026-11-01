@@ -1100,6 +1100,66 @@ module.exports = function (G) {
   };
 
   /* ---------- 首页卡片图标（简化 sprite） ---------- */
+  /* 青蛙（青蛙跳玩法）：96×78 盒内绘制，中心 (48,39)，默认朝右。
+     状态驱动：leap 后腿伸展、不鼓鸣囊；land 由外层压扁；其余鼓鸣囊呼吸。
+     配色刻意偏黄绿——荷塘是深墨绿，青蛙必须比背景亮一档才看得清 */
+  D.frog = (ctx, p, t) => {
+    const leap = p.fState === "leap";
+    const breathe = 1 + Math.sin(t * 2.6 + (p.phase || 0)) * 0.02;
+    // 后腿：跳跃时向后下方伸展，蹲坐时收成椭圆
+    ctx.fillStyle = "#4b8b3a";
+    if (leap) {
+      ctx.save(); ctx.translate(28, 50); ctx.rotate(-0.5);
+      ctx.beginPath(); ctx.ellipse(0, 0, 21, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+      ctx.save(); ctx.translate(24, 58); ctx.rotate(-0.28);
+      ctx.beginPath(); ctx.ellipse(0, 0, 19, 7, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    } else {
+      ctx.beginPath(); ctx.ellipse(26, 52, 16, 12, -0.25, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(22, 60, 15, 8, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // 身体
+    ctx.fillStyle = "#7cc45f";
+    ctx.beginPath(); ctx.ellipse(50, 44, 30, 20 * breathe, 0, 0, Math.PI * 2); ctx.fill();
+    // 背部亮面
+    ctx.fillStyle = "#a8dd7d";
+    ctx.beginPath(); ctx.ellipse(50, 36, 24, 12, 0, 0, Math.PI * 2); ctx.fill();
+    // 腹部
+    ctx.fillStyle = "#eef7c8";
+    ctx.beginPath(); ctx.ellipse(53, 52, 20, 10, 0, 0, Math.PI * 2); ctx.fill();
+    // 背部斑点
+    ctx.fillStyle = "rgba(64,120,50,.42)";
+    [[36, 33, 3.2], [56, 31, 2.6], [70, 37, 2.2]].forEach(d => {
+      ctx.beginPath(); ctx.arc(d[0], d[1], d[2], 0, Math.PI * 2); ctx.fill();
+    });
+    // 前脚
+    ctx.fillStyle = "#6ab84f";
+    ctx.beginPath(); ctx.ellipse(66, 58, 9, 6, 0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(54, 62, 9, 5.5, 0.1, 0, Math.PI * 2); ctx.fill();
+    // 鸣囊：只有非腾空时才鼓（"呱"的视觉来源）
+    if (!leap) {
+      const puff = 1 + Math.sin(t * 5 + (p.phase || 0)) * 0.12;
+      ctx.fillStyle = "rgba(238,247,200,.86)";
+      ctx.beginPath(); ctx.ellipse(61, 54, 9 * puff, 7 * puff, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // 眼睛（3/4 视角两只，突出头顶）
+    const ex1 = 44, ex2 = 64, ey = 26;
+    ctx.fillStyle = "#7cc45f";
+    ctx.beginPath(); ctx.arc(ex1, ey, 10, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex2, ey, 10, 0, Math.PI * 2); ctx.fill();
+    [[ex1, ey, 0.8], [ex2, ey, 1.6]].forEach(([x, y, ox]) => {
+      ctx.fillStyle = "#f8ffe8"; ctx.beginPath(); ctx.arc(x, y - 1, 7.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#17240f"; ctx.beginPath(); ctx.arc(x + ox, y, 3.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.92)"; ctx.beginPath(); ctx.arc(x + ox + 1.4, y - 2.2, 1.3, 0, Math.PI * 2); ctx.fill();
+    });
+    // 嘴 + 鼻孔
+    ctx.strokeStyle = "#2f5b25"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(38, 42); ctx.quadraticCurveTo(48, 50, 63, 43); ctx.stroke();
+    ctx.lineCap = "butt";
+    ctx.fillStyle = "#3f7a30";
+    ctx.beginPath(); ctx.arc(52, 38, 1.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(57, 37, 1.2, 0, Math.PI * 2); ctx.fill();
+  };
+
   D.icon = (ctx, type, x, y, s) => {
     ctx.save();
     ctx.translate(x, y); ctx.scale(s, s);
@@ -1124,6 +1184,10 @@ module.exports = function (G) {
     } else if (type === "pool") {
       const fake = { state: "hold", sc: 1 };
       D.poolLight(ctx, fake, 0.6);
+    } else if (type === "frog") {
+      ctx.translate(-48, -39);
+      const fake = { fState: "settle", phase: 0 };
+      D.frog(ctx, fake, 0.4);
     }
     ctx.restore();
   };

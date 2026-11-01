@@ -20,7 +20,7 @@ function findChrome() {
 (async () => {
   const browser = await chromium.launch({ executablePath: findChrome(), headless: true });
   const page = await browser.newPage({ viewport: { width: 1100, height: 260 } });
-  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./game.js"];
+  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/sharecard.js", "./js/ui.js", "./js/feeder.js", "./game.js"];
   const modules = {};
   for (const n of modNames) modules[n] = fs.readFileSync(path.join(ROOT, n), "utf8");
   await page.goto("file://" + path.join(ROOT, "test/harness.html"));

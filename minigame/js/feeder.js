@@ -1,7 +1,7 @@
 /* feeder.js — 电子猫粮机：定时定量 / 手动加餐
    视觉重点只有三样：往下掉的猫粮、猫盆、盆里堆起来的粮。
    三态：
-     home  常态    —— 机器居中，机身正面一颗出粮键，右上角一颗小设置键
+     home  常态    —— 机器居中，机身正面一颗出粮键，左上角返回 + 设置两颗圆键（与首页同规格）
      modal 设置    —— 半透明遮罩 + 设置卡片（份数 / 间隔 / 补粮 / 清空）
      feed  出粮演出 —— 9:16 竖版舞台，两侧压暗，界面全部隐藏，点一下可跳过
    粮粒造型按真实比例做：一颗粮半径 5 个设计单位，盆口直径 152，约 1:15。 */
@@ -923,61 +923,48 @@ module.exports = function (G) {
   }
 
   /* ================= 常态界面 ================= */
-  function drawBack(L) {
-    const r = 17;
-    const x = L.safe.left + 18 + r, y = L.safe.top + 14 + r;
+  /* 顶部圆键规格与首页设置键完全一致：34px 白圆 / 1px 细边 / 15px 齿轮 / 左上角 (12,10) 起排。
+     之前这里的齿轮是自绘的实心 8 齿、还为了躲微信胶囊跑到右上角，用户在两个页面看到两种"设置"。 */
+  const HEAD = { size: 34, gap: 8, inset: 12, top: 10, icon: 15 };
+  function headPos(L, i) {
+    const s = HEAD.size;
+    return { x: L.safe.left + HEAD.inset + i * (s + HEAD.gap), y: L.safe.top + HEAD.top, s };
+  }
+  /* 白圆底 + 细边（与首页同色，不用 C.line 的浅绿，避免两个页面底色深浅不一） */
+  function roundBtn(x, y, s) {
     ctx.save();
     ctx.fillStyle = "rgba(255,255,255,.92)";
-    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = C.line; ctx.lineWidth = 1.2; ctx.stroke();
-    ctx.strokeStyle = C.tealDeep; ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(x + 4, y - 6); ctx.lineTo(x - 3, y); ctx.lineTo(x + 4, y + 6);
-    ctx.stroke();
+    ctx.beginPath(); ctx.arc(x + s / 2, y + s / 2, s / 2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = "rgba(20,49,58,.10)"; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
-    G.ui.buttons.push({ x: x - r - 4, y: y - r - 4, w: r * 2 + 8, h: r * 2 + 8, cb: () => G.switchScreen("home"), key: "back" });
-    return { x: x + r + 12, y };
   }
 
-  /* 设置键：避开右上角微信胶囊（横屏放在胶囊左侧，竖屏落到胶囊下方） */
-  function drawGearBtn(L) {
-    const S = G.platform.S || 1;
-    const m = G.platform.menu;
-    const r = 16;
-    const land = L.W > L.H;
-    let x, y;
-    if (land && m && m.width > 0) {
-      const ml = m.left / S, mt = m.top / S, mh = m.height / S;
-      x = ml - 14 - (mh + 10) - r;         // 胶囊 + 游戏中心手柄位左侧
-      y = mt + mh / 2;
-      if (x < L.W * 0.45) { x = L.W - L.safe.right - r - 12; y = mt + mh + r + 10; }
-    } else {
-      // 竖屏：胶囊在顶部，键落到它下方，避免压进状态栏
-      x = L.W - L.safe.right - r - 12;
-      y = m && m.width > 0
-        ? Math.max(m.bottom / S + r + 10, L.safe.top + r + 12)
-        : L.safe.top + r + 14;
-    }
+  function drawBack(L) {
+    const p = headPos(L, 0);
+    roundBtn(p.x, p.y, p.s);
+    const cx = p.x + p.s / 2, cy = p.y + p.s / 2;
     ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,.92)";
-    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-    ctx.strokeStyle = C.line; ctx.lineWidth = 1.2; ctx.stroke();
-    // 齿轮
-    ctx.fillStyle = C.tealDeep;
-    for (let i = 0; i < 8; i++) {
-      const a = i * Math.PI / 4;
-      ctx.save();
-      ctx.translate(x + Math.cos(a) * 8.4, y + Math.sin(a) * 8.4);
-      ctx.rotate(a);
-      roundPath(-2.1, -1.5, 4.2, 3, 1.2); ctx.fill();
-      ctx.restore();
-    }
-    ctx.beginPath(); ctx.arc(x, y, 5.2, 0, TAU); ctx.fill();
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath(); ctx.arc(x, y, 2.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = C.tealDeep; ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx + 4, cy - 6); ctx.lineTo(cx - 3, cy); ctx.lineTo(cx + 4, cy + 6);
+    ctx.stroke();
+    ctx.restore();
+    G.ui.buttons.push({ x: p.x, y: p.y, w: p.s, h: p.s, cb: () => G.switchScreen("home"), key: "back" });
+    // 标题排在两颗圆键之后
+    const g = headPos(L, 1);
+    return { x: g.x + g.s + 14, y: cy };
+  }
+
+  /* 设置键：与首页同一位置（左上角第二颗）、同一尺寸、同一齿轮画法 */
+  function drawGearBtn(L) {
+    const p = headPos(L, 1);
+    roundBtn(p.x, p.y, p.s);
+    ctx.save();
+    ctx.translate(p.x + p.s / 2, p.y + p.s / 2);
+    if (G.ui.gearAt) G.ui.gearAt(ctx, HEAD.icon, C.ink2);
     ctx.restore();
     G.ui.buttons.push({
-      x: x - r - 4, y: y - r - 4, w: r * 2 + 8, h: r * 2 + 8, key: "settings",
+      x: p.x, y: p.y, w: p.s, h: p.s, key: "settings",
       cb: () => { F.mode = "modal"; G.playTick(); }
     });
   }

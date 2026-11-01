@@ -25,7 +25,7 @@ function findChrome() {
   page.on("pageerror", e => errors.push(String(e)));
 
   // 注入模块源码（game.js 在页面加载后手动 require）
-  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./game.js"];
+  const modNames = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js", "./js/scenery.js", "./js/prey.js", "./js/sharecard.js", "./js/ui.js", "./js/feeder.js", "./game.js"];
   const modules = {};
   for (const n of modNames) modules[n] = fs.readFileSync(path.join(ROOT, n), "utf8");
   await page.addInitScript(m => { window.__MODULES__ = m; }, modules);

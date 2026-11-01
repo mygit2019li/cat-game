@@ -42,6 +42,26 @@
     getOpenDataContext: () => ({
       postMessage: (msg) => { (window.__odcMsgs = window.__odcMsgs || []).push(msg); }
     }),
+    /* 好友关系链授权（scope.WxFriendInteraction）的模拟：
+       window.__authSetting  = { "scope.WxFriendInteraction": true|false } 当前授权表
+       window.__authStub     = "grant"（默认）| "deny" | "invalid"    authorize 的行为
+       window.__openSettingGrant = false 可让“去设置”也开不出来 */
+    getSetting: (o) => { o && o.success && o.success({ authSetting: window.__authSetting || {} }); },
+    authorize: (o) => {
+      window.__authCalls = (window.__authCalls || 0) + 1;
+      const st = (window.__authSetting = window.__authSetting || {});
+      const mode = window.__authStub || "grant";
+      if (mode === "grant") { st[o.scope] = true; o.success && o.success({}); }
+      else if (mode === "deny") { st[o.scope] = false; o.fail && o.fail({ errMsg: "authorize:fail auth deny" }); }
+      else { o.fail && o.fail({ errMsg: "authorize:fail invalid scope" }); }
+    },
+    openSetting: (o) => {
+      window.__openSettingCalls = (window.__openSettingCalls || 0) + 1;
+      const st = (window.__authSetting = window.__authSetting || {});
+      if (window.__openSettingGrant !== false) st["scope.WxFriendInteraction"] = true;
+      o && o.success && o.success({ authSetting: st });
+      o && o.complete && o.complete({ authSetting: st });
+    },
     createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
     /* ===== 自定义召唤卡用到的 API 垫片 =====
        测试里不弹系统面板：渠道返回值由 window.__pickStub 注入，给字符串就是所有渠道同一个

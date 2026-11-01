@@ -96,6 +96,18 @@ module.exports = function (G) {
         this.dartFromY = 0; this.dartStartX = 0; this.dartTarget = null;
         this.lift = 64;
       }
+      if (type === "frog") {
+        /* 青蛙跳：蹲荷叶 → 蓄力 → 抛物线腾空（唯一 +2 窗口）→ 落水 → 静坐。
+           蓄力末尾把落点荷叶点亮（pad.hint），是猫唯一的预判依据 */
+        this.fState = "crouch"; this.fT = 0;
+        this.padIdx = -1; this.targetPadIdx = -1;
+        this.jumpH = 0; this.leapK = 0;
+        this.chain = 0;                 // 本次跳组已完成的跳跃数（阶段③ 最多 2）
+        this.rspT = 0;                  // 被拍后的重生等待
+        this.croakCd = rand(1.2, 3.2);
+        this._visRot = 0; this._squash = 1;
+        this.faceDir = 1;
+      }
       this.phase = rand(0, Math.PI * 2);
       this.adaptiveScale = 1; this.adaptiveSlow = 1;
       this.comboSpeed = 1; this.comboSpeedTarget = 1; this.comboSize = 1;
@@ -202,9 +214,145 @@ module.exports = function (G) {
         this.applyFlapImpulse();     // 带初始动量，入场即飞
         return;
       }
+      if (this.type === "frog") {
+        this.spawnOnPad();           // 落到一片空荷叶上开始蓄力
+        return;
+      }
       this.x = b.x + rand(0.15, 0.85) * b.w;
       this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
       this.baseY = this.y;
+    }
+
+    /* ============ 青蛙：荷叶跳跃四态机 ============ */
+    /* 落到一片没被其他青蛙占用的荷叶 */
+    spawnOnPad() {
+      const pads = (G.scene && G.scene.pads) || [];
+      if (!pads.length) {
+        const b = G.bounds();
+        this.x = b.x + b.w / 2; this.y = b.y + b.h / 2; this.padIdx = -1;
+      } else {
+        const taken = {};
+        preys.forEach(q => { if (q !== this && q.type === "frog" && q.padIdx >= 0) taken[q.padIdx] = 1; });
+        let free = [];
+        pads.forEach((p, i) => { if (!taken[i] && i !== this.padIdx) free.push(i); });
+        if (!free.length) free = pads.map((_, i) => i).filter(i => i !== this.padIdx);
+        if (!free.length) free = [0];
+        const pick = free[Math.floor(rand(0, free.length))];
+        this.padIdx = pick;
+        this.x = pads[pick].x; this.y = pads[pick].y;
+      }
+      this.fState = "crouch"; this.fT = 0; this.leapK = 0; this.jumpH = 0;
+      this.chain = 0; this.rspT = 0; this.vanishT = 0; this.fade = 1;
+      this._visRot = 0; this._squash = 1;
+      if (G.session && G.session.stage) this.stage = G.session.stage;
+      this.pickTargetPad();
+    }
+    /* 选下一片落点荷叶：阶段①只挑最近的（短弧线好追），连跳第二跳必跨远 */
+    pickTargetPad() {
+      const pads = (G.scene && G.scene.pads) || [];
+      if (!pads.length) { this.targetPadIdx = -1; return; }
+      const P = G.FROG_PARAMS[this.stage || 1] || G.FROG_PARAMS[1];
+      const taken = {};
+      preys.forEach(q => { if (q !== this && q.type === "frog" && q.padIdx >= 0) taken[q.padIdx] = 1; });
+      let cands = pads.map((_, i) => i).filter(i => i !== this.padIdx && !taken[i]);
+      if (!cands.length) cands = pads.map((_, i) => i).filter(i => i !== this.padIdx);
+      if (!cands.length) { this.targetPadIdx = this.padIdx; return; }
+      const cur = pads[this.padIdx] || pads[0];
+      const dist = (i) => Math.hypot(pads[i].x - cur.x, pads[i].y - cur.y);
+      if (P.nearFirst > 0) {
+        cands.sort((a, b) => dist(a) - dist(b));
+        cands = cands.slice(0, Math.max(1, P.nearFirst));
+      } else if (this.chain >= 1) {
+        cands.sort((a, b) => dist(b) - dist(a));          // 连跳第二跳：取最远的一半
+        cands = cands.slice(0, Math.max(1, Math.ceil(cands.length / 2)));
+      }
+      this.targetPadIdx = cands[Math.floor(rand(0, cands.length))];
+    }
+    startLeap() {
+      const pads = (G.scene && G.scene.pads) || [];
+      if (this.targetPadIdx < 0 || this.targetPadIdx === this.padIdx || !pads[this.targetPadIdx]) this.pickTargetPad();
+      this.fState = "leap"; this.fT = 0; this.leapK = 0;
+      if (this.targetPadIdx >= 0 && pads[this.targetPadIdx]) pads[this.targetPadIdx].hint = performance.now();
+      // 起跳不配音（只留视觉与落点光圈），声音全部留给落地后的"呱呱"
+    }
+    updateFrog(dt, t) {
+      const pads = (G.scene && G.scene.pads) || [];
+      const stage = (G.session && G.session.stage) || 1;
+      if (this.stage !== stage) this.stage = stage;
+      const P = G.FROG_PARAMS[this.stage] || G.FROG_PARAMS[1];
+      // 被拍中：先淡出（0.3s），再等 0.9s 从另一片荷叶水波里重生
+      if (this.vanishT > 0) {
+        this.vanishT -= dt;
+        if (this.vanishT <= 0) { this.vanishT = 0; this.fade = 0; this.jumpH = 0; this.rspT = 0.9; }
+        return;
+      }
+      if (this.rspT > 0) {
+        this.rspT -= dt;
+        if (this.rspT <= 0) { this.rspT = 0; this.spawnOnPad(); }
+        return;
+      }
+      this.fade = 1;
+      // 时长缩放：难度 / 自适应辅助 / 连击提速 全部压进同一乘子（与现有玩法一致）
+      const k = clamp((this.speedMul || 1) * (this.adaptiveSlow || 1) * (this.comboSpeed || 1), 0.45, 2.4);
+      this.fT += dt * k;
+      const MS = Math.pow(G.platform.S || 1, 0.5);
+
+      if (this.fState === "crouch") {
+        // 蓄力末段点亮落点荷叶：猫的预判窗口
+        if (P.crouch - this.fT <= P.prep && this.targetPadIdx >= 0 && pads[this.targetPadIdx]) {
+          pads[this.targetPadIdx].hint = performance.now();
+        }
+        this._squash = 1 - Math.min(0.16, this.fT / Math.max(P.crouch, 0.01) * 0.16);
+        this._visRot = 0;
+        this.croakCd -= dt;
+        if (this.croakCd <= 0) { this.croakCd = rand(3, 6); if (G.playFrogCroak) G.playFrogCroak(); }
+        if (this.fT >= P.crouch) this.startLeap();
+        return;
+      }
+      if (this.fState === "leap") {
+        const A = pads[this.padIdx], B = pads[this.targetPadIdx];
+        this.leapK = Math.min(1, this.fT / P.leap);
+        const k2 = this.leapK;
+        if (A && B) {
+          this.x = A.x + (B.x - A.x) * k2;
+          this.y = A.y + (B.y - A.y) * k2;
+          this.jumpH = 4 * 66 * MS * k2 * (1 - k2);        // 抛物线：最高点 ~66px
+          this.faceDir = B.x < A.x ? -1 : 1;
+        }
+        this._visRot = (0.5 - k2) * 0.85;                  // 起跳抬头 → 落地低头
+        this._squash = 1 + Math.sin(k2 * Math.PI) * 0.08;
+        if (this.leapK >= 1) {
+          this.padIdx = this.targetPadIdx;
+          this.fState = "land"; this.fT = 0; this.jumpH = 0; this._squash = 0.82;
+          if (G.playFrogLandCroak) G.playFrogLandCroak();   // 落地后"呱呱"两声（不再有起跳音）
+          if (G.ripple) G.ripple(this.x, this.y, false);
+          if (G.padSway) G.padSway(this.x, this.y);
+        }
+        return;
+      }
+      if (this.fState === "land") {
+        this._squash = 0.82 + Math.min(1, this.fT / 0.18) * 0.18;
+        this._visRot = 0;
+        if (this.fT >= P.land) {
+          this.chain = (this.chain || 0) + 1;
+          this.fT = 0;
+          if (this.chain < (P.chain || 1)) {
+            // 阶段③ 连跳：落地几乎不停顿，再跳一次（光圈立刻亮起，仍有预兆）
+            this.pickTargetPad();
+            this.fState = "crouch";
+            this.fT = Math.max(0, P.crouch - 0.14);
+            if (this.targetPadIdx >= 0 && pads[this.targetPadIdx]) pads[this.targetPadIdx].hint = performance.now();
+          } else {
+            this.chain = 0;
+            this.fState = "settle";
+          }
+        }
+        return;
+      }
+      // settle 静坐：呼吸起伏，随时可拍（+1）
+      this._squash = 1 + Math.sin(this.fT * 6) * 0.015;
+      this._visRot = 0;
+      if (this.fT >= P.settle) { this.fState = "crouch"; this.fT = 0; this.pickTargetPad(); }
     }
     /* 平滑泳姿：朝目标点转向——转向速率有上限（慢鱼更缓），近边提前缓弯，
        位置强制夹在屏内。鱼不会突然调头、也不会游出去淡出消失 */
@@ -524,6 +672,8 @@ module.exports = function (G) {
 
     vanish() {
       if (this.type === "butterfly" && this.state === "STARTLED") return;   // 惊飞中防重入
+      // 青蛙：拍中要"干脆消失"，只留 0.16s 残影，观感交给 frogPop 的爆开特效
+      if (this.type === "frog") { this.burstT = 0; this.vanishT = 0.16; return; }
       this.vanishT = 0.3;
       this.burstT = 0;
       if (this.type === "butterfly") {
@@ -582,6 +732,7 @@ module.exports = function (G) {
         this.updateMouse(dt, t); return;
       }
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
+      if (this.type === "frog") { this.updateFrog(dt, t); return; }
       if (this.type === "pool") { this.updateCrawl(dt, t); return; }
       if (this.type === "laser") { this.updateLaser(dt, t); return; }
       // ---- 鱼：三阶段 ----
@@ -1250,6 +1401,16 @@ module.exports = function (G) {
     /* ============ 命中判定（对齐 DOM 包围盒点击语义） ============ */
     hittable(x, y) {
       if (this.vanishT > 0) return false;
+      if (this.type === "frog") {
+        // 重生等待期不可拍；命中盒外扩 15%（落水瞬间放宽到 25%，只要拍在荷叶上都算）
+        if (this.rspT > 0 || this.fade < 0.4) return false;
+        const pad = this.fState === "land" ? 1.25 : 1.15;
+        const hw = this.baseW * this.sc * 0.5 * pad, hh = this.baseH * this.sc * 0.5 * pad;
+        const cy = this.y - (this.jumpH || 0);
+        if (Math.abs(x - this.x) <= hw && Math.abs(y - cy) <= hh) return true;
+        // 腾空时水面投影同样可命中（不要求精确压在抛起的身体上）
+        return this.fState === "leap" && Math.abs(x - this.x) <= hw && Math.abs(y - this.y) <= hh;
+      }
       // 蝴蝶移动快、入场频繁：宽容判定（外扩 1.7 倍 ≈ 可见翅膀再加大圈容错边；半透明期放宽到 0.25）
       // 鱼群小鱼太小：外扩 1.5 倍保证猫拍得中
       const bPad = this.type === "butterfly" ? 1.7
@@ -1318,6 +1479,41 @@ module.exports = function (G) {
         ctx.translate(this.x, this.y);
         if (this.type === "pool") G.draw.poolLight(ctx, this, t);
         else G.draw.laser(ctx, this, t);
+      } else if (this.type === "frog") {
+        // 水面投影：与身体分离来表达"跳起来了"（跳跃中影子留在地面并变小）
+        const lift = this.jumpH || 0;
+        ctx.save();
+        ctx.globalAlpha = clamp(alpha * (0.42 - lift / 900), 0.05, 0.42);
+        ctx.fillStyle = "#041e22";
+        ctx.beginPath();
+        ctx.ellipse(this.x, this.y + 8 * this.sc, this.baseW * this.sc * (0.30 - lift / 1400),
+          this.baseH * this.sc * (0.12 - lift / 3200), 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        // 发光：深色水面上青蛙要"亮"出来（猫更容易锁定）；腾空时更亮更大，同时也是 +2 窗口的视觉提示
+        const glowK = this.fState === "leap" ? 1.6 : this.fState === "crouch" ? 1.0 : 0.8;
+        const pulse = 0.84 + 0.16 * Math.sin(t * 2.6 + (this.phase || 0));
+        const gx = this.x, gy = this.y - lift - 6;
+        const gr = 52 * this.sc * (this.fState === "leap" ? 1.35 : 1);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = clamp(alpha * 0.8 * pulse, 0, 1);
+        const glow = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr);
+        glow.addColorStop(0, "rgba(226,255,170," + clamp(0.22 * glowK, 0, 1).toFixed(3) + ")");
+        glow.addColorStop(0.5, "rgba(170,240,110," + clamp(0.13 * glowK, 0, 1).toFixed(3) + ")");
+        glow.addColorStop(1, "rgba(150,230,120,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath(); ctx.arc(gx, gy, gr, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(this.x, this.y - lift - 6);
+        ctx.rotate(this._visRot || 0);
+        // 视觉尺寸 0.85：让荷叶从身体两侧露出一圈，才像"蹲在叶子上"（命中盒仍按原尺寸，判定不受影响）
+        const s = this.sc * vs * 0.85;
+        ctx.scale(s * (this.faceDir || 1), s * (this._squash || 1));
+        ctx.translate(-48, -39);
+        G.draw.frog(ctx, this, t);
+        ctx.restore();
       } else {
         // 泳池模式：鱼身柔光（泳池玩具截图里的发光小鱼）；鱼群模式：银白小鱼光
         if (this.type === "fish" && inPoolMode()) {
@@ -1412,6 +1608,11 @@ module.exports = function (G) {
     }
     // 水面追光：光斑太多会满屏乱闪，封顶 3→4→5
     if (G.config.targetType === "pool") return ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3;
+    // 青蛙跳：每只独占一片荷叶，封顶按荷叶数（6 片）留 1 片空叶供轮换
+    if (G.config.targetType === "frog") {
+      const padN = (G.scene && G.scene.pads ? G.scene.pads.length : 6);
+      return Math.min(({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3, Math.max(1, padN - 1));
+    }
     // 鱼群巡游：极小的鱼聚成发光"饵球"，数量（24→32→40）——太多会看花也更费电
     if (G.config.targetType === "fish" && G.session.sea && G.session.sea.key === "school") {
       return ({ 1: 24, 2: 32, 3: 40 })[G.session.stage] || 24;

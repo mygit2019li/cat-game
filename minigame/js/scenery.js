@@ -215,6 +215,75 @@ module.exports = function (G) {
         });
       }
     }
+    if (type === "frog") {
+      /* 夏夜荷塘：6 片荷叶按 3×2 散布（上排远、下排近），青蛙在荷叶之间跳跃。
+         荷叶坐标存进 S.pads，猎物（Frog）直接引用——场景只负责画，不做逻辑。 */
+      const b = G.bounds();
+      // 荷叶半径下限按青蛙体型定：叶面必须比青蛙宽出一圈，否则青蛙会把整片叶子盖住（像浮在空中）
+      const R0 = G.clamp(Math.min(W, H) * 0.13, 44, 84);
+      S.pads = [];
+      const cols = [0.17, 0.50, 0.83], rows = [0.22, 0.66];
+      rows.forEach((ry, ri) => {
+        cols.forEach(cx => {
+          const near = ri === 1;                       // 下排更近：略大、略暖
+          S.pads.push({
+            x: b.x + (cx + rand(-0.012, 0.012)) * b.w,
+            y: b.y + (ry + rand(-0.022, 0.022)) * b.h,
+            r: R0 * (near ? rand(1.0, 1.07) : rand(0.92, 1.0)),
+            rot: rand(-0.16, 0.16),
+            notch: rand(0, Math.PI * 2),               // 叶缘缺口方向
+            tone: near ? 1 : 0,                        // 0 暗绿（远） / 1 亮绿（近）
+            ph: rand(0, Math.PI * 2),
+            hint: 0, swayT: 0, swayAmt: 0
+          });
+        });
+      });
+      // 睡莲：随机挑 2 片荷叶各开一朵（纯装饰）
+      // 睡莲浮在荷叶之间的水面上（不放在荷叶上：青蛙蹲在叶心会正好挡住花，像叼着一朵）
+      S.lilies = [];
+      for (let i = 0; i < 2; i++) {
+        for (let attempt = 0; attempt < 30; attempt++) {
+          const lx = rand(b.x + b.w * 0.12, b.x + b.w * 0.88);
+          const ly = rand(b.y + b.h * 0.34, b.y + b.h * 0.92);
+          const clear = S.pads.every(p => Math.hypot(lx - p.x, (ly - p.y) / 0.45) > p.r * 1.25);
+          const apart = S.lilies.every(l => Math.hypot(lx - l.x, ly - l.y) > 90);
+          if (!clear || !apart) continue;
+          S.lilies.push({
+            x: lx, y: ly, r: rand(15, 22), ph: rand(0, Math.PI * 2),
+            c: i === 0 ? "#f7c9dc" : "#f6e7f0"
+          });
+          break;
+        }
+      }
+      // 芦苇剪影：贴左右两侧，弱对比不抢戏
+      S.reeds = [];
+      for (let i = 0; i < 7; i++) {
+        const left = i % 2 === 0;
+        S.reeds.push({
+          x: left ? rand(2, W * 0.06) : rand(W * 0.94, W - 2),
+          y: H * rand(0.42, 0.98), h: rand(70, 150), ph: rand(0, Math.PI * 2)
+        });
+      }
+      // 水面萤火：暖黄小光点慢漂（复用 poolDust 的绘制方式）
+      S.pondDust = [];
+      const nf = Math.round(G.clamp(Math.min(W, H) / 46, 8, 16));
+      for (let i = 0; i < nf; i++) S.pondDust.push({
+        x: rand(0, W), y: rand(0, H), r: rand(1.4, 2.8),
+        ph: rand(0, Math.PI * 2), sp: rand(3, 8), amp: rand(5, 14),
+        hue: Math.random() < 0.7 ? "214,255,170" : "255,238,170"
+      });
+      // 小浮萍：飘在水面的碎叶，填充空白但不抢戏
+      S.duckweed = [];
+      for (let i = 0; i < 9; i++) S.duckweed.push({
+        x: rand(W * 0.04, W * 0.96), y: rand(H * 0.3, H * 0.95),
+        r: rand(6, 13), n: Math.floor(rand(2, 4.99)), rot: rand(0, 6.28), ph: rand(0, 6.28)
+      });
+      // 远景水波条（横向缓移的高光带）
+      S.glints = [];
+      for (let i = 0; i < 16; i++) S.glints.push({
+        x: rand(0, W), y: rand(0, H), w: rand(18, 64), a: rand(0.03, 0.08), sp: rand(3, 9), ph: rand(0, 6.28)
+      });
+    }
   };
 
   G.plantsStartle = (x, y) => {
@@ -686,6 +755,7 @@ module.exports = function (G) {
     if (S.type === "fish") drawSea(ctx, t);
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
+    else if (S.type === "frog") drawPond(ctx, t);
     else if (S.type === "mouse" && S.mouseBg === "swarm") { drawSwarmFloor(ctx, t); }
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
@@ -810,6 +880,145 @@ module.exports = function (G) {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
+  /* ============ 夏夜荷塘（青蛙跳） ============
+     深墨绿水面上漂着 6 片荷叶，青蛙在叶间跳跃。
+     落点预兆由猎物把时间戳写进 pad.hint，这里只按「最近 420ms 内被点亮」渲染光圈，
+     场景与猎物逻辑完全解耦（重开/换阶段不需要清理状态）。 */
+  function drawPond(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#0b2b34"); g.addColorStop(0.45, "#12414a"); g.addColorStop(1, "#08222b");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 水面高光条：横向缓移，制造"水面在动"的底噪
+    (S.glints || []).forEach(gl => {
+      const x = ((gl.x + t * gl.sp) % (W + gl.w)) - gl.w / 2;
+      const y = gl.y + Math.sin(t * 0.5 + gl.ph) * 3;
+      ctx.fillStyle = "rgba(190,240,225," + gl.a.toFixed(3) + ")";
+      ctx.beginPath(); ctx.ellipse(x, y, gl.w / 2, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    // 芦苇剪影（贴边，弱对比）
+    (S.reeds || []).forEach(r => {
+      const sway = Math.sin(t * 0.7 + r.ph) * 5;
+      ctx.strokeStyle = "rgba(6,26,28,.62)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(r.x, r.y);
+      ctx.quadraticCurveTo(r.x + sway * 0.4, r.y - r.h * 0.6, r.x + sway, r.y - r.h);
+      ctx.stroke();
+    });
+    // 小浮萍
+    (S.duckweed || []).forEach(d => {
+      ctx.save();
+      ctx.translate(d.x + Math.sin(t * 0.6 + d.ph) * 4, d.y);
+      ctx.rotate(d.rot);
+      ctx.fillStyle = "rgba(58,122,84,.55)";
+      for (let i = 0; i < d.n; i++) {
+        const a = i / d.n * Math.PI * 2;
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(a) * d.r * 0.7, Math.sin(a) * d.r * 0.32, d.r * 0.55, d.r * 0.26, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    });
+    // 荷叶：先画上排（远），再画下排（近），远的被近的遮住更自然
+    (S.pads || []).slice().sort((a, b) => a.y - b.y).forEach(p => drawPad(ctx, p, t));
+    // 睡莲
+    (S.lilies || []).forEach(l => {
+      const r = l.r * (1 + Math.sin(t * 1.1 + l.ph) * 0.04);
+      for (let i = 0; i < 6; i++) {
+        const a = i / 6 * Math.PI * 2 + l.ph * 0.2;
+        ctx.fillStyle = l.c;
+        ctx.beginPath();
+        ctx.ellipse(l.x + Math.cos(a) * r * 0.52, l.y + Math.sin(a) * r * 0.24, r * 0.5, r * 0.24, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = "#ffe9a8";
+      ctx.beginPath(); ctx.arc(l.x, l.y, r * 0.24, 0, Math.PI * 2); ctx.fill();
+    });
+    // 萤火：呼吸 + 慢漂
+    (S.pondDust || []).forEach(d => {
+      let y = (d.y - t * d.sp) % (H + 40);
+      if (y < 0) y += H + 40;
+      const x = d.x + Math.sin(t * 0.5 + d.ph) * d.amp;
+      const a = 0.16 + 0.14 * Math.sin(t * 1.5 + d.ph);
+      if (a <= 0.02) return;
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, d.r * 4.2);
+      rg.addColorStop(0, "rgba(" + d.hue + "," + (a * 0.8).toFixed(2) + ")");
+      rg.addColorStop(1, "rgba(" + d.hue + ",0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, d.r * 4.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(" + d.hue + "," + a.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
+    });
+    // 顶部压暗（HUD 区可读）+ 四周暗角
+    const tg = ctx.createLinearGradient(0, 0, 0, H * 0.28);
+    tg.addColorStop(0, "rgba(0,0,0,.42)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.28);
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.24, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.42)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  /* 单片荷叶：水下投影 + 叶面双色 + 叶缘缺口 + 叶脉 + 落点预兆光圈 */
+  function drawPad(ctx, p, t) {
+    const sway = p.swayAmt > 0 ? Math.sin(t * 11) * p.swayAmt : 0;
+    if (p.swayAmt > 0) p.swayAmt = Math.max(0, p.swayAmt - 0.09);   // 被拍后约 0.7s 停止晃动
+    const y = p.y + sway + Math.sin(t * 0.9 + p.ph) * 1.5;
+    const rx = p.r, ry = p.r * 0.42;
+    ctx.save();
+    ctx.translate(p.x, y);
+    // 水下投影（荷叶浮在水面，边缘一圈暗）
+    ctx.fillStyle = "rgba(3,22,26,.42)";
+    ctx.beginPath(); ctx.ellipse(3, ry * 0.62, rx * 1.04, ry * 1.06, 0, 0, Math.PI * 2); ctx.fill();
+    // 叶面
+    ctx.fillStyle = p.tone ? "#37955a" : "#2d7350";
+    ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+    // 受光面（偏上）
+    ctx.fillStyle = p.tone ? "#4bb074" : "#3c8560";
+    ctx.beginPath(); ctx.ellipse(0, -ry * 0.16, rx * 0.9, ry * 0.72, 0, 0, Math.PI * 2); ctx.fill();
+    // 叶缘高光：把荷叶从深水里"托"起来，避免看着像贴纸
+    ctx.strokeStyle = "rgba(190,244,214,.14)"; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.ellipse(0, 0, rx * 0.99, ry * 0.99, 0, 0, Math.PI * 2); ctx.stroke();
+    // 叶缘缺口（V 形通到叶心，用半透明水色挖掉一个楔子）
+    const na = p.notch, nw2 = p.r * 0.118;
+    ctx.fillStyle = "rgba(9,38,46,.58)";
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(na - nw2) * rx * 1.02, Math.sin(na - nw2) * ry * 1.02);
+    ctx.lineTo(Math.cos(na + nw2) * rx * 1.02, Math.sin(na + nw2) * ry * 1.02);
+    ctx.closePath(); ctx.fill();
+    // 叶脉：从叶心放射
+    ctx.strokeStyle = "rgba(8,44,34,.34)"; ctx.lineWidth = 1.2;
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2;
+      if (Math.abs(((a - na + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.34) continue;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * rx * 0.94, Math.sin(a) * ry * 0.94);
+      ctx.stroke();
+    }
+    // 落点预兆光圈：青蛙蓄力末尾点亮，起跳后 420ms 内自然淡出
+    const dt = p.hint ? (performance.now() - p.hint) : 9999;
+    if (dt < 420) {
+      const k = 1 - dt / 420;
+      const pulse = 1 + Math.sin(performance.now() / 110) * 0.03;
+      ctx.strokeStyle = "rgba(255,214,102," + (0.85 * k).toFixed(2) + ")";
+      ctx.lineWidth = 2.4;
+      ctx.setLineDash([7, 6]);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, rx * 1.1 * pulse, ry * 1.16 * pulse, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+  }
+
+  /* 拍偏/落水时荷叶轻晃（场景侧反馈，不影响逻辑） */
+  G.padSway = (x, y) => {
+    const S = G.scene;
+    if (!S || !S.pads) return;
+    S.pads.forEach(p => {
+      if (Math.hypot(x - p.x, y - p.y) < p.r * 1.25) p.swayAmt = 4;
+    });
+  };
+
   /* ================= 粒子特效 ================= */
   const fx = {
     bubbles: [], dust: [], pollen: [], scales: [], sparks: [], ripples: [],
@@ -893,6 +1102,55 @@ module.exports = function (G) {
     PUSH(fx.ripples, { x, y, r: 20, life: 0.85, miss: false, color: "rgba(255,255,255,.8)", big: true }, 30);
     G.sparkBurst(x, y, P.spark, big ? 12 : 8);
   };
+  /* ============ 青蛙被拍中：一拍炸成草屑 ============
+     刻意和捕鱼的水花区分：不做大气泡球，而是"啪"地炸成一圈细环 + 四散草屑 + 上飘萤火。
+     空中截击（+2）整体放大一档并多一圈金环，让加分时机看得出区别 */
+  G.frogPop = (x, y, aerial) => {
+    const LEAF = ["#d9ff9a", "#b9f07a", "#8fdd66", "#5fbf55", "#e9ffd0"];
+    const n = aerial ? 16 : 11;
+    // 1) 草屑/碎叶：细短线条向外飞散
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(150, aerial ? 450 : 330);
+      PUSH(fx.confetti, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(40, aerial ? 190 : 140),
+        rot: rand(0, 6.28), vr: rand(-12, 12),
+        len: rand(5, 11), w: rand(2, 3.2), life: rand(0.42, 0.8), c: LEAF[i % LEAF.length]
+      }, 60);
+    }
+    // 2) 光点（小半径，别糊成一团）
+    for (let i = 0; i < (aerial ? 12 : 8); i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(120, aerial ? 380 : 280);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(30, 140),
+        r: rand(1.6, aerial ? 4.2 : 3.4), life: rand(0.32, 0.62),
+        c0: "#f6ffe0", c1: "#c8f58e", c2: "rgba(120,220,120,0)"
+      }, 90);
+    }
+    // 3) 冲击波：落水面上是压扁的椭圆（正圆会像肥皂泡），空中截击则是正圆爆开
+    if (aerial) {
+      PUSH(fx.shockwaves, { x, y, r: 8, life: 0.55, speed: 420, w: 2.4, color: "rgba(200,255,160,.95)" }, 12);
+      PUSH(fx.shockwaves, { x, y, r: 6, life: 0.7, speed: 210, w: 1.8, color: "rgba(255,214,102,.85)" }, 12);
+      // 落点处仍补一圈水面波纹
+      PUSH(fx.shockwaves, { x, y: y + 46, r: 8, life: 0.55, speed: 300, w: 2, color: "rgba(198,255,198,.7)", flat: true }, 12);
+    } else {
+      PUSH(fx.shockwaves, { x, y, r: 8, life: 0.55, speed: 330, w: 2.4, color: "rgba(200,255,160,.95)", flat: true }, 12);
+    }
+    // 4) 中心小爆闪（短促，不是大光球）
+    PUSH(fx.shockwaves, { x, y, r: 3, life: 0.34, speed: 120, w: 9, color: "rgba(244,255,206,.95)", glow: true }, 12);
+    // 5) 上飘萤火
+    for (let i = 0; i < (aerial ? 5 : 3); i++) {
+      PUSH(fx.pollen, {
+        x: x + rand(-16, 16), y: y + rand(-8, 8),
+        vx: rand(-16, 16), vy: rand(-46, -20),
+        r: rand(1.3, 2.4), life: rand(0.55, 1.0), glow: "#d6ff8a"
+      }, 80);
+    }
+    // 6) 荷叶上的涟漪
+    PUSH(fx.ripples, { x, y, r: 8, life: 0.8, color: "rgba(198,255,198,.7)", big: true }, 30);
+    fx.flash = Math.max(fx.flash, aerial ? 0.15 : 0.07);
+    G.sparkBurst(x, y, "#d9ff9a", aerial ? 9 : 6);
+  };
+
   G.ripple = (x, y, miss) => {
     if (G.scene.type !== "fish" && G.scene.type !== "pool") return;
     const th = G.seaThemeNow();
@@ -1044,7 +1302,11 @@ module.exports = function (G) {
         ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
       } else {
         ctx.strokeStyle = p.color; ctx.lineWidth = p.w;
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath();
+        // flat=贴水面的冲击波：压成椭圆（俯视有透视的水面，正圆会像肥皂泡）
+        if (p.flat) ctx.ellipse(p.x, p.y, p.r, p.r * 0.46, 0, 0, Math.PI * 2);
+        else ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.stroke();
       }
     });
     ctx.globalAlpha = 1;

@@ -126,6 +126,50 @@ module.exports = function (G) {
         wx.setUserCloudStorage({ KVDataList: [{ key: "bestHits", value: String(Math.max(0, Math.floor(Number(v) || 0))) }] });
       } catch (e) {}
     },
+    /* 好友关系链授权（scope.WxFriendInteraction）——读好友成绩的前提。
+       返回四种状态：
+         "ok"          已授权 / 该基础库不需要授权，可以直接 getFriendCloudStorage
+         "denied"      用户拒绝过（wx.authorize 不会再弹窗，只能引导去设置）
+         "asking"      正在弹窗（本函数同步返回、异步回调，最终只回 ok / denied / unsupported）
+         "unsupported" 环境不支持（浏览器垫片、旧基础库）→ 调用方按 ok 处理，直接尝试读取
+       注意：曾经拒绝过的 scope，wx.authorize 会直接 fail 不弹窗，所以先用 getSetting 分流。 */
+    friendAuth(cb) {
+      const done = (s) => { try { cb && cb(s); } catch (e) {} };
+      try {
+        if (typeof wx === "undefined") return done("unsupported");
+        if (typeof wx.getSetting !== "function" || typeof wx.authorize !== "function") return done("unsupported");
+        const SCOPE = "scope.WxFriendInteraction";
+        wx.getSetting({
+          success: (res) => {
+            const st = (res && res.authSetting) || {};
+            if (st[SCOPE] === true) return done("ok");
+            if (st[SCOPE] === false) return done("denied");     // 已拒绝：再 authorize 也没弹窗
+            // 从没问过 → 弹一次；拒绝就记为 denied，绝不反复弹
+            try {
+              wx.authorize({
+                scope: SCOPE,
+                success: () => done("ok"),
+                fail: (err) => {
+                  const msg = String((err && err.errMsg) || "");
+                  // 老基础库不认识这个 scope：不是用户拒绝，别把锅甩给用户
+                  done(/invalid scope|not support|scope/i.test(msg) ? "unsupported" : "denied");
+                }
+              });
+            } catch (e) { done("unsupported"); }
+          },
+          fail: () => done("unsupported")
+        });
+      } catch (e) { done("unsupported"); }
+    },
+    /* 引导去设置页开权限（必须在用户点击的同一手势里调用）。complete 后回读一次授权状态 */
+    openFriendSetting(cb) {
+      let called = false;
+      const run = () => { if (called) return; called = true; if (cb) cb(); };
+      try {
+        if (typeof wx.openSetting !== "function") { run(); return; }
+        wx.openSetting({ success: run, fail: run, complete: run });
+      } catch (e) { run(); }
+    },
     /* 向开放数据域发消息（show/hide/refresh） */
     odcPost(msg) {
       try {
@@ -153,6 +197,52 @@ module.exports = function (G) {
     },
     audioCtx() {
       try { return wx.createWebAudioContext(); } catch (e) { return null; }   // 基础库 <2.19 时静默降级
+    },
+    /* 短音效文件（真实录音 mp3）：wx 用 InnerAudioContext，浏览器垫片用 <audio>。
+       同一路径复用实例——微信同时存在的 InnerAudioContext 上限约 10 个，反复 create 会泄漏；
+       触发时先 stop/seek(0) 再 play，保证连点时能从头重放。
+       返回 true 表示环境支持并已发起播放；false 表示不可用（调用方回退合成音）。 */
+    sfxPool: {},
+    _sfxCreate(src) {
+      const inWx = typeof wx !== "undefined" && typeof wx.createInnerAudioContext === "function";
+      if (inWx) {
+        const a = wx.createInnerAudioContext();
+        a.src = src;
+        if (typeof a.onError === "function") a.onError(() => { a._bad = true; });
+        return a;
+      }
+      if (typeof Audio !== "undefined") {
+        // 浏览器垫片页面在 test/ 下，包内相对路径要补 ../
+        const abs = /^(?:data:|blob:|https?:|\/|wxfile:\/\/)/i.test(src);
+        const a = new Audio(abs || typeof location === "undefined" ? src : "../" + src);
+        if (typeof a.addEventListener === "function") a.addEventListener("error", () => { a._bad = true; });
+        return a;
+      }
+      return null;
+    },
+    sfx(src, vol) {
+      if (!src) return false;
+      try {
+        let a = P.sfxPool[src];
+        if (!a) {
+          a = P._sfxCreate(src);
+          if (!a) return false;
+          P.sfxPool[src] = a;
+        }
+        if (a._bad) return false;
+        a.volume = vol == null ? 0.55 : vol;
+        try { if (typeof a.stop === "function") a.stop(); } catch (e) {}
+        try { if (typeof a.seek === "function") a.seek(0); } catch (e) {}
+        try { a.currentTime = 0; } catch (e) {}
+        const r = a.play();
+        if (r && typeof r.catch === "function") r.catch(() => {});
+        return true;
+      } catch (e) { return false; }
+    },
+    /* 预取：进入玩法时先把音频实例建好，首次触发就不用等下载 */
+    preloadSfx(src) {
+      if (!src) return;
+      try { if (!P.sfxPool[src]) P.sfxPool[src] = P._sfxCreate(src); } catch (e) {}
     },
     /* 主动拉起转发面板（好友/群聊） */
     shareApp(opts) {

@@ -9,7 +9,8 @@ module.exports = function (G) {
   G.ui = ui;
   G.uiFX = { stagePop: 0, stageText: "", comboPop: 0 };
 
-  const btn = (x, y, w, h, cb) => { ui.buttons.push({ x, y, w, h, cb }); };
+  /* silent=true 时只画不注册（抽屉背后复用的首页就是这样画的，避免"抽屉外"的卡片被点到） */
+  const btn = (x, y, w, h, cb) => { if (ui.silent) return; ui.buttons.push({ x, y, w, h, cb }); };
   /* 带 key 的命中区：给自动化测试一个不依赖坐标算式的查找入口 */
   const btnKey = (x, y, w, h, key, cb) => { ui.buttons.push({ x, y, w, h, key, cb }); };
   const inBtn = (x, y, b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
@@ -48,6 +49,26 @@ module.exports = function (G) {
     ctx.fillText(str, x, y);
   }
   // 矢量小图标（与整体 UI 同风格，尺寸/颜色可控，避免 emoji 跨平台渲染不可控）
+  /* 齿轮图标：以原点为中心画（调用方自己 translate/save）。
+     首页设置键与电子猫粮设置键共用这一份，避免两处各画一套、看着不一样。 */
+  function gearAt(c2, s, color) {
+    const r = s / 2;
+    c2.save();
+    c2.strokeStyle = color; c2.fillStyle = color;
+    c2.lineWidth = Math.max(1.5, s * 0.16);
+    c2.lineCap = "round"; c2.lineJoin = "round";
+    c2.beginPath(); c2.arc(0, 0, r * 0.55, 0, Math.PI * 2); c2.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      c2.beginPath();
+      c2.moveTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72);
+      c2.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      c2.stroke();
+    }
+    c2.restore();
+  }
+  ui.gearAt = gearAt;      // 电子猫粮页（feeder.js）用自己的 ctx 调用同一份绘制
+
   function drawVecIcon(key, cx, cy, s, color) {
     const r = s / 2;
     ctx.save();
@@ -55,15 +76,7 @@ module.exports = function (G) {
     ctx.strokeStyle = color; ctx.fillStyle = color;
     ctx.lineCap = "round"; ctx.lineJoin = "round";
     if (key === "gear") {
-      ctx.lineWidth = Math.max(1.5, s * 0.16);
-      ctx.beginPath(); ctx.arc(0, 0, r * 0.55, 0, Math.PI * 2); ctx.stroke();
-      for (let i = 0; i < 8; i++) {
-        const a = i * Math.PI / 4;
-        ctx.beginPath();
-        ctx.moveTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72);
-        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-        ctx.stroke();
-      }
+      gearAt(ctx, s, color);              // 已在 (cx,cy) 上做过 translate
     } else if (key === "chart") {
       const bw = s * 0.2;
       [0.45, 0.72, 1].forEach((hh, i) => {
@@ -247,13 +260,16 @@ module.exports = function (G) {
     return { W, H, land, m, gap, safe, S };
   }
 
-  /* ================= 首页 ================= */
+  /* ================= 首页 =================
+     卡片顺序即数组顺序（3 列排列，一行 3 个）：
+     第一行 捕鱼 / 青蛙 / 激光　第二行 捕鼠 / 暗夜 / 蝴蝶 */
   const MODES = [
     { key: "fish",      name: "深海捕鱼", desc: "三条小鱼随波游动" },
-    { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
-    { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
+    { key: "frog",      name: "青蛙跳",   desc: "荷叶之间来回跳" },
     { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
-    { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" }
+    { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
+    { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" },
+    { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
      中心小鱼往返游动(swimDrift 3.4s) + 摆尾 + 上升气泡 + 整体呼吸(breath 2.8s) */
@@ -358,6 +374,16 @@ module.exports = function (G) {
       ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
 
+    /* 左上角小齿轮：设置入口。抽屉就是从这一角滑出来的，位置与动画方向一致 */
+    {
+      const gs = 34, gx = safe.left + 12, gy = safe.top + 10;
+      ctx.fillStyle = "rgba(255,255,255,.92)";
+      ctx.strokeStyle = "rgba(20,49,58,.10)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(gx + gs / 2, gy + gs / 2, gs / 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      drawVecIcon("gear", gx + gs / 2, gy + gs / 2, 15, C.ink2);
+      btn(gx, gy, gs, gs, () => G.openSettings());
+    }
+
     if (land) {
       const edgeL = safe.left + m, edgeR = W - safe.right - m;
       const availW = edgeR - edgeL, availH = H - safe.top - safe.bottom;
@@ -385,9 +411,12 @@ module.exports = function (G) {
       const rowBtns = [
         { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
         { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
-        { label: "设置", icon: "gear", cb: () => { G.switchScreen("settings"); } },
-        { label: "本周记录", icon: "chart", cb: () => { G.switchScreen("records"); } },
-        { label: "好友排行", icon: "trophy", cb: () => { G.switchScreen("leaderboard"); G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
+        { label: "本周记录", icon: "chart", cb: () => { G.openModal("records"); } },
+        { label: "好友排行", icon: "trophy", cb: () => {
+          G.openModal("lb");
+          G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 });
+          G.askFriendAuth();          // 在同一手势里发起授权：拒绝过的不再弹窗，改为引导去设置
+        } }
       ];
       // 底部通栏一行：设置/本周记录/好友排行——按钮宽度按文案自适应，整行居中（不再强行三等分撑满）
       const rowW = rowBtns.map(b => fitBtnWidth(b.label, rowH, { icon: true }));
@@ -442,7 +471,7 @@ module.exports = function (G) {
         }
         // 自适应布局：图标占「文字区之上」的剩余空间并随卡高缩放，矮卡不再与文字重叠
         const iconZone = ch - 42;
-        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : mItem.key === "frog" ? 0.62 : 0.5;
         const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
@@ -486,7 +515,7 @@ module.exports = function (G) {
           ctx.restore();
         }
         const iconZone = ch - 42;
-        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : 0.5;
+        const baseS = mItem.key === "fish" ? 0.55 : mItem.key === "mouse" ? 0.45 : mItem.key === "laser" ? 1.0 : mItem.key === "pool" ? 1.0 : mItem.key === "butterfly" ? 0.6 : mItem.key === "frog" ? 0.62 : 0.5;
         const scl = Math.min(baseS, Math.max(0.3, (iconZone - 6) / 115));
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
@@ -515,9 +544,12 @@ module.exports = function (G) {
       const subY2 = by + orbD2 + 40;
       // 设置/本周记录/好友排行：按文案自适应宽度，整行水平居中
       const subBtns = [
-        { label: "设置", icon: "gear", cb: () => { G.switchScreen("settings"); } },
-        { label: "本周记录", icon: "chart", cb: () => { G.switchScreen("records"); } },
-        { label: "好友排行", icon: "trophy", cb: () => { G.switchScreen("leaderboard"); G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 }); ui.showLB(); } }
+        { label: "本周记录", icon: "chart", cb: () => { G.openModal("records"); } },
+        { label: "好友排行", icon: "trophy", cb: () => {
+          G.openModal("lb");
+          G.track("lb_open", { best: Number(G.platform.storage.get("catToyBest")) || 0 });
+          G.askFriendAuth();          // 在同一手势里发起授权：拒绝过的不再弹窗，改为引导去设置
+        } }
       ];
       const subW = subBtns.map(b => fitBtnWidth(b.label, 44, { icon: true }));
       const subSum = subW.reduce((a, w) => a + w, 0) + 10 * (subBtns.length - 1);
@@ -909,19 +941,42 @@ module.exports = function (G) {
     ctx.restore();                                   // 弹入动画整体位移结束
   };
 
+  /* ================= 设置（左上角抽屉） =================
+     从首页左上角滑出，不占满屏：点右上角 X 关闭，点抽屉外的遮罩也能关闭。
+     抽屉宽度约屏幕 85%、高度按内容自适应，所以看起来是"抽出来的一层"，不是新开一个页面。 */
   ui.drawSettings = () => {
-    const { W, H, land, m, gap, safe } = layout();
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 标题左上角横排一行（原居中两行占 84px 顶部，会把卡片挤成紧凑档、按钮压到底边）
-    const titleFont = "bold 22px sans-serif";
-    text("设置", safe.left + m, safe.top + 28, titleFont, C.ink, "left");
-    ctx.font = titleFont;
-    const titleW = ctx.measureText("设置").width;
-    text("逗猫偏好，一次设好", safe.left + m + titleW + 12, safe.top + 29, "13px sans-serif", C.ink3, "left");
+    const { W, H, land, safe } = layout();
+    const now = performance.now();
+    if (!G.settings) G.settings = { t0: now };
+    const closing = G.settings.closing || null;     // 关闭动画的起始时间戳
+    const durIn = 240, durOut = 200;
+    const k = closing
+      ? Math.min(1, (now - closing.t0) / durOut)
+      : Math.min(1, (now - G.settings.t0) / durIn);
+    const eased = 1 - Math.pow(1 - k, 3);           // easeOutCubic
+    const vis = closing ? 1 - eased : eased;        // 1=完全展开，0=完全收起
+    const open = !closing && k >= 1;
+    G._settingsEase = vis;                          // 测试钩子：抽屉展开进度（0→1）
 
-    // 分组：对局（青绿点）/ 体验（琥珀点）
+    // 背景直接画真实首页（静音注册按钮）：抽屉"浮在首页上"，关闭时首页自然露出来
+    const silentBak = ui.silent;
+    ui.silent = true;
+    ui.drawHome();
+    ui.silent = silentBak;
+    ctx.fillStyle = "rgba(8,32,42," + (0.36 * vis).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+
+    // 关闭动画期间不注册任何可点区域，避免点穿到首页
+    if (!closing) btn(0, 0, W, H, () => { if (open) G.closeSettings(); });
+
+    /* ---------- 抽屉几何 ---------- */
+    const pad = 14;
+    const px = safe.left + 12, py = safe.top + 10;
+    const pw = land ? Math.min(W * 0.62, 560) : Math.min(W - safe.left - safe.right - 44, 344);
+    const innerX = px + pad, innerW = pw - pad * 2;
+    const headH = 40;
+
+    // 分组数据（与旧版设置页完全一致）
     const groups = [
       { title: "对局", dot: C.teal, rows: [] },
       { title: "体验", dot: C.amber, rows: [] }
@@ -929,7 +984,7 @@ module.exports = function (G) {
     groups[0].rows.push(
       { label: "猎物数量", options: [{ label: "单只", val: 1 }, { label: "多只", val: 3 }], cur: G.config.preyCount, cb: v => { G.config.preyCount = v; } },
       { label: "难度", options: [{ label: "悠闲", val: "easy" }, { label: "标准", val: "normal" }, { label: "激烈", val: "hard" }], cur: G.config.difficulty, cb: v => { G.config.difficulty = v; } },
-      { label: "时长", options: [{ label: "1 分钟", val: 60 }, { label: "3 分钟", val: 180 }, { label: "5 分钟", val: 300 }, { label: "∞ 无限", val: 0 }], cur: G.config.infinite ? 0 : G.config.duration, cb: v => { if (v === 0) G.config.infinite = true; else { G.config.infinite = false; G.config.duration = v; } } }
+      { label: "时长", options: [{ label: "1分钟", val: 60 }, { label: "3分钟", val: 180 }, { label: "5分钟", val: 300 }, { label: "无限", val: 0 }], cur: G.config.infinite ? 0 : G.config.duration, cb: v => { if (v === 0) G.config.infinite = true; else { G.config.infinite = false; G.config.duration = v; } } }
     );
     groups[1].rows.push(
       { label: "音效", options: [{ label: "关", val: false }, { label: "开", val: true }], cur: G.config.sound, cb: v => { G.config.sound = v; } },
@@ -937,34 +992,70 @@ module.exports = function (G) {
       { label: "自适应辅助", options: [{ label: "关", val: false }, { label: "开", val: true }], cur: G.config.adaptive, cb: v => { G.config.adaptive = v; } }
     );
 
-    // 分组卡片：柔和阴影 + 白卡 + 圆点标题 + 分隔线
-    function card(x, y, w, h, dot, title, compact) {
-      // 柔和投影（绘制后重置，避免污染后续绘制）
-      ctx.save();
-      ctx.shadowColor = "rgba(20,49,58,.12)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 8;
-      ctx.fillStyle = C.card;
-      G.rr(ctx, x, y, w, h, 22); ctx.fill();
-      ctx.restore();
-      // 描边：G.rr 内部会 fill，须显式给白底，否则被 restore 后遗留的 fillStyle（如文字色）覆盖
-      ctx.fillStyle = C.card;
-      ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, x, y, w, h, 22); ctx.stroke();
-      const headY = y + (compact ? 21 : 24);
-      // 圆点 + 外圈微光
-      ctx.save(); ctx.globalAlpha = .18;
-      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 22, headY, 9, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 22, headY, 5, 0, Math.PI * 2); ctx.fill();
-      text(title, x + 38, headY, "bold 16px sans-serif", C.ink, "left");
+    /* ---------- 紧凑尺寸 ---------- */
+    const cardHeader = 32, cardPadB = 10, labelH = 16, rowGap = 6, segH = 30;
+    const rowH = labelH + rowGap + segH;
+    const cardH = cardHeader + 6 + rowH * 3 + cardPadB;
+    const sideBySide = land;                        // 横屏两张卡并排，竖屏上下堆叠
+    const cardW = sideBySide ? (innerW - 10) / 2 : innerW;
+    const cardsH = sideBySide ? cardH : cardH * 2 + 10;
+    const footH = 32 + 8 + 32;                      // 常亮开关行 + 间距 + 底部按钮行
+    const needH = pad + headH + cardsH + 12 + footH + pad;
+    const ph = Math.min(needH, H - safe.top - safe.bottom - 24);
+
+    /* ---------- 抽屉面板（带投影 + 从左上角滑入） ---------- */
+    // 位移量随面板尺寸走：关闭时整块滑出屏幕左上角，打开时从屏幕外滑进来（不是原地淡入）
+    const slideOut = 1 - vis;
+    const dx = Math.min(pw * 0.92 + 28, 420) * slideOut;
+    const dy = Math.min(ph * 0.62 + 24, 420) * slideOut;
+    ctx.save();
+    ctx.globalAlpha = Math.pow(vis, 0.85);
+    ctx.translate(-dx, -dy);
+    ctx.save();
+    ctx.shadowColor = "rgba(8,40,52,.28)"; ctx.shadowBlur = 26; ctx.shadowOffsetY = 10;
+    ctx.fillStyle = "rgba(252,255,253,.99)";
+    G.rr(ctx, px, py, pw, ph, 20);            // G.rr 内部已做 fill
+    ctx.restore();
+    // 同上：描边前清空填充色，别用遮罩色把面板盖灰
+    ctx.fillStyle = "transparent";
+    ctx.strokeStyle = "rgba(20,49,58,.10)"; ctx.lineWidth = 1;
+    G.rr(ctx, px, py, pw, ph, 20); ctx.stroke();
+
+    // 标题 + 关闭 X
+    text("设置", px + 16, py + 26, "bold 18px sans-serif", C.ink, "left");
+    text("改完自动保存", px + 60, py + 27, "11px sans-serif", C.ink3, "left");
+    const xr = 15, xcx = px + pw - 14 - xr, xcy = py + 26;
+    ctx.fillStyle = "#eef5f2";
+    ctx.beginPath(); ctx.arc(xcx, xcy, xr, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink2; ctx.lineWidth = 1.8; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(xcx - 4.2, xcy - 4.2); ctx.lineTo(xcx + 4.2, xcy + 4.2);
+    ctx.moveTo(xcx + 4.2, xcy - 4.2); ctx.lineTo(xcx - 4.2, xcy + 4.2);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+
+    /* ---------- 分组卡 ---------- */
+    function card(x, y, w, h, dot, title) {
+      ctx.fillStyle = "#f7fbf9";
+      G.rr(ctx, x, y, w, h, 14); ctx.fill();
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+      G.rr(ctx, x, y, w, h, 14); ctx.stroke();
+      const hy = y + 16;
+      ctx.globalAlpha = vis * 0.18;
+      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 16, hy, 7.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = vis;
+      ctx.fillStyle = dot; ctx.beginPath(); ctx.arc(x + 16, hy, 4, 0, Math.PI * 2); ctx.fill();
+      text(title, x + 29, hy, "bold 14px sans-serif", C.ink, "left");
       ctx.strokeStyle = "rgba(0,0,0,.05)"; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x + 16, y + (compact ? 38 : 42)); ctx.lineTo(x + w - 16, y + (compact ? 38 : 42)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 12, y + 30); ctx.lineTo(x + w - 12, y + 30); ctx.stroke();
     }
-    // 分段选择器：选中=青绿渐变填充+白字（像"按下"的按钮）；未选中=极淡灰+深青灰字
+    // 分段选择器：字号随卡片宽度收放，窄卡不挤行
+    const segFS = cardW < 250 ? 13 : 14;
     function seg(x, y, wTotal, h, r) {
-      const ow = (wTotal - (r.options.length - 1) * 8) / r.options.length;
+      const ow = (wTotal - (r.options.length - 1) * 6) / r.options.length;
       r.options.forEach((op, idx) => {
         const on = op.val === r.cur;
-        const ox = x + idx * (ow + 8);
+        const ox = x + idx * (ow + 6);
         if (on) {
           const grad = ctx.createLinearGradient(ox, y, ox, y + h);
           grad.addColorStop(0, C.startGrad0); grad.addColorStop(1, C.startGrad1);
@@ -972,240 +1063,331 @@ module.exports = function (G) {
         } else {
           ctx.fillStyle = C.segBg;
         }
-        ctx.strokeStyle = "transparent"; ctx.lineWidth = 0;
-        G.rr(ctx, ox, y, ow, h, 12); ctx.fill();
-        if (on) { ctx.strokeStyle = C.startGrad1; ctx.lineWidth = 1.2; ctx.stroke(); }
-        text(op.label, ox + ow / 2, y + h / 2, on ? "bold 15px sans-serif" : "15px sans-serif", on ? "#fff" : C.ink2);
-        btn(ox, y, ow, h, () => { r.cb(op.val); G.saveConfig(); G.playTick(); });
+        G.rr(ctx, ox, y, ow, h, 9); ctx.fill();
+        text(op.label, ox + ow / 2, y + h / 2, (on ? "bold " : "") + segFS + "px sans-serif", on ? "#fff" : C.ink2);
+        if (open) btn(ox, y, ow, h, () => { r.cb(op.val); G.saveConfig(); G.playTick(); });
       });
     }
-
-    // 标题收到左上角后顶部只需留 52px；底部预留加大到 104px，让返回等按钮不贴屏幕底边
-    const contentTop = safe.top + 52;
-    const bottomLimit = H - safe.bottom - 104;
-    const availCH = bottomLimit - contentTop;
-    const btnH = 34;
-
-    if (land) {
-      // 双卡并排，行内布局：label 左 + 选项右；空间不足时切换紧凑档
-      // 阈值 = 完整档实际卡高 190（旧值 180 会算出放不下的卡、压到功能行）
-      const fits = availCH >= 190;
-      const headerH = fits ? 42 : 38, stride = fits ? 46 : 42, padB = fits ? 12 : 9;
-      const rowH = fits ? 34 : 32;   // 选项行高（空间不足时略压，给底部功能行让位）
-      const cardH = headerH + 10 + 2 * stride + rowH + padB;
-      const edgeL = safe.left + m, edgeR = W - safe.right - m;
-      const availW = edgeR - edgeL;
-      let cardW = Math.min((availW - gap) / 2, 440);
-      const startX = edgeL + (availW - (cardW * 2 + gap)) / 2;
-      const cardTop = contentTop + Math.max(0, (availCH - cardH) / 2);
-      groups.forEach((grp, gi) => {
-        const x = startX + gi * (cardW + gap);
-        card(x, cardTop, cardW, cardH, grp.dot, grp.title, !fits);
-        const labelW = Math.min(96, cardW * 0.28);
-        grp.rows.forEach((r, ri) => {
-          const ry = cardTop + headerH + 10 + ri * stride;
-          text(r.label, x + 16, ry + rowH / 2, "15px sans-serif", C.ink2, "left");
-          seg(x + 16 + labelW, ry, cardW - 32 - labelW, rowH, r);
-        });
+    const cardsTop = py + pad + headH;
+    groups.forEach((grp, gi) => {
+      const x = innerX + (sideBySide ? gi * (cardW + 10) : 0);
+      const y = cardsTop + (sideBySide ? 0 : gi * (cardH + 10));
+      card(x, y, cardW, cardH, grp.dot, grp.title);
+      grp.rows.forEach((r, ri) => {
+        const ry = y + cardHeader + 6 + ri * rowH;
+        text(r.label, x + 14, ry + labelH / 2, "13px sans-serif", C.ink2, "left");
+        seg(x + 14, ry + labelH + rowGap, cardW - 28, segH, r);
       });
-    } else {
-      // 竖屏：卡片纵堆，label 在选项上方
-      const headerH = 42, labelH = 18, stride = 74, padB = 14;
-      const cardH = headerH + 10 + 2 * stride + labelH + 8 + btnH + padB;
-      const edgeL = safe.left + 18;
-      const availW = W - safe.left - safe.right - 36;
-      const cardW = Math.min(availW, 420);
-      const startX = edgeL + (availW - cardW) / 2;
-      const availCH2 = bottomLimit - contentTop;
-      const cardTop = contentTop + Math.max(0, (availCH2 - (cardH * 2 + gap)) / 2);
-      groups.forEach((grp, gi) => {
-        const x = startX, y = cardTop + gi * (cardH + gap);
-        card(x, y, cardW, cardH, grp.dot, grp.title, false);
-        grp.rows.forEach((r, ri) => {
-          const ry = y + headerH + 10 + ri * stride;
-          text(r.label, x + 16, ry + labelH / 2, "15px sans-serif", C.ink2, "left");
-          seg(x + 16, ry + labelH + 8, cardW - 32, btnH, r);
-        });
-      });
-    }
+    });
 
-    // 底部一行：联系客服（白卡）/ 分享给好友（青绿字白卡）/ 返回（青绿渐变主按钮）
-    let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
-    let bx = land ? safe.left + m : safe.left + 24;
-    if (land && bw > 440) { bx = (W - 440) / 2; bw = 440; }
-    const gapB = 12;
-    const cw = (bw - gapB * 2) / 3;
-    // 底部功能行：屏幕常亮（iOS 风格开关）+ 防误触说明（带图标按钮），两块等高等宽对称
-    const fy = bottomLimit + 8;
-    const fh = 38;            // 功能块高
-    const bh = 34;            // 主按钮高
-    const by = fy + fh + 8;   // 功能行 + 8 间距
-
-    // iOS 风格开关：开=青绿渐变、关=浅灰，白色圆形滑块带微阴影
-    function toggle(cx, cy, w, h, on, cb) {
-      const r = h / 2;
-      ctx.save();
+    /* ---------- 底部：屏幕常亮 + 三个功能按钮 ---------- */
+    const fy = cardsTop + cardsH + 12;
+    // 屏幕常亮（白底药丸 + 小开关）
+    ctx.fillStyle = "#f7fbf9"; ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+    G.rr(ctx, innerX, fy, innerW, 32, 10); ctx.fill(); G.rr(ctx, innerX, fy, innerW, 32, 10); ctx.stroke();
+    text("屏幕常亮", innerX + 14, fy + 16, "bold 13px sans-serif", C.ink, "left");
+    {
+      const on = !!G.config.keepScreen;
+      const tw = 44, th = 24, tx = innerX + innerW - tw - 12, ty = fy + 4;
+      const rr2 = th / 2;
       if (on) {
-        const grad = ctx.createLinearGradient(cx, cy, cx + w, cy);
+        const grad = ctx.createLinearGradient(tx, ty, tx + tw, ty);
         grad.addColorStop(0, C.startGrad0); grad.addColorStop(1, C.startGrad1);
         ctx.fillStyle = grad;
-      } else {
-        ctx.fillStyle = "#e1eae7";
-      }
-      G.rr(ctx, cx, cy, w, h, r);
-      const knob = h - 6;
-      const kx = on ? cx + w - r - 3 : cx + r + 3;
-      ctx.shadowColor = "rgba(0,0,0,.2)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
+      } else ctx.fillStyle = "#dfe9e6";
+      G.rr(ctx, tx, ty, tw, th, rr2); ctx.fill();
+      const kx = on ? tx + tw - rr2 - 2 : tx + rr2 + 2;
       ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(kx, cy + r, knob / 2, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
-      btn(cx, cy, w, h, cb);
-    }
-
-    // 屏幕常亮块（白卡，左标签 + 右开关）
-    {
-      const fw = (bw - gapB) / 2;
-      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, bx, fy, fw, fh, 12); ctx.fill(); ctx.stroke();
-      text("屏幕常亮", bx + 16, fy + fh / 2, "bold 15px sans-serif", C.ink, "left");
-      const on = !!G.config.keepScreen;
-      const tw = 52, th = 30;
-      toggle(bx + fw - tw - 14, fy + (fh - th) / 2, tw, th, on, () => {
+      ctx.beginPath(); ctx.arc(kx, ty + rr2, (th - 5) / 2, 0, Math.PI * 2); ctx.fill();
+      if (open) btn(tx - 6, ty - 3, tw + 12, th + 6, () => {
         G.config.keepScreen = !on;
-        try { G.platform.keepScreen(G.config.keepScreen); } catch (e) {}
+        try { G.platform.keepScreen(G.config.keepScreen); } catch (err) {}
         G.session._keepOn = G.config.keepScreen;
         G.saveConfig(); G.playTick();
       });
     }
-    // 防误触说明块（白卡，图标 + 文字整体居中）
-    {
-      const fw = (bw - gapB) / 2;
-      const tx = bx + fw + gapB;
-      ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-      G.rr(ctx, tx, fy, fw, fh, 12); ctx.fill(); ctx.stroke();
-      const iy = fy + fh / 2;
-      ctx.font = "bold 15px sans-serif";
-      const tw = ctx.measureText("防误触说明").width;
-      const gx = tx + (fw - (22 + 12 + tw)) / 2;   // 图标22 + 间距12 + 文字，整组居中
-      const ix = gx + 11;
-      ctx.fillStyle = C.teal; ctx.beginPath(); ctx.arc(ix, iy, 11, 0, Math.PI * 2); ctx.fill();
-      text("?", ix, iy, "bold 15px sans-serif", "#fff");
-      text("防误触说明", gx + 34, iy, "bold 15px sans-serif", C.teal, "left");
-      btn(tx, fy, fw, fh, () => { try { G.platform.antiGuide(() => {}); } catch (e) {} });
-    }
+    // 一排三个：联系客服 / 分享给好友 / 防误触
+    const by = fy + 40;
+    const bGap = 8, bw3 = (innerW - bGap * 2) / 3;
+    const footBtns = [
+      { label: "联系客服", color: C.ink, cb: () => G.platform.openSupport() },
+      { label: "分享给好友", color: C.teal, cb: () => { try { G.shareInvite("settings"); } catch (err) {} } },
+      { label: "防误触", color: C.teal, cb: () => { try { G.platform.antiGuide(() => {}); } catch (err) {} } }
+    ];
+    footBtns.forEach((b, i) => {
+      const bx = innerX + i * (bw3 + bGap);
+      ctx.fillStyle = "#ffffff"; ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+      G.rr(ctx, bx, by, bw3, 32, 10); ctx.fill(); G.rr(ctx, bx, by, bw3, 32, 10); ctx.stroke();
+      text(b.label, bx + bw3 / 2, by + 16, "bold 12px sans-serif", b.color);
+      if (open) btn(bx, by, bw3, 32, b.cb);
+    });
+    ctx.restore();                                  // 结束抽屉的位移/透明度
 
-    // 联系客服 / 分享给好友 / 返回（主按钮带柔和投影）
-    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx, by, cw, bh, 13); ctx.fill(); ctx.stroke();
-    text("联系客服", bx + cw / 2, by + bh / 2, "bold 15px sans-serif", C.ink);
-    btn(bx, by, cw, bh, () => G.platform.openSupport());
-    // 分享给好友：无本局结果时回落「猫档案」测评图，带我家猫的战绩邀请好友来比
-    const bx2 = bx + cw + gapB;
-    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-    G.rr(ctx, bx2, by, cw, bh, 13); ctx.fill(); ctx.stroke();
-    text("分享给好友", bx2 + cw / 2, by + bh / 2, "bold 15px sans-serif", C.teal);
-    btn(bx2, by, cw, bh, () => { try { G.shareInvite("settings"); } catch (e) {} });
-    // 返回
-    const bx3 = bx2 + cw + gapB;
+    // 抽屉按钮与关闭 X 都用最终坐标（动画结束后才注册，避免滑动中误点）
+    if (open) {
+      btn(xcx - xr - 4, xcy - xr - 4, (xr + 4) * 2, (xr + 4) * 2, () => G.closeSettings());
+    }
+    // 关闭动画播完：真正切回首页（面板此时已完全滑出屏幕）
+    if (closing && k >= 1) { G.settings = null; G.screen = "home"; }
+  };
+
+  /* ================= 弹窗壳（本周记录 / 好友排行共用） =================
+     和设置抽屉是一套语言：背后画真实首页（静音注册）+ 遮罩，面板 0.94→1 缩放 + 上浮淡入，
+     关闭时反向。返回的 M 里带 vis/open/closing/面板矩形，末尾必须调用 modalEnd(M) 收尾。 */
+  function modalShell(key, maxW, wantH) {
+    const { W, H, safe } = layout();
+    const now = performance.now();
+    if (!G.modal || G.modal.key !== key) G.modal = { key, t0: now };
+    const closing = G.modal.closing || null;
+    const k = closing
+      ? Math.min(1, (now - closing.t0) / 200)
+      : Math.min(1, (now - G.modal.t0) / 260);
+    const eased = 1 - Math.pow(1 - k, 3);
+    const vis = closing ? 1 - eased : eased;
+    const open = !closing && k >= 1;
+    G._modalEase = vis;                              // 测试钩子
+
+    // 背景：真实首页（只画不注册）+ 遮罩
+    const silentBak = ui.silent;
+    ui.silent = true;
+    ui.drawHome();
+    ui.silent = silentBak;
+    ctx.fillStyle = "rgba(8,32,42," + (0.5 * vis).toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+    if (!closing) btn(0, 0, W, H, () => { if (open) G.closeModal(); });
+
+    const pw = Math.min(W - safe.left - safe.right - 44, maxW || 460);
+    const availH = H - safe.top - safe.bottom - 56;
+    const ph = Math.min(availH, Math.max(240, wantH || availH * 0.74));
+    const px = Math.round((W - pw) / 2), py = Math.round((H - ph) / 2);   // 取整：半像素坐标会让圆角路径出问题
+
+    // 面板：以中心缩放 + 轻微上浮
+    const sc = 0.94 + 0.06 * vis;
+    const cx = px + pw / 2, cy = py + ph / 2;
     ctx.save();
-    ctx.shadowColor = "rgba(20,160,147,.35)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 5;
-    const bg = ctx.createLinearGradient(bx3, by, bx3, by + bh);
-    bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
-    ctx.fillStyle = bg; G.rr(ctx, bx3, by, cw, bh, 13); ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle = C.startInner; ctx.lineWidth = 1.2; G.rr(ctx, bx3, by, cw, bh, 13); ctx.stroke();
-    text("返回", bx3 + cw / 2, by + bh / 2, "bold 17px sans-serif", "#fff");
-    btn(bx3, by, cw, bh, () => { G.switchScreen("home"); });
-  };
-
-  /* ================= 记录 ================= */
-  ui.drawRecords = () => {
-    const { W, H, land, m, gap, safe } = layout();
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    text("本周记录", W / 2, safe.top + 54, "bold 24px sans-serif", C.ink);
-    // 安全读取：历史里若混入 null / 非对象元素，原样 forEach 会抛错（记录页白屏）
-    const logs = G.getLogs();
-    if (!logs.length) text("还没有记录，来一局吧！", W / 2, safe.top + H * 0.4, "15px sans-serif", C.ink3);
-
-    if (land) {
-      const edgeL = safe.left + m, edgeR = W - safe.right - m;
-      const availW = edgeR - edgeL;
-      const availH = H - safe.top - safe.bottom;
-      // 列表内容块限宽限高、整体垂直居中：大屏不挤顶、字段不至于拉太散
-      const topLimit = safe.top + Math.max(70, Math.min(84, availH * 0.09)) + 40;
-      const bottomLimit = H - safe.bottom - 92;
-      const rowH = 52;
-      const maxPerCol = Math.max(1, Math.floor((bottomLimit - topLimit) / rowH));
-      const shown = Math.min(logs.length, maxPerCol * 2);
-      const useCols = shown > maxPerCol;
-      const listW = Math.min(availW, 900);
-      const colW = useCols ? (listW - gap) / 2 : listW;
-      const listH = Math.min(shown, useCols ? maxPerCol : shown) * rowH - 8;
-      const listTop = topLimit + Math.max(0, (bottomLimit - topLimit - listH) / 2);
-      const x1 = edgeL + (availW - listW) / 2, x2 = x1 + colW + gap;
-      logs.slice(0, shown).forEach((L, i) => {
-        const col = useCols ? (i < maxPerCol ? 0 : 1) : 0;
-        const x = col === 0 ? x1 : x2;
-        const y = listTop + (col === 0 ? i : i - maxPerCol) * rowH;
-        ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
-        G.rr(ctx, x, y, colW, 44, 12); ctx.fill(); ctx.stroke();
-        text(L.date || "-", x + 12, y + 22, "14px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
-        text(typeName, x + 65, y + 22, "14px sans-serif", C.ink3, "left");
-        text("捕获 " + (L.hits || 0), x + colW * 0.44, y + 22, "bold 15px sans-serif", C.amberDeep, "left");
-        text("命中 " + (L.accuracy || 0) + "%", x + colW * 0.64, y + 22, "14px sans-serif", C.tealDeep, "left");
-        text("连击 " + (L.combo || 0), x + colW * 0.86, y + 22, "14px sans-serif", C.danger, "left");
-      });
-    } else {
-      const edgeL = safe.left + 18, availW = W - safe.left - safe.right - 36;
-      logs.slice(0, 10).forEach((L, i) => {
-        const y = safe.top + 92 + i * 52;
-        if (y > H - safe.bottom - 110) return;
-        ctx.fillStyle = C.card; ctx.strokeStyle = "#f0f6f3"; ctx.lineWidth = 1;
-        G.rr(ctx, edgeL, y, availW, 44, 12); ctx.fill(); ctx.stroke();
-        text(L.date || "-", edgeL + 16, y + 22, "14px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光" }[L.type] || "";
-        text(typeName, edgeL + 90, y + 22, "14px sans-serif", C.ink3, "left");
-        text("捕获 " + (L.hits || 0), edgeL + availW * 0.42, y + 22, "bold 15px sans-serif", C.amberDeep, "left");
-        text("命中 " + (L.accuracy || 0) + "%", edgeL + availW * 0.60, y + 22, "14px sans-serif", C.tealDeep, "left");
-        text("连击 " + (L.combo || 0), edgeL + availW * 0.80, y + 22, "14px sans-serif", C.danger, "left");
-      });
+    ctx.globalAlpha = Math.pow(vis, 0.9);
+    ctx.translate(cx, cy - (1 - vis) * 16);
+    ctx.scale(sc, sc);
+    ctx.translate(-cx, -cy);
+    ctx.fillStyle = "rgba(255,255,255,.99)";
+    G.rr(ctx, px, py, pw, ph, 22);            // G.rr 内部已做 fill
+    // 描边前把填充色清空：G.rr 自带 fill，不清会拿上一个 fillStyle（遮罩色）把面板盖灰
+    ctx.fillStyle = "transparent";
+    ctx.strokeStyle = "rgba(20,49,58,.08)"; ctx.lineWidth = 1;
+    G.rr(ctx, px, py, pw, ph, 22); ctx.stroke();
+    // 面板本体吞掉点击：点内容区（标题、列表、说明）不该关闭弹窗，只有点面板外才关
+    if (!closing) btn(px, py, pw, ph, () => {});
+    G.modal.geo = { px, py, pw, ph };         // 面板矩形：测试与排障用
+    return { W, H, safe, px, py, pw, ph, vis, open, closing, k };
+  }
+  /* 弹窗右上角关闭 X（画在面板内），收尾时再注册命中区 */
+  function modalX(M) {
+    const xr = 15, xcx = M.px + M.pw - 16 - xr, xcy = M.py + 26;
+    ctx.fillStyle = "#eef5f2";
+    ctx.beginPath(); ctx.arc(xcx, xcy, xr, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.ink2; ctx.lineWidth = 1.8; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(xcx - 4.2, xcy - 4.2); ctx.lineTo(xcx + 4.2, xcy + 4.2);
+    ctx.moveTo(xcx + 4.2, xcy - 4.2); ctx.lineTo(xcx - 4.2, xcy + 4.2);
+    ctx.stroke(); ctx.lineCap = "butt";
+    return { x: xcx - xr - 4, y: xcy - xr - 4, w: (xr + 4) * 2, h: (xr + 4) * 2 };
+  }
+  function modalEnd(M, hit, onDone) {
+    ctx.restore();                                   // 结束缩放/透明度
+    if (M.open && hit) {
+      btn(hit.x, hit.y, hit.w, hit.h, () => G.closeModal());
     }
-    let bw = land ? W - safe.left - safe.right - m * 2 : W - safe.left - safe.right - 48;
-    let bx = land ? safe.left + m : safe.left + 24;
-    if (land && bw > 360) { bx = (W - 360) / 2; bw = 360; }
-    const by = H - safe.bottom - 75;
-    const bg = ctx.createLinearGradient(bx, by, bx, by + 50);
-    bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
-    ctx.fillStyle = bg;
-    G.rr(ctx, bx, by, bw, 50, 14); ctx.fill();
-    text("返回", W / 2, by + 25, "bold 18px sans-serif", "#fff");
-    btn(bx, by, bw, 50, () => { G.switchScreen("home"); });
+    if (M.closing && M.k >= 1) {
+      if (onDone) onDone();
+      G.modal = null; G.screen = "home";
+    }
+  }
+
+  /* ================= 本周记录（弹窗 + 上下滚动） =================
+     数据上限：最近 7 天、最多 200 条（G.getLogs / G.pruneLogs）。
+     超出一屏的部分靠手指上下拖 + 惯性滚动，右侧有细滚动条；拖到顶/底自动回弹停住。 */
+  const REC_ROW_H = 46, REC_ROW_GAP = 6;
+  /* 滚动状态挂在 G.modal 上：弹窗重建（openModal 新建对象）时自动归零 */
+  const recState = () => {
+    if (!G.modal) return { y: 0, v: 0, drag: null, t: 0, geo: null };
+    if (!G.modal.rec) G.modal.rec = { y: 0, v: 0, drag: null, t: 0, geo: null };
+    return G.modal.rec;
+  };
+  const recGeo = () => (G.modal && G.modal.rec && G.modal.rec.geo) || null;
+
+  /* 手势入口（game.js 触摸路由调用）：返回 true 表示这一下归列表，不再走按钮 */
+  ui.recTouchStart = (vx, vy) => {
+    const g = recGeo();
+    if (!g || g.maxScroll <= 0) return false;
+    if (vx < g.x || vx > g.x + g.w || vy < g.y || vy > g.y + g.h) return false;
+    const st = recState();
+    st.drag = { lastY: vy, lastT: performance.now() };
+    st.v = 0;
+    return true;
+  };
+  ui.recTouchMove = (vy) => {
+    const st = G.modal && G.modal.rec, g = recGeo();
+    if (!st || !st.drag || !g) return;
+    const now = performance.now();
+    const dy = vy - st.drag.lastY;
+    const dtm = Math.max(8, now - st.drag.lastT) / 1000;   // 下限 8ms：过滤同一帧内的抖动
+    st.y = Math.max(0, Math.min(g.maxScroll, st.y - dy));
+    st.v = -dy / dtm;                                      // 手指上拖 → 内容上移 → 速度为正
+    st.drag.lastY = vy; st.drag.lastT = now;
+  };
+  ui.recTouchEnd = () => {
+    const st = G.modal && G.modal.rec;
+    if (!st || !st.drag) return;
+    // 松手前停了一下（>90ms 没移动）就不该甩出去，避免"按一下也滚很远"
+    const idle = performance.now() - st.drag.lastT;
+    st.v = idle > 90 ? 0 : Math.max(-2200, Math.min(2200, st.v || 0));
+    st.drag = null;
   };
 
-  /* ================= 好友排行（开放数据域渲染） =================
-     列表本体由 openDataContext 画在透明覆盖层上；主域负责框架（标题/返回/说明）。
+  ui.drawRecords = () => {
+    const { H, land, safe } = layout();
+    // 安全读取：历史里若混入 null / 非对象元素，原样 forEach 会抛错（页面白屏）
+    const logs = G.getLogs();
+    const rowH = REC_ROW_H, rowGap = REC_ROW_GAP;
+    const availH = H - safe.top - safe.bottom - 56;
+    const footH = 22;                              // 列表下方的提示条（滚动提示 / 位置）
+    const cols = land ? 2 : 1;                     // 横屏双列：一屏能看到两倍条数，不用狂滑
+    const maxRows = Math.max(1, Math.floor((availH - 66 - footH - 8 + rowGap) / (rowH + rowGap)));
+    const willShow = Math.min(Math.ceil(logs.length / cols), maxRows);
+    // 高度按内容收缩：行数少就矮一点；行数超一屏则固定满高，改为内部滚动
+    const wantH = logs.length ? 66 + willShow * (rowH + rowGap) - rowGap + footH + 10 : 260;
+    const M = modalShell("records", land ? 720 : 440, wantH);
+    const { px, py, pw, ph } = M;
+
+    text("本周记录", px + 22, py + 28, "bold 19px sans-serif", C.ink, "left");
+    text(
+      "近 7 天 · 最多 200 条 · 共 " + logs.length + " 局",
+      px + 22, py + 49, "11px sans-serif", C.ink3, "left"
+    );
+    const hit = modalX(M);
+
+    // 右侧留 18px 给滚动条
+    const listX = px + 16, listW = pw - 34;
+    const listY = py + 66, listH = ph - 66 - footH - 10;
+
+    if (!logs.length) {
+      text("还没有记录，来一局吧！", px + pw / 2, py + ph / 2 - 6, "15px sans-serif", C.ink3);
+      text("每局结束会自动记在这里", px + pw / 2, py + ph / 2 + 18, "11px sans-serif", C.ink3);
+      modalEnd(M, hit);
+      return;
+    }
+
+    /* ---------- 滚动：惯性衰减 + 边界夹紧 ---------- */
+    const st = recState();
+    const now = performance.now();
+    const dt = st.t ? Math.min(0.05, (now - st.t) / 1000) : 0;
+    st.t = now;
+    const colGap = 8;
+    const cellW = (listW - colGap * (cols - 1)) / cols;
+    const totalRows = Math.ceil(logs.length / cols);
+    const contentH = totalRows * (rowH + rowGap) - rowGap;
+    const maxScroll = Math.max(0, contentH - listH);
+    if (!st.drag && Math.abs(st.v) > 4) {
+      st.y += st.v * dt;
+      st.v *= Math.pow(0.05, dt);              // 约 0.4s 衰减到 5%，手感接近原生
+    } else if (!st.drag) {
+      st.v = 0;
+    }
+    st.y = Math.max(0, Math.min(maxScroll, st.y));
+    if ((st.y <= 0 && st.v < 0) || (st.y >= maxScroll && st.v > 0)) st.v = 0;
+    st.geo = { x: listX, y: listY, w: listW, h: listH, maxScroll };
+
+    /* ---------- 列表（裁剪 + 位移，只画可见行；横屏每行两列） ---------- */
+    const visible = Math.ceil(listH / (rowH + rowGap)) + 1;
+    const first = Math.max(0, Math.floor(st.y / (rowH + rowGap)));
+    ctx.save();
+    ctx.beginPath(); ctx.rect(listX, listY, listW, listH); ctx.clip();
+    for (let r = first; r < Math.min(totalRows, first + visible); r++) {
+      const y = listY + r * (rowH + rowGap) - st.y;
+      for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (i >= logs.length) break;
+        const L = logs[i];
+        const x = listX + c * (cellW + colGap);
+        ctx.fillStyle = "#f8fbf9"; ctx.strokeStyle = "#eef4f1"; ctx.lineWidth = 1;
+        G.rr(ctx, x, y, cellW, rowH, 12); ctx.stroke();
+        const cy = y + rowH / 2;
+        text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙" }[L.type] || "";
+        // 玩法标签：浅色药丸，比纯文字更好扫读
+        const tagW = 38, tagX = x + 56;
+        ctx.fillStyle = "rgba(21,154,140,.10)";
+        G.rr(ctx, tagX, cy - 9, tagW, 18, 9);
+        text(typeName, tagX + tagW / 2, cy, "11px sans-serif", C.tealDeep);
+        // 统计列：从右往左排 + 实测文字宽度，避免窄列（横屏双列）里挤成一团
+        const fs2 = cellW < 300 ? 10 : 11;
+        const capStr = "捕获 " + (L.hits || 0);
+        const hitStr = "命中 " + (L.accuracy || 0) + "%";
+        const comboStr = "连击 " + (L.combo || 0);
+        ctx.font = "bold 13px sans-serif";
+        const capW = ctx.measureText(capStr).width;
+        ctx.font = fs2 + "px sans-serif";
+        const hitW = ctx.measureText(hitStr).width, comboW = ctx.measureText(comboStr).width;
+        const capX = x + 56 + tagW + 9;
+        const comboX = x + cellW - 10;                        // 右对齐
+        const hitX = comboX - comboW - 9 - hitW;              // 命中排在连击左侧
+        const showCombo = capX + capW + 6 <= hitX;            // 实在挤不下就省掉连击
+        text(capStr, capX, cy, "bold 13px sans-serif", C.amberDeep, "left");
+        text(hitStr, showCombo ? hitX : comboX - hitW, cy, fs2 + "px sans-serif", C.tealDeep, "left");
+        if (showCombo) text(comboStr, comboX, cy, fs2 + "px sans-serif", C.danger, "right");
+      }
+    }
+    ctx.restore();
+
+    /* ---------- 滚动条（内容超一屏才出现） ---------- */
+    if (maxScroll > 1) {
+      const barX = listX + listW + 7, trackY = listY, trackH = listH;
+      ctx.fillStyle = "rgba(20,49,58,.07)";
+      G.rr(ctx, barX, trackY, 4, trackH, 2);
+      const thumbH = Math.max(26, trackH * (listH / contentH));
+      const thumbY = trackY + (trackH - thumbH) * (st.y / maxScroll);
+      ctx.fillStyle = st.drag ? "rgba(21,154,140,.55)" : "rgba(21,154,140,.32)";
+      G.rr(ctx, barX, thumbY, 4, thumbH, 2);
+      // 底部渐隐：只在"还没滚到底"时加，让被裁切的那一行看起来是滚出去的；
+      // 滚到底时最后一条要完整露出，再加渐隐反而像被吃掉半边
+      if (st.y < maxScroll - 1) {
+        const fade = ctx.createLinearGradient(0, listY + listH - 16, 0, listY + listH);
+        fade.addColorStop(0, "rgba(255,255,255,0)");
+        fade.addColorStop(1, "rgba(255,255,255,.85)");
+        ctx.fillStyle = fade;
+        ctx.fillRect(listX, listY + listH - 16, listW, 16);
+      }
+      // 顶部同样的渐隐：往上滚过之后，最上面被切掉半行才不会像"画漏了"
+      if (st.y > 1) {
+        const fadeT = ctx.createLinearGradient(0, listY, 0, listY + 14);
+        fadeT.addColorStop(0, "rgba(255,255,255,.85)");
+        fadeT.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = fadeT;
+        ctx.fillRect(listX, listY, listW, 14);
+      }
+    }
+
+    /* ---------- 底部提示：能滚就提示拖动，滚到哪儿也顺带告诉位置 ---------- */
+    const footY = py + ph - footH + 4;
+    if (maxScroll > 1) {
+      const firstIdx = Math.min(logs.length, Math.floor(st.y / (rowH + rowGap)) * cols + 1);
+      const lastIdx = Math.min(logs.length, (Math.floor((st.y + listH) / (rowH + rowGap)) + 1) * cols);
+      text("上下拖动查看更多", listX + 2, footY, "11px sans-serif", C.ink3, "left");
+      text(firstIdx + "–" + lastIdx + " / " + logs.length,
+        listX + listW - 10, footY, "11px sans-serif", C.ink3, "right");
+    } else if (logs.length > 3) {
+      text("全部 " + logs.length + " 局都在这里了", listX + listW / 2, footY, "11px sans-serif", C.ink3);
+    }
+
+    modalEnd(M, hit);
+  };
+
+  /* ================= 好友排行（弹窗 + 开放数据域列表） =================
+     列表本体由 openDataContext 画在透明覆盖层上；主域负责弹窗外壳与按钮。
      好友关系链数据无需授权弹窗，仅含同玩本游戏的好友成绩，不涉及通讯录。 */
-  function lbRect() {
-    const { W, H, land, m, safe } = layout();
-    const availW = W - safe.left - safe.right - m * 2;
-    const top = safe.top + 92;
-    // 底部让出一行说明 + 两个按钮（邀猫友 / 返回）的位置
-    const bottom = H - safe.bottom - 24 - 46 - 30;
-    const w = land ? Math.min(availW * 0.56, 560) : availW - 12;
-    const h = Math.max(120, bottom - top);
-    return { x: (W - w) / 2, y: top, w, h };
-  }
-  function lbRow() {
-    const { W, H, land, m, safe } = layout();
-    const full = Math.min(W - safe.left - safe.right - m * 2, land ? 520 : W - safe.left - safe.right - 48);
-    const bh = 46, gp = 12;
-    return { bx: (W - full) / 2, by: H - safe.bottom - 24 - bh, bh, full, half: (full - gp) / 2, gp };
-  }
   ui.showLB = () => {
-    const r = lbRect();
+    const r = (G.modal && G.modal.lbRect) || null;
+    if (!r) return;
     const S = G.platform.S || 1;   // ODC 覆盖层用真实坐标，需把虚拟布局换算回真实尺寸
     G.platform.odcPost({ type: "refresh" });   // 每次进排行榜先拉最新好友成绩，避免显示旧缓存
     G.platform.odcPost({ type: "show", x: r.x * S, y: r.y * S, w: r.w * S, h: r.h * S });
@@ -1213,33 +1395,84 @@ module.exports = function (G) {
   ui.hideLB = () => { G.platform.odcPost({ type: "hide" }); };
 
   ui.drawLeaderboard = () => {
-    const { W, H, m, safe } = layout();
-    const g = ctx.createLinearGradient(0, 0, W, H);
-    g.addColorStop(0, C.subBg1); g.addColorStop(1, C.subBg2);
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    text("好友排行", W / 2, safe.top + 46, "bold 24px sans-serif", C.ink);
-    text("展示同玩本游戏的微信好友单局最佳捕获", W / 2, safe.top + 74, "13px sans-serif", C.ink3);
+    const { H, land, safe } = layout();
+    const availH = H - safe.top - safe.bottom - 56;
+    const M = modalShell("lb", land ? 580 : 460, availH * (land ? 0.94 : 0.8));
+    const { px, py, pw, ph } = M;
 
-    // 卡片区域由开放数据域绘制（覆盖层），此处只画卡外说明
-    const r = lbRect();
-    const row = lbRow();
-    text("玩过本游戏的好友自动进入榜单，无需授权通讯录", W / 2, r.y + r.h + 18, "11px sans-serif", C.ink3);
+    // 授权状态：unknown/asking=正在问，ok=能读，denied=用户拒绝过（要引导去设置）
+    const auth = G.friendAuthState || "unknown";
+    const authed = auth === "ok";
 
-    // 左：邀猫友。空榜时这是唯一能让用户「做点什么」的动作——把"等人来"变成"发出邀请"。
-    // 文案必须和开放数据域空榜里的指引一字一致（"点下方「邀猫友比一比」"），否则用户找不到。
-    // 合规说明：不奖励分享、不设解锁条件，只是邀请好友来玩。
-    const bg = ctx.createLinearGradient(row.bx, row.by, row.bx, row.by + row.bh);
+    text("好友排行", px + 22, py + 28, "bold 19px sans-serif", C.ink, "left");
+    text(
+      authed ? "同玩好友的单局最佳捕获" : "需要「微信朋友信息」权限",
+      px + 22, py + 49, "11px sans-serif", authed ? C.ink3 : C.amberDeep, "left"
+    );
+    const hit = modalX(M);
+
+    // 列表区（开放数据域按这块矩形绘制）+ 下方说明与按钮
+    const btnH = 40, hintY = py + ph - 14 - btnH - 20;
+    const rect = { x: px + 14, y: py + 64, w: pw - 28, h: Math.max(90, hintY - 20 - (py + 64)) };
+    G.modal.lbRect = rect;
+
+    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    if (!authed) {
+      /* 未授权时这块区域本来就空着，用一张虚线占位卡托住文字，
+         既说明"这里将来是榜单"，也不至于让一段话飘在整片白色里 */
+      ctx.fillStyle = "rgba(247,251,249,.85)";
+      G.rr(ctx, rect.x, rect.y, rect.w, rect.h, 16); ctx.fill();
+      ctx.save();
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = "rgba(31,64,58,.16)"; ctx.lineWidth = 1.2;
+      G.rr(ctx, rect.x, rect.y, rect.w, rect.h, 16); ctx.stroke();
+      ctx.restore();
+    }
+    if (!authed && auth === "denied") {
+      /* ---- 拒绝过授权：这里必须给出可执行动作，而不是让用户看空榜 ---- */
+      text("还看不到好友成绩", cx, cy - 34, "bold 16px sans-serif", C.ink);
+      text("微信需要你允许「使用你的微信朋友信息」，", cx, cy - 6, "12px sans-serif", C.ink3);
+      text("才能读取好友的单局成绩（不含通讯录）。", cx, cy + 14, "12px sans-serif", C.ink3);
+      // 小锁：锁梁 + 锁体
+      const ly = cy + 62;
+      ctx.strokeStyle = "rgba(232,137,12,.6)"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.arc(cx, ly, 9, Math.PI, 0); ctx.stroke();
+      ctx.lineCap = "butt";
+      ctx.fillStyle = "rgba(232,137,12,.6)";
+      G.rr(ctx, cx - 13, ly - 1, 26, 18, 5);
+    } else if (!authed) {
+      // 正在弹授权框 / 还没回来：别写"加载中"，否则用户以为数据在等
+      text("正在请求好友权限…", cx, cy - 6, "14px sans-serif", C.ink3);
+      text("（只读同玩好友的成绩，不含通讯录）", cx, cy + 18, "11px sans-serif", C.ink3);
+    } else {
+      // 占位底：覆盖层还没画上来时（真机首帧 / 浏览器调试）不至于是一片空白
+      text("正在加载好友排行…", cx, cy, "12px sans-serif", C.ink3);
+    }
+
+    // 说明文案随状态变
+    text(
+      auth === "denied" ? "开启后好友成绩会自动出现在这里" : "玩过本游戏的好友自动进榜，无需授权通讯录",
+      px + pw / 2, hintY, "11px sans-serif", C.ink3
+    );
+
+    // 主按钮：未授权=去开启；已授权=邀猫友
+    const bx = px + 14, bw = pw - 28, by = py + ph - 14 - btnH;
+    const bg = ctx.createLinearGradient(bx, by, bx, by + btnH);
     bg.addColorStop(0, C.startGrad0); bg.addColorStop(1, C.startGrad1);
     ctx.fillStyle = bg;
-    G.rr(ctx, row.bx, row.by, row.half, row.bh, 14); ctx.fill();
-    text("邀猫友比一比", row.bx + row.half / 2, row.by + row.bh / 2, "bold 17px sans-serif", "#fff");
-    btn(row.bx, row.by, row.half, row.bh, () => G.shareInvite("lb"));
+    G.rr(ctx, bx, by, bw, btnH, 13); ctx.fill();
+    text(auth === "denied" ? "去设置开启" : "邀猫友比一比", bx + bw / 2, by + btnH / 2, "bold 16px sans-serif", "#fff");
 
-    const rx = row.bx + row.half + row.gp;
-    ctx.fillStyle = C.card; ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
-    G.rr(ctx, rx, row.by, row.half, row.bh, 14); ctx.fill(); ctx.stroke();
-    text("返回", rx + row.half / 2, row.by + row.bh / 2, "bold 17px sans-serif", C.ink);
-    btn(rx, row.by, row.half, row.bh, () => { ui.hideLB(); G.switchScreen("home"); });
+    // 覆盖层时序：只有已授权才拉起子域；完全展开后 show（避免列表在缩放中"贴死"），开始关闭立刻 hide
+    if (!authed && !G.modal.lbHidden) { G.modal.lbHidden = true; ui.hideLB(); }
+    if (authed && M.open && !G.modal.lbShown) { G.modal.lbShown = true; ui.showLB(); }
+    if (M.closing && !G.modal.lbHidden) { G.modal.lbHidden = true; ui.hideLB(); }
+
+    modalEnd(M, hit, () => { ui.hideLB(); });
+    if (M.open) {
+      if (auth === "denied") btn(bx, by, bw, btnH, () => G.grantFriendAuth());
+      else btn(bx, by, bw, btnH, () => G.shareInvite("lb"));
+    }
   };
 
   /* 卡面插画：有照片用照片；没照片（猫粮开饭 / 自定义还没传图）走矢量插画，

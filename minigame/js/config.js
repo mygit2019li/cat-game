@@ -89,7 +89,7 @@ module.exports = function (G) {
 
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
-  const TYPES = ["fish", "butterfly", "mouse", "laser", "pool"];
+  const TYPES = ["fish", "butterfly", "mouse", "laser", "pool", "frog"];
 
   /* ===== 可切换模式表 =====
      某玩法有 ≥2 套模式时，首页点「开始游戏」先弹模式选择层（可左右滑动/点按翻页），
@@ -104,6 +104,10 @@ module.exports = function (G) {
       { key: "kelp", name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
       { key: "pool", name: "泳池追鱼", desc: "亮蓝池水 · 焦散光网" },
       { key: "school", name: "鱼群巡游", desc: "深海鱼群 · 结群游动" }
+    ],
+    /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
+    frog: [
+      { key: "pond", name: "夏夜荷塘", desc: "荷叶 · 睡莲 · 萤火" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
@@ -154,26 +158,67 @@ module.exports = function (G) {
   G.config = loadConfig();
   G.GAME_TYPES = TYPES; G.GAME_DURS = DURS;
 
+  /* 本局历史上限：只留最近 7 天、最多 200 条。
+     200 条 × 每条约 90 字节 ≈ 18KB，远低于 storage 单 key 1MB 限制。 */
+  G.LOG_KEEP_DAYS = 7;
+  G.LOG_KEEP_MAX = 200;
+
+  const DAY_MS = 86400000;
+  /* 取一条记录的时间戳（毫秒）。新记录直接存 ts；
+     旧记录只有 "M/D" 文本，按"今年"推、若落在未来则算去年（跨年边界也能对）。 */
+  const logTs = (L, now) => {
+    const t = Number(L.ts);
+    if (isFinite(t) && t > 0) return t;
+    const s = typeof L.date === "string" ? L.date : "";
+    const m = /^(\d{1,2})\s*\/\s*(\d{1,2})$/.exec(s);
+    if (!m) return 0;
+    const d = new Date(now);
+    d.setHours(12, 0, 0, 0);                 // 取当天中午：避免 0 点/23 点跨日算错
+    d.setMonth(Number(m[1]) - 1, Number(m[2]));
+    if (d.getTime() > now + DAY_MS) d.setFullYear(d.getFullYear() - 1);
+    return d.getTime();
+  };
+
   /* 本局历史的安全读取：存储里可能是对象、null、元素为 null 的数组（旧版本/手动清理所致），
-     原样交给 forEach / slice / unshift 会直接抛错（记录页闪退、结算写不进日志）。 */
+     原样交给 forEach / slice / unshift 会直接抛错（记录页闪退、结算写不进日志）。
+     同时按"最近 7 天 + 最多 200 条"过滤：这是唯一出口，界面与统计都拿不到过期数据。 */
   G.getLogs = () => {
     let arr = null;
     try { arr = JSON.parse(G.platform.storage.get("catToyLogs") || "[]"); } catch (e) { arr = null; }
     if (!Array.isArray(arr)) return [];
     const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
+    const now = Date.now(), cut = now - G.LOG_KEEP_DAYS * DAY_MS;
     // 同时剔掉空对象 {}：它是合法对象但没有有效字段，会渲染成一行"0 抓 0%"的脏记录
     return arr.filter(L => L && typeof L === "object" && !Array.isArray(L) && (L.date || L.hits != null))
-      .map(L => ({
-      date: typeof L.date === "string" ? L.date : "-",
-      type: TYPES.indexOf(L.type) >= 0 ? L.type : "fish",
-      dur: num(L.dur) || 180,
-      hits: num(L.hits),
-      touches: num(L.touches),
-      accuracy: num(L.accuracy),
-      combo: num(L.combo),
-      dart: num(L.dart),
-      bonus: num(L.bonus)
-    }));
+      .map(L => {
+        const ts = logTs(L, now);
+        return {
+          ts,
+          date: typeof L.date === "string" ? L.date : "-",
+          type: TYPES.indexOf(L.type) >= 0 ? L.type : "fish",
+          dur: num(L.dur) || 180,
+          hits: num(L.hits),
+          touches: num(L.touches),
+          accuracy: num(L.accuracy),
+          combo: num(L.combo),
+          dart: num(L.dart),
+          bonus: num(L.bonus)
+        };
+      })
+      .filter(L => L.ts >= cut)                  // 超过 7 天的直接丢弃
+      .slice(0, G.LOG_KEEP_MAX);
+  };
+
+  /* 写入前的裁剪：新记录 unshift 之后调用，保证存储里也只有 7 天 / 200 条 */
+  G.pruneLogs = (arr) => {
+    const now = Date.now(), cut = now - G.LOG_KEEP_DAYS * DAY_MS;
+    return (Array.isArray(arr) ? arr : [])
+      .map(L => {
+        const t = Number(L && L.ts);
+        return (L && isFinite(t) && t > 0) ? L : Object.assign({}, L, { ts: L ? logTs(L, now) : 0 });
+      })
+      .filter(L => L && Number(L.ts) >= cut)
+      .slice(0, G.LOG_KEEP_MAX);
   };
 
   /* ===== 猫档案（累计维度） =====
@@ -310,6 +355,16 @@ module.exports = function (G) {
     2: { peek: 1.4,  dartSpeed: 380, fakeP: 0.35, adjacent: false, dartP: 0.85 },
     3: { peek: 0.85, dartSpeed: 500, fakeP: 0.55, adjacent: false, dartP: 1 }
   };
+  /* 青蛙跳三阶段：一次循环 = 蓄力 → 腾空 → 落水 → 静坐，循环结束换一片荷叶。
+     crouch/leap/land/settle = 各状态基准时长（秒，按速度倍率缩放）
+     prep   = 起跳前落点光圈提前量（猫唯一的预判依据，三个段位都保留）
+     nearFirst = 落点优先从「最近的 N 片荷叶」里挑（0 = 全随机）
+     chain  = 一次落水后最多接着连跳几次（2 = 落地再跳一次，共 2 跳） */
+  G.FROG_PARAMS = {
+    1: { crouch: 0.60, leap: 0.80, land: 0.28, settle: 1.00, count: 3, prep: 0.35, nearFirst: 2, chain: 1 },
+    2: { crouch: 0.52, leap: 0.72, land: 0.26, settle: 0.80, count: 4, prep: 0.35, nearFirst: 0, chain: 1 },
+    3: { crouch: 0.44, leap: 0.64, land: 0.24, settle: 0.62, count: 5, prep: 0.35, nearFirst: 0, chain: 2 }
+  };
   /* 老鼠花色 variants：毛色分层（背→中→腹）/ 耳 / 爪 / 尾 / 眼鼻 + 速度体型差异 */
   G.MOUSE_VARIANTS = [
     { key: "house", name: "灰褐家鼠", speed: 1.0,  size: 1.0,
@@ -373,7 +428,9 @@ module.exports = function (G) {
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
     /* 水面追光：高亮光斑。命中盒比激光略大（高速目标宽容些），spark 用水花青白 */
-    pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" }
+    pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" },
+    /* 青蛙跳：体型大、移动靠跳跃（不参与巡游速度），spark 用荷叶青绿 */
+    frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" }
   };
   /* 全局配色：与 H5 原型 CSS 变量 / 场景色严格对齐 */
   G.COLORS = {
