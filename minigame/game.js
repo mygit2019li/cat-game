@@ -111,7 +111,9 @@ initDebug();
    配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
    量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
 const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只" };
-const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光小动物" };
+/* 暗夜萤光三种动物的命中碎屑主色（和各自本体一致：狗偏琥珀、鼠偏柠檬、瓢虫偏橙） */
+const POOL_SPARK = { dog: "#ffd79a", mouse: "#fdf3a8", ladybug: "#ffbe7a" };
 G.shareResult = () => {
   const R = G.result || {};
   const hits = Number(R.hits) || 0;
@@ -166,7 +168,7 @@ G.shareInvite = (from) => {
   G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=" + src });
 };
 G.platform.initShare(() => ({
-  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、萤光虫轮着来，看它能抓到几个",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、发光小动物轮着来，看它能抓到几个",
   query: "from=menu"
 }));
 
@@ -176,6 +178,7 @@ G.startGame = () => {
   G.ensureAudio();
   // 青蛙跳：进局先把两段蛙鸣预取好，第一声"呱"就不用等下载
   if (G.config.targetType === "frog" && G.preloadFrogVoices) G.preloadFrogVoices();
+  if (G.config.targetType === "pool" && G.preloadFireflySfx) G.preloadFireflySfx();
   const S = G.session;
   S.touches = 0; S.hits = 0; S.bonusHits = 0; S.combo = 0; S.maxCombo = 0;
   S.missStreak = 0; S.dartStreak = 0; S.dartHits = 0;
@@ -347,6 +350,11 @@ G.summonPickTouchEnd = (x) => {
 /* ================= 每秒心跳 ================= */
 function tickSecond() {
   const S = G.session;
+  /* 暗夜萤光：视频约 15.3s 会有一次"满屏金色火花 → 整屏换成龟裂焦土"。
+     一局只切一次，约开局 16 秒触发（无限模式同样）。 */
+  if (G.config.targetType === "pool" && S.time >= 16 && G.scene && !G.scene._shiftDone && G.poolShiftTheme) {
+    G.poolShiftTheme();
+  }
   // 无限模式：倒计时仅用于阶段推进，不减到负、不自动结束（给猫玩不中途打断）
   if (S.infinite) {
     if (S.remaining > 0) S.remaining--;
@@ -485,14 +493,16 @@ function onHit(x, y, prey) {
   G.shake = Math.min(G.shake + 8, 20); // Add screen shake
   prey.vanish();
   const sparkC = isPool
-    ? "#eaf9ff"
+    ? (POOL_SPARK[prey.species] || "#eaf9ff")
     : isLaser
     ? ((G.laserColorSet && G.laserColorSet())[(prey.laserVar && prey.laserVar.key) || "red"] || {}).spark || "#ff8a8a"
     : isFrog
     ? "#bdf58a"
     : (isMouse || isBfly ? (prey.def.sparkColor || "#ffd76a") : (G.seaThemeNow().spark || prey.def.sparkColor || "#ffd76a"));
   G.sparkBurst(x, y, sparkC, 8);
-  if (!isLaser) G.ripple(x, y, false);
+  // 萤火改到枯草地上：不再画水面涟漪（干地上出现水圈很违和），爆散交给 lightPop
+  if (isPool) { /* 光爆自带碎光 + 双环，不再叠扬尘 */ }
+  else if (!isLaser) G.ripple(x, y, false);
   G.plantsStartle(x, y);
   if (isMouse) {
     G.dustBurst(x, y, 5);
@@ -521,10 +531,10 @@ function onHit(x, y, prey) {
       G.playFlutter();
     }
   } else if (isPool) {
-    // 夸张光爆：连击越高越大（hold 停窗命中也走大光爆）
-    G.splashBurst(x, y, holding || S.combo >= 5);
-    G.playHit(S.combo);
-    G.tone("sine", 1320, 320, 0.12, 0.22);        // 高频"叮"叠加，增强炸裂感
+    // 萤火虫被拍散：一小把碎光（白/金）+ 两点冷色，声音是"脆的一下"（对齐视频实测的 1kHz 短音）
+    G.lightPop(x, y, holding || S.combo >= 5, prey.species);
+    G.playFireflyHit(prey.species);
+    G.playHit(S.combo * 0.5);                     // 只留一层很轻的低频垫底，不抢主角
     if (holding) { S.bonusHits++; G.playMilestone(); }
   } else if (isLaser) {
     G.sparkBurst(x, y, "#ff5252", 8);
@@ -558,7 +568,7 @@ function onHit(x, y, prey) {
   } else {
     if (isMouse) G.floatText(x, y - 20, chasing ? "+2 追击成功！" : "+1 抓住！", chasing ? "big" : "");
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
-    else if (isPool) G.floatText(x, y - 20, holding ? "+2 光爆连击！" : "光爆 +1", holding ? "big" : "");
+    else if (isPool) G.floatText(x, y - 56, holding ? "+2 光爆连击！" : "光爆 +1", holding ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
     else if (isFrog) G.floatText(prey.x, prey.y - (prey.jumpH || 0) - 62, aerial ? "空中截击 +2！" : "抓住！", aerial ? "big" : "");
     else G.floatText(x, y - 20, "+1");
@@ -579,7 +589,7 @@ function onMiss(x, y) {
   S.missStreak++;
   applyAdaptive();
   applyComboBoost();
-  if (G.config.targetType !== "laser") G.ripple(x, y, true);
+  if (G.config.targetType !== "laser" && G.config.targetType !== "pool") G.ripple(x, y, true);
   G.plantsStartle(x, y);
   if (G.config.targetType === "mouse") {
     G.dustBurst(x, y, 3);
@@ -746,6 +756,8 @@ function loop(ts) {
     while (S.secAcc >= 1) { S.secAcc -= 1; tickSecond(); }
     G.preys.forEach(p => p.update(dt, S.time));
   }
+  // 荷塘荷叶的缓慢漂移 / 沉浮（结算页背景也继续漂，不是静止贴图）
+  if (G.scene && G.scene.type === "frog" && G.padsUpdate) G.padsUpdate(dt, t);
   G.fx.update(dt, t);
   if (G.shake > 0) G.shake *= 0.88; // Decay shake
 

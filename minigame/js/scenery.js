@@ -162,56 +162,94 @@ module.exports = function (G) {
       }
     }
     if (type === "pool") {
-      // Peppy Cat 石板墙（对齐官方游玩背景：深棕灰不规则石块 + 深缝，衬托发光猎物）
-      // 密度控制：大块石板 + 窄缝 + 少裂纹，避免密集恐惧感
-      S.stones = [];
-      const cell = Math.max(150, Math.round(Math.min(W, H) / 2.6));  // 石块基准边长（更大更疏朗）
-      const cols = Math.ceil(W / cell) + 1, rows = Math.ceil(H / cell) + 1;
-      const jx = cell * 0.22;                                        // 格点抖动 → 石块不规则
-      // 共享抖动格点：相邻石块共用顶点，拼合无缝
-      const P = [];
-      for (let i = 0; i <= cols; i++) {
-        P[i] = [];
-        for (let j = 0; j <= rows; j++) {
-          const edgeX = (i === 0 || i === cols), edgeY = (j === 0 || j === rows);
-          P[i][j] = {
-            x: i * cell + (edgeX ? 0 : rand(-jx, jx)),
-            y: j * cell + (edgeY ? 0 : rand(-jx, jx))
-          };
+      /* 深夜枯草地（对照参考视频：俯拍干草 + 碎石 + 四周压暗，写实底纹衬托发光猎物）。
+         草秆/碎石只是"数据"，真正上色在离屏 canvas 里做一次并缓存（见 drawGrassField），
+         否则每帧几百条曲线会拖慢低端机。 */
+      S.grass = [];
+      S.pebbles = [];
+      S._grassSeed = Math.floor(rand(0, 1e9));
+      const nStraw = Math.round(W * H / 175);          // 参考截图里干草较稀，不是密草垫
+      const PAL = ["#8a7048", "#9c8055", "#755f3d", "#a89168", "#614c30", "#866c44"];
+      for (let i = 0; i < nStraw; i++) {
+        // 往画面中间堆成一堆（径向分布，边缘自然变稀，不会出现一条生硬的边界）
+        let x = rand(-8, W + 8), y = rand(-8, H + 8);
+        if (Math.random() < 0.76) {
+          const a = rand(0, Math.PI * 2);
+          const rr = Math.pow(Math.random(), 0.62) * Math.min(W * 0.42, H * 0.30);
+          x = W * 0.5 + Math.cos(a) * rr;
+          y = H * 0.46 + Math.sin(a) * rr * 1.25;
         }
-      }
-      const SWATCH = [
-        ["#4c423c", "#5a4f47"], ["#443b36", "#51463f"], ["#544941", "#63564c"],
-        ["#3e3631", "#4a413b"], ["#4f453e", "#5d5148"], ["#463d37", "#54483f"]
-      ];
-      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
-        const a = P[i][j], b = P[i + 1][j], c = P[i + 1][j + 1], d = P[i][j + 1];
-        const cx = (a.x + b.x + c.x + d.x) / 4, cy = (a.y + b.y + c.y + d.y) / 4;
-        const ins = rand(0.030, 0.055);                     // 向心内缩更小 → 缝隙更窄（弱化网状密孔感）
-        const pts = [a, b, c, d].map(p => ({ x: p.x + (cx - p.x) * ins, y: p.y + (cy - p.y) * ins }));
-        // 石块内部的碎石裂线（最多 1 条，弱化密集纹理）
-        const cracks = [];
-        if (Math.random() < 0.5) {
-          const k = Math.floor(rand(0, 4));
-          const e1 = pts[k], e2 = pts[(k + 2) % 4];
-          const mx = (e1.x + e2.x) / 2 + rand(-8, 8), my = (e1.y + e2.y) / 2 + rand(-8, 8);
-          cracks.push([e1.x + (cx - e1.x) * 0.25, e1.y + (cy - e1.y) * 0.25, mx, my]);
-        }
-        const sw = SWATCH[Math.floor(rand(0, SWATCH.length))];
-        S.stones.push({
-          pts, cracks, c: sw[0], c2: sw[1],
-          hi: "rgba(255,255,255," + rand(0.03, 0.075).toFixed(3) + ")"   // 受光边
+        S.grass.push({
+          x, y,
+          len: rand(7, 24), ang: -0.34 + rand(-0.5, 0.5),      // 整体顺一个风向，像被压平的枯草
+          bend: rand(-2.6, 2.6), w: rand(0.6, 1.5),
+          c: PAL[Math.floor(rand(0, PAL.length))],
+          a: rand(0.14, 0.42), hi: rand(0, 1) < 0.14
         });
       }
-      // 背景萤尘：石板墙上缓漂呼吸的微光点（稀疏大间距，避免成片密集）
+      // 碎草屑 / 草籽：极小的点，补足"草垫"的细颗粒感（视频里地面满是这种碎屑）
+      S.chaff = [];
+      const nChaff = Math.round(W * H / 1200);
+      for (let i = 0; i < nChaff; i++) {
+        S.chaff.push({ x: rand(0, W), y: rand(0, H), r: rand(0.8, 2.0), a: rand(0.18, 0.5) });
+      }
+      const nPeb = Math.round(G.clamp(Math.min(W, H) / 52, 8, 16));
+      for (let i = 0; i < nPeb; i++) {
+        S.pebbles.push({
+          x: rand(0.03, 0.97) * W, y: rand(0.05, 0.95) * H,
+          r: rand(3, 9), rot: rand(0, Math.PI),
+          c: rand(0, 1) < 0.5 ? "#5a4c3c" : "#6b5b47"
+        });
+      }
+      /* 参考视频有两套地面，中途整屏切换：
+         theme 0 = 暗紫褐地面 + 一堆干草（0–15.3s）
+         theme 1 = 暗紫褐地面 + 龟裂焦土多边形（15.3–24s） */
+      S.poolTheme = 0;
+      S.poolShift = null;
+      S._shiftDone = false;
+      // 龟裂土：抖动网格生成不规则多边形（只算一次，绘制在离屏 canvas 缓存）
+      S.cracks = [];
+      {
+        const cols = 7, rows = Math.max(8, Math.round(cols * H / W));
+        const cw = W / cols, ch = H / rows;
+        const jit = (v) => rand(0.12, 0.88) * v;
+        const pts = [];
+        for (let r = 0; r <= rows; r++) {
+          const row = [];
+          for (let c = 0; c <= cols; c++) {
+            row.push({
+              x: c * cw + (c === 0 || c === cols ? 0 : rand(-0.30, 0.30) * cw),
+              y: r * ch + (r === 0 || r === rows ? 0 : rand(-0.30, 0.30) * ch)
+            });
+          }
+          pts.push(row);
+        }
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            S.cracks.push({
+              poly: [pts[r][c], pts[r][c + 1], pts[r + 1][c + 1], pts[r + 1][c]],
+              tone: rand(0, 1), sub: rand(0, 1) < 0.35 ? jit(0.5) : 0
+            });
+          }
+        }
+      }
+      // 地面余烬：视频里两套地面都撒着几十颗小金点，各自独立明灭
+      S.embers = [];
+      for (let i = 0; i < 46; i++) {
+        S.embers.push({
+          x: rand(0, W), y: rand(0, H),
+          r: rand(0.8, 2.0), ph: rand(0, Math.PI * 2), sp: rand(2.5, 6.5)
+        });
+      }
+      // 缓慢上漂的暖色浮尘（环境层，亮度压得很低，不抢猎物）
       S.poolDust = [];
-      const nd = Math.round(Math.min(W, H) / 52);
+      const nd = Math.round(Math.min(W, H) / 34);
       for (let i = 0; i < nd; i++) {
         S.poolDust.push({
           x: rand(0, W), y: rand(0, H),
-          r: rand(1.5, 3.2), ph: rand(0, Math.PI * 2),
-          sp: rand(4, 10), amp: rand(6, 16),               // 上漂速度 / 左右摆幅
-          hue: rand(0, 1) < 0.72 ? "220,255,120" : "120,240,220"   // 黄绿为主、青色点缀
+          r: rand(1.2, 2.4), ph: rand(0, Math.PI * 2),
+          sp: rand(3, 8), amp: rand(5, 14),
+          hue: rand(0, 1) < 0.82 ? "255,196,120" : "150,235,225"
         });
       }
     }
@@ -226,15 +264,23 @@ module.exports = function (G) {
       rows.forEach((ry, ri) => {
         cols.forEach(cx => {
           const near = ri === 1;                       // 下排更近：略大、略暖
+          const bx = b.x + (cx + rand(-0.012, 0.012)) * b.w;
+          const by = b.y + (ry + rand(-0.022, 0.022)) * b.h;
           S.pads.push({
-            x: b.x + (cx + rand(-0.012, 0.012)) * b.w,
-            y: b.y + (ry + rand(-0.022, 0.022)) * b.h,
+            x: bx, y: by, bx, by,                      // x/y 为当前漂浮位置，bx/by 为漂浮中心
             r: R0 * (near ? rand(1.0, 1.07) : rand(0.92, 1.0)),
             rot: rand(-0.16, 0.16),
             notch: rand(0, Math.PI * 2),               // 叶缘缺口方向
             tone: near ? 1 : 0,                        // 0 暗绿（远） / 1 亮绿（近）
             ph: rand(0, Math.PI * 2),
-            hint: 0, swayT: 0, swayAmt: 0
+            hint: 0, swayT: 0, swayAmt: 0,
+            // 缓慢漂流：两个不同周期的正弦叠加（水面环流），振幅只有几像素
+            drift: {
+              ax: rand(0.16, 0.30), ay: rand(0.11, 0.22),
+              px: rand(0, Math.PI * 2), py: rand(0, Math.PI * 2),
+              ampX: rand(7, 16), ampY: rand(4, 9)
+            },
+            sink: 0, sinkState: "float", sinkT: 0    // 三只青蛙压沉荷叶：0 浮 / 1 全沉
           });
         });
       });
@@ -825,65 +871,211 @@ module.exports = function (G) {
   /* ============ 暗夜萤光（Peppy Cat 石板墙） ============
      对齐官方游玩背景：深棕灰不规则石块 + 深缝 + 微弱受光边，整体压暗，
      最大程度衬托发光猎物（黄绿 glow 在暗底上跳出来） */
-  function drawPool(ctx, t) {
-    const S = G.scene, W = S.W, H = S.H;
-    // 石缝底色（深棕黑）
-    ctx.fillStyle = "#1b1613"; ctx.fillRect(0, 0, W, H);
-    const stones = S.stones || [];
-    stones.forEach(s => {
-      const p = s.pts, n = p.length;
-      const path = (arr, rad) => {
-        ctx.beginPath();
-        ctx.moveTo((arr[0].x + arr[n - 1].x) / 2, (arr[0].y + arr[n - 1].y) / 2);
-        for (let i = 0; i < n; i++) {
-          const cur = arr[i], nxt = arr[(i + 1) % n];
-          ctx.arcTo(cur.x, cur.y, (cur.x + nxt.x) / 2, (cur.y + nxt.y) / 2, rad);
-        }
-        ctx.closePath();
-      };
-      // 石块主体（圆角多边形，圆角取石块尺度的 12%）
-      const w0 = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
-      path(p, Math.max(8, w0 * 0.10));
-      ctx.fillStyle = s.c; ctx.fill();
-      // 受光面：向心内缩的亮一档多边形，偏左上 2px（模拟石面明暗）
-      const cx = p.reduce((a, q) => a + q.x, 0) / n, cy = p.reduce((a, q) => a + q.y, 0) / n;
-      const inner = p.map(q => ({ x: q.x + (cx - q.x) * 0.17 - 2, y: q.y + (cy - q.y) * 0.17 - 2 }));
-      path(inner, Math.max(6, w0 * 0.08));
-      ctx.fillStyle = s.c2; ctx.fill();
-      // 边缘受光细线
-      path(p, Math.max(8, w0 * 0.10));
-      ctx.strokeStyle = s.hi; ctx.lineWidth = 1.6; ctx.stroke();
-      // 碎石裂线（低对比，弱化密集纹理）
-      if (s.cracks && s.cracks.length) {
-        ctx.strokeStyle = "rgba(0,0,0,.18)"; ctx.lineWidth = 1.1;
-        s.cracks.forEach(k => { ctx.beginPath(); ctx.moveTo(k[0], k[1]); ctx.lineTo(k[2], k[3]); ctx.stroke(); });
+  /* ---------- 深夜枯草地：离屏缓存 ----------
+     几百根草秆每帧重画会拖慢低端机，所以只画一次到离屏 canvas，之后每帧 drawImage。
+     缓存 key 里带尺寸和 seed：换机/转屏/重建场景都会自动重画。 */
+  /* 两套地面各缓存一张离屏 canvas（key 带 W/H/seed/theme） */
+  const groundCache = {};
+  function paintGrass(c2, W, H, S) {
+    // 底：暖褐到近黑的纵向渐变（夜里的土地，不是纯黑，保留一点土色）
+    let g = c2.createLinearGradient(0, 0, W * 0.35, H);
+    g.addColorStop(0, "#2c2022"); g.addColorStop(0.5, "#241a1c"); g.addColorStop(1, "#1a1316");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+    // 大块土色斑驳：让地面有起伏，不是一块平色
+    for (let i = 0; i < 30; i++) {
+      const x = Math.random() * W, y = Math.random() * H, r = (0.12 + Math.random() * 0.3) * Math.max(W, H);
+      const rg = c2.createRadialGradient(x, y, 0, x, y, r);
+      const dark = Math.random() < 0.5;
+      rg.addColorStop(0, dark ? "rgba(22,15,8,.34)" : "rgba(126,100,64,.18)");
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      c2.fillStyle = rg;
+      c2.beginPath(); c2.arc(x, y, r, 0, Math.PI * 2); c2.fill();
+    }
+    // 草堆受光：中间一块暖光，草才有"被照亮"的层次
+    {
+      const rg = c2.createRadialGradient(W * 0.5, H * 0.46, 0, W * 0.5, H * 0.46, Math.max(W, H) * 0.55);
+      rg.addColorStop(0, "rgba(150,110,70,.12)");
+      rg.addColorStop(0.6, "rgba(120,88,54,.06)");
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      c2.fillStyle = rg; c2.fillRect(0, 0, W, H);
+    }
+    // 碎石
+    (S.pebbles || []).forEach(p => {
+      c2.save();
+      c2.translate(p.x, p.y); c2.rotate(p.rot);
+      c2.fillStyle = "rgba(0,0,0,.42)";
+      c2.beginPath(); c2.ellipse(1.5, 2.5, p.r, p.r * 0.72, 0, 0, Math.PI * 2); c2.fill();   // 影子
+      c2.fillStyle = p.c;
+      c2.beginPath(); c2.ellipse(0, 0, p.r, p.r * 0.7, 0, 0, Math.PI * 2); c2.fill();
+      c2.fillStyle = "rgba(255,240,210,.16)";
+      c2.beginPath(); c2.ellipse(-p.r * 0.25, -p.r * 0.25, p.r * 0.45, p.r * 0.3, 0, 0, Math.PI * 2); c2.fill();
+      c2.restore();
+    });
+    // 碎屑 / 草籽
+    (S.chaff || []).forEach(c => {
+      c2.fillStyle = "rgba(190,166,120," + c.a.toFixed(2) + ")";
+      c2.beginPath(); c2.arc(c.x, c.y, c.r, 0, Math.PI * 2); c2.fill();
+    });
+    // 干草秆：先铺一层暗影，再叠亮面，才有"铺在地上的厚度"
+    c2.lineCap = "round";
+    (S.grass || []).forEach(st => {
+      const dx = Math.cos(st.ang) * st.len, dy = Math.sin(st.ang) * st.len;
+      const mx = st.x + dx * 0.5 + Math.cos(st.ang + Math.PI / 2) * st.bend;
+      const my = st.y + dy * 0.5 + Math.sin(st.ang + Math.PI / 2) * st.bend;
+      c2.strokeStyle = "rgba(0,0,0,.20)";
+      c2.lineWidth = st.w + 1.2;
+      c2.beginPath(); c2.moveTo(st.x + 1.2, st.y + 1.6);
+      c2.quadraticCurveTo(mx + 1.2, my + 1.6, st.x + dx + 1.2, st.y + dy + 1.6); c2.stroke();
+      // 柔边：先画一道更宽更淡的（模拟失焦的边缘），再画实体
+      c2.globalAlpha = st.a * 0.34;
+      c2.strokeStyle = st.c;
+      c2.lineWidth = st.w + 2.0;
+      c2.beginPath(); c2.moveTo(st.x, st.y);
+      c2.quadraticCurveTo(mx, my, st.x + dx, st.y + dy); c2.stroke();
+      c2.globalAlpha = st.a;
+      c2.strokeStyle = st.hi ? "#c8a878" : st.c;
+      c2.lineWidth = st.w;
+      c2.beginPath(); c2.moveTo(st.x, st.y);
+      c2.quadraticCurveTo(mx, my, st.x + dx, st.y + dy); c2.stroke();
+      c2.globalAlpha = 1;
+    });
+  }
+  /* ---------- 主题 1：深蓝龟裂地面（按截图 3 复原） ----------
+     截图里是深蓝底 + 亮蓝细裂纹组成的多边形板块，不是暗红焦土。 */
+  function paintCracks(c2, W, H, S) {
+    let g = c2.createLinearGradient(0, 0, W * 0.35, H);
+    g.addColorStop(0, "#16224c"); g.addColorStop(0.52, "#101a3d"); g.addColorStop(1, "#0a1230");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+    // 底层斑驳
+    for (let i = 0; i < 28; i++) {
+      const x = Math.random() * W, y = Math.random() * H, r = (0.12 + Math.random() * 0.3) * Math.max(W, H);
+      const rg = c2.createRadialGradient(x, y, 0, x, y, r);
+      rg.addColorStop(0, Math.random() < 0.5 ? "rgba(6,10,30,.40)" : "rgba(78,110,210,.15)");
+      rg.addColorStop(1, "rgba(0,0,0,0)");
+      c2.fillStyle = rg;
+      c2.beginPath(); c2.arc(x, y, r, 0, Math.PI * 2); c2.fill();
+    }
+    // 裂纹只集中在中间一块（视频里中间是亮的裂土，四周是暗紫地面）
+    const cx = W * 0.5, cy = H * 0.47;
+    const rr = Math.min(W * 0.46, H * 0.34);
+    (S.cracks || []).forEach(cell => {
+      let mx = 0, my = 0;
+      cell.poly.forEach(q => { mx += q.x; my += q.y; });
+      mx /= 4; my /= 4;
+      const d = Math.hypot((mx - cx) / rr, (my - cy) / (rr * 1.15));
+      if (d > 1.12) return;
+      const k = Math.max(0, 1 - d);
+      // 板块填色：亮一点的赭红
+      c2.fillStyle = cell.tone > 0.5
+        ? "rgba(48,86,168," + (0.20 * k).toFixed(3) + ")"
+        : "rgba(26,44,104," + (0.24 * k).toFixed(3) + ")";
+      c2.beginPath();
+      cell.poly.forEach((q, i) => i ? c2.lineTo(q.x, q.y) : c2.moveTo(q.x, q.y));
+      c2.closePath(); c2.fill();
+      // 裂纹边缘：暗影 + 亮线（视频里裂纹是发白的细线）
+      c2.strokeStyle = "rgba(4,8,26," + (0.46 * k).toFixed(3) + ")";
+      c2.lineWidth = 3.2; c2.stroke();
+      c2.strokeStyle = "rgba(122,178,255," + (0.58 * k).toFixed(3) + ")";
+      c2.lineWidth = 1.2; c2.stroke();
+      // 少量次级细裂
+      if (cell.sub > 0.25) {
+        const a = cell.poly[0], b = cell.poly[2];
+        c2.strokeStyle = "rgba(110,160,235," + (0.20 * k).toFixed(3) + ")";
+        c2.lineWidth = 0.9;
+        c2.beginPath(); c2.moveTo(a.x, a.y); c2.lineTo((a.x + b.x) / 2 + 8, (a.y + b.y) / 2); c2.lineTo(b.x, b.y); c2.stroke();
       }
     });
-    // 背景萤尘：缓慢上漂 + 左右正弦摆 + 呼吸发光（环境动效，衬托猎物但不抢戏）
+    // 裂纹区的暖光
+    const glow = c2.createRadialGradient(cx, cy, 0, cx, cy, rr * 1.3);
+    glow.addColorStop(0, "rgba(90,134,240,.18)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    c2.fillStyle = glow; c2.fillRect(0, 0, W, H);
+  }
+
+  function drawGroundLayer(ctx, theme) {
+    const S = G.scene, W = S.W, H = S.H;
+    const dpr = Math.min(G.platform.dpr || 2, 2);
+    const key = W + "x" + H + ":" + (S._grassSeed || 0) + ":" + theme;
+    let cache = groundCache[theme];
+    if (!cache || cache.key !== key) {
+      const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
+      const cv = (cache && cache.cv) || mk();
+      const c2 = cv.getContext("2d");
+      if (!c2) return;
+      cv.width = Math.ceil(W * dpr); cv.height = Math.ceil(H * dpr);
+      c2.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c2.clearRect(0, 0, W, H);
+      if (theme === 1) paintCracks(c2, W, H, S); else paintGrass(c2, W, H, S);
+      cache = groundCache[theme] = { cv, ctx: c2, key };
+    }
+    ctx.drawImage(cache.cv, 0, 0, W, H);
+  }
+
+  function drawPool(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+
+    /* ---------- 换关：视频 15.3s 那次是"全屏金色火花 → 整屏换成龟裂焦土" ---------- */
+    let shiftK = 1;
+    if (S.poolShift) {
+      const elapsed = performance.now() - S.poolShift.t0;
+      shiftK = Math.max(0, Math.min(1, elapsed / S.poolShift.dur));
+      drawGroundLayer(ctx, S.poolShift.from);
+      if (shiftK > 0) {
+        ctx.save();
+        ctx.globalAlpha = shiftK;
+        drawGroundLayer(ctx, S.poolShift.to);
+        ctx.restore();
+      }
+      // 火花爆开的一瞬间整屏蒙一层暖光，然后 0.5s 内退掉
+      if (shiftK < 0.5) {
+        ctx.fillStyle = "rgba(255,178,86," + ((0.5 - shiftK) * 0.30).toFixed(3) + ")";
+        ctx.fillRect(0, 0, W, H);
+      }
+      if (shiftK >= 1) {
+        S.poolTheme = S.poolShift.to;
+        S.poolShift = null;
+      }
+    } else {
+      drawGroundLayer(ctx, S.poolTheme || 0);
+    }
+
+    /* ---------- 地面余烬：视频里两套地面都撒着几十颗独立明灭的小金点 ---------- */
+    (S.embers || []).forEach(e => {
+      const tw = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * e.sp + e.ph));
+      if (tw < 0.3) return;
+      ctx.globalAlpha = tw * 0.9;
+      ctx.fillStyle = "#ffd27a";
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2); ctx.fill();
+      if (tw > 0.8) {
+        ctx.globalAlpha = (tw - 0.8) * 1.1;
+        ctx.fillStyle = "#ffb44a";
+        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 2.6, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    ctx.globalAlpha = 1;
+
+    /* ---------- 上漂浮尘（暖色为主、青色点缀） ---------- */
     (S.poolDust || []).forEach(d => {
       let y = (d.y - t * d.sp) % (H + 40);
       if (y < 0) y += H + 40;
       const x = d.x + Math.sin(t * 0.5 + d.ph) * d.amp;
-      const a = 0.20 + 0.16 * Math.sin(t * 1.6 + d.ph);
+      const a = 0.14 + 0.13 * Math.sin(t * 1.5 + d.ph);
       if (a <= 0.02) return;
-      const rg = ctx.createRadialGradient(x, y, 0, x, y, d.r * 4.2);
-      rg.addColorStop(0, "rgba(" + d.hue + "," + (a * 0.85).toFixed(2) + ")");
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, d.r * 4.5);
+      rg.addColorStop(0, "rgba(" + d.hue + "," + (a * 0.9).toFixed(3) + ")");
       rg.addColorStop(1, "rgba(" + d.hue + ",0)");
       ctx.fillStyle = rg;
-      ctx.beginPath(); ctx.arc(x, y, d.r * 4.2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(" + d.hue + "," + a.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(x, y, d.r * 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(" + d.hue + "," + a.toFixed(3) + ")";
       ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
     });
-    // 全局暗角：四周压暗，中心留亮（让猎物所在的中部更醒目）
-    const vg = ctx.createRadialGradient(W * 0.5, H * 0.48, Math.min(W, H) * 0.18, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+
+    // 暗角：四周压到近黑，中间留一点亮
+    const vg = ctx.createRadialGradient(W * 0.5, H * 0.46, Math.min(W, H) * 0.16, W * 0.5, H * 0.5, Math.max(W, H) * 0.74);
     vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.46)");
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
-  /* ============ 夏夜荷塘（青蛙跳） ============
-     深墨绿水面上漂着 6 片荷叶，青蛙在叶间跳跃。
-     落点预兆由猎物把时间戳写进 pad.hint，这里只按「最近 420ms 内被点亮」渲染光圈，
-     场景与猎物逻辑完全解耦（重开/换阶段不需要清理状态）。 */
   function drawPond(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
     const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -957,14 +1149,107 @@ module.exports = function (G) {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
+  /* ===== 青蛙跳：荷叶的漂浮 / 沉浮 / 载蛙 =====
+     每帧由主循环调用（不限玩法状态，结算页背景里的荷叶也继续漂）。 */
+  G.padsUpdate = (dt, t) => {
+    const S = G.scene;
+    if (!S || S.type !== "frog" || !S.pads) return;
+    S.pads.forEach(p => {
+      // 1) 缓慢漂流：两条不同周期的正弦叠加，像被水面环流缓缓推着走
+      const d = p.drift || (p.drift = { ax: 0.22, ay: 0.16, px: 0, py: 0, ampX: 10, ampY: 6 });
+      p.x = p.bx + Math.sin(t * d.ax + d.px) * d.ampX + Math.sin(t * 0.11 + d.px * 1.7) * d.ampX * 0.32;
+      p.y = p.by + Math.sin(t * d.ay + d.py) * d.ampY;
+      // 2) 沉浮状态机：被三只青蛙压沉 → 没入水里 1.5s → 缓缓浮起
+      if (p.sinkState === "sinking") {
+        p.sinkT += dt;
+        p.sink = Math.min(1, p.sinkT / 0.55);
+        if (p.sink >= 1) { p.sinkState = "sunk"; p.sinkT = 0; }
+      } else if (p.sinkState === "sunk") {
+        p.sinkT += dt;
+        if (p.sinkT >= 1.5) { p.sinkState = "rising"; p.sinkT = 0; }
+      } else if (p.sinkState === "rising") {
+        p.sinkT += dt;
+        const k = Math.min(1, p.sinkT / 0.95);
+        p.sink = Math.pow(1 - k, 3);                  // 缓出：先快后慢地浮回水面
+        if (k >= 1) {
+          p.sink = 0; p.sinkState = "float"; p.sinkT = 0;
+          G.padSplash(p.x, p.y, p.r * 0.92, false);   // 浮回水面时漾开一圈
+        }
+      }
+    });
+  };
+
+  /* 池塘水花：沿荷叶边缘溅起一圈水珠 + 贴水面的扁椭圆波纹（俯视透视，正圆会像肥皂泡） */
+  G.padSplash = (x, y, r, strong) => {
+    const R = Math.max(10, r || 24);
+    const n = strong ? 20 : 11;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2);
+      const rr = R * rand(0.86, 1.16);
+      PUSH(fx.droplets, {
+        x: x + Math.cos(a) * rr, y: y + Math.sin(a) * rr * 0.44,
+        vx: Math.cos(a) * rand(60, 190), vy: Math.sin(a) * rand(20, 80) - rand(90, strong ? 230 : 170),
+        r: rand(1.8, strong ? 4.4 : 3.4), life: rand(0.4, 0.82),
+        c0: "#ffffff", c1: "#dcffef", c2: "rgba(130,220,205,.35)"
+      }, 90);
+    }
+    // 贴水面的扁圆波纹：从叶缘向外扩散两圈
+    PUSH(fx.shockwaves, { x, y, r: R * 0.94, life: 0.75, speed: strong ? 170 : 120, w: strong ? 2.4 : 1.8, color: "rgba(206,255,236,.8)", flat: true }, 12);
+    PUSH(fx.shockwaves, { x, y, r: R * 0.58, life: 0.95, speed: strong ? 90 : 62, w: 1.4, color: "rgba(170,240,222,.55)", flat: true }, 12);
+    if (strong) {
+      PUSH(fx.ripples, { x, y, r: R * 0.9, life: 1, color: "rgba(206,255,236,.85)", big: true, flat: true }, 30);
+    }
+  };
+
+  /* 荷叶座位：三只青蛙同叶时错开摆放，避免完全重叠（0 叶心 / 1 左 / 2 右） */
+  G.padSlotPos = (p, slot) => {
+    const r = p ? p.r : 48;
+    if (slot === 1) return { dx: -r * 0.42, dy: r * 0.10 };
+    if (slot === 2) return { dx: r * 0.42, dy: -r * 0.04 };
+    return { dx: 0, dy: -r * 0.05 };
+  };
+  /* 叶上已落定的青蛙（占着座位） */
+  G.padOccupants = (idx) => (G.preys || []).filter(f =>
+    f.type === "frog" && f.padIdx === idx && f.slot >= 0 &&
+    f.fState !== "drown" && !(f.vanishT > 0) && !(f.rspT > 0));
+  /* 找空座位；includeLeaping=true 时把"正跳向这片叶"的青蛙也视为占位，避免两只同时落同一点 */
+  G.padFreeSlot = (idx, self, includeLeaping) => {
+    const used = [0, 0, 0];
+    (G.preys || []).forEach(f => {
+      if (f === self || f.type !== "frog") return;
+      if (f.fState === "drown" || f.vanishT > 0 || f.rspT > 0) return;
+      if (f.padIdx === idx && f.slot >= 0) used[f.slot] = 1;
+      if (includeLeaping && f.fState === "leap" && f.targetPadIdx === idx && f.targetSlot >= 0) used[f.targetSlot] = 1;
+    });
+    for (let s = 0; s < 3; s++) if (!used[s]) return s;
+    return -1;
+  };
+  /* 三只同叶 → 荷叶被压沉，叶上的青蛙一起落水 */
+  G.padSink = (idx) => {
+    const S = G.scene;
+    const p = S && S.pads && S.pads[idx];
+    if (!p || p.sinkState !== "float") return;
+    p.sinkState = "sinking"; p.sinkT = 0;
+    G.padSplash(p.x, p.y, p.r * 1.08, true);
+    (G.preys || []).forEach(f => {
+      if (f.type === "frog" && f.padIdx === idx && f.slot >= 0 && f.startDrown) f.startDrown(p);
+    });
+  };
+
   /* 单片荷叶：水下投影 + 叶面双色 + 叶缘缺口 + 叶脉 + 落点预兆光圈 */
   function drawPad(ctx, p, t) {
     const sway = p.swayAmt > 0 ? Math.sin(t * 11) * p.swayAmt : 0;
     if (p.swayAmt > 0) p.swayAmt = Math.max(0, p.swayAmt - 0.09);   // 被拍后约 0.7s 停止晃动
     const y = p.y + sway + Math.sin(t * 0.9 + p.ph) * 1.5;
+    const sinkK = p.sink || 0;
+    if (sinkK >= 0.995) return;                       // 完全没入水下：这一帧不画叶片
     const rx = p.r, ry = p.r * 0.42;
     ctx.save();
-    ctx.translate(p.x, y);
+    // 下沉：叶片整体往下移、缩小、变暗（水越深越看不清），浮回时反向
+    ctx.globalAlpha = 1 - sinkK * 0.88;
+    ctx.translate(p.x, y + sinkK * p.r * 1.05);
+    const padSc = 1 - sinkK * 0.16;
+    ctx.scale(padSc, padSc);
     // 水下投影（荷叶浮在水面，边缘一圈暗）
     ctx.fillStyle = "rgba(3,22,26,.42)";
     ctx.beginPath(); ctx.ellipse(3, ry * 0.62, rx * 1.04, ry * 1.06, 0, 0, Math.PI * 2); ctx.fill();
@@ -1023,7 +1308,7 @@ module.exports = function (G) {
   const fx = {
     bubbles: [], dust: [], pollen: [], scales: [], sparks: [], ripples: [],
     trails: [], scorches: [], petals: [], paws: [], floats: [], ambientT: 0,
-    droplets: [], shockwaves: [], flash: 0, confetti: []
+    droplets: [], shockwaves: [], flash: 0, confetti: [], shower: []
   };
   G.fx = fx;
   const PUSH = (arr, o, cap) => { arr.push(o); if (arr.length > cap) arr.splice(0, arr.length - cap); };
@@ -1032,6 +1317,102 @@ module.exports = function (G) {
   G.dustBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.dust, { x, y, vx: rand(-55, 55), vy: rand(-60, -8), r: rand(3, 7), life: rand(0.4, 0.8) }, 60); };
   G.pollenBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.pollen, { x: x + rand(-12, 12), y: y + rand(-12, 12), vx: rand(-24, 24), vy: rand(-34, -6), r: rand(1.5, 3.4), life: rand(0.7, 1.4) }, 80); };
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
+  /* 萤火尾迹：一颗暖色余烬，偶尔换一颗青色火星（对应参考视频里那串拖尾与冷色点缀） */
+  /* 三张截图里，猎物身后拖的都是一串**金色五角星**（不是圆形火星） */
+  G.emberTrail = (x, y) => {
+    PUSH(fx.droplets, {
+      x: x + rand(-4, 4), y: y + rand(-4, 4),
+      vx: rand(-10, 10), vy: rand(-18, -4),
+      r: rand(2.2, 4.2), life: rand(0.6, 1.15),
+      star: true, rot: rand(0, 6.28),
+      c0: "#FFF6C8", c1: "#FFD75A", c2: "rgba(255,170,40,0)"
+    }, 90);
+  };
+  /* 命中光爆：暖橙碎光 + 冷色（青白）小点，冷色是整个画面里唯一的冷调，最跳 */
+  /* 萤火虫被拍中：视频里它是一下散成几颗小圆点（白/金），没有夸张的环，也没有水花。
+     所以这里刻意"轻"：一把小碎光 + 两三点冷色 + 一圈很细的暖环，短促干净。 */
+  /* 命中碎光的配色随猎物种类走（视频里炸开的都是该虫自己的颜色） */
+  /* 三种发光玩具动物的爆散配色（主色取自动物本体，冷色取自它们身上那几点蓝） */
+  const FF_POP_COLORS = {
+    dog:     { main: ["#fff3cf", "#ffab3a"], cyan: "#8ff0e6", ring: "rgba(255,196,120,.78)" },
+    mouse:   { main: ["#fdf7c0", "#ffd23e"], cyan: "#7fd8ff", ring: "rgba(255,236,150,.75)" },
+    ladybug: { main: ["#ffe6c0", "#ff9100"], cyan: "#9ef0e0", ring: "rgba(255,180,110,.78)" }
+  };
+  G.lightPop = (x, y, big, species) => {
+    const C = FF_POP_COLORS[species] || FF_POP_COLORS.dog;
+    const n = big ? 18 : 13;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(90, big ? 300 : 240);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(10, 70),
+        r: rand(2.0, big ? 4.2 : 3.6), life: rand(0.3, 0.58),
+        c0: C.main[0], c1: C.main[1], c2: "rgba(255,140,30,0)"
+      }, 90);
+    }
+    // 冷色：虫体上那些发光点的颜色，散出去最"跳"
+    for (let i = 0; i < (big ? 7 : 4); i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(70, 220);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(0, 40),
+        r: rand(1.5, 2.6), life: rand(0.34, 0.6),
+        c0: "#f4fffe", c1: C.cyan, c2: "rgba(120,240,230,0)"
+      }, 90);
+    }
+    // 几颗金色小星星（三张截图里散落的都是星星）
+    for (let i = 0; i < (big ? 5 : 3); i++) {
+      const a = rand(0, Math.PI * 2), sp = rand(60, 180);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(10, 60),
+        r: rand(2.2, 4.0), life: rand(0.4, 0.8),
+        star: true, rot: rand(0, 6.28),
+        c0: "#fff6c8", c1: "#ffd75a", c2: "rgba(255,170,40,0)"
+      }, 90);
+    }
+    // 一圈很细的暖环（视频里几乎看不出环，但完全不给会显得"没打到"）
+    PUSH(fx.shockwaves, { x, y, r: 6, life: 0.34, speed: big ? 300 : 240, w: 1.8, color: C.ring, flat: true }, 12);
+    fx.flash = Math.max(fx.flash, big ? 0.10 : 0.06);
+  };
+  /* ---------- 换关特效：视频 15.0s 那一下是"满屏金色火花爆散" ---------- */
+  G.goldShower = () => {
+    const W = G.platform.W / (G.platform.S || 1), H = G.platform.H / (G.platform.S || 1);
+    for (let i = 0; i < 110; i++) {
+      PUSH(fx.shower, {
+        x: rand(0, W), y: rand(0, H),
+        vx: rand(-16, 16), vy: rand(-34, -4),
+        r: rand(1.0, 3.4), life: rand(0.55, 1.55),
+        tw: rand(7, 16), ph: rand(0, Math.PI * 2),
+        c: Math.random() < 0.22 ? "#fff4d2" : (Math.random() < 0.5 ? "#ffc45c" : "#ff9a32")
+      }, 220);
+    }
+    fx.flash = Math.max(fx.flash, 0.12);
+  };
+  /* 换关：火花 + 1.1s 整屏交叉淡入到另一套地面 */
+  G.poolShiftTheme = () => {
+    const S = G.scene;
+    if (!S || S.type !== "pool" || S.poolShift || S._shiftDone) return false;
+    S._shiftDone = true;
+    S.poolShift = {
+      t0: performance.now(), dur: 1100,
+      from: S.poolTheme || 0, to: (S.poolTheme || 0) === 0 ? 1 : 0
+    };
+    G.goldShower();
+    /* 视频里火花不是均匀撒的：拍击点还有一团集中的亮橙爆闪 */
+    const W = G.platform.W / (G.platform.S || 1), H = G.platform.H / (G.platform.S || 1);
+    const cx = W * 0.5, cy = H * 0.20;
+    if (G.lightPop) G.lightPop(cx, cy, true, "dog");
+    for (let i = 0; i < 16; i++) {
+      const a = rand(0, Math.PI * 2), r = rand(4, 34);
+      PUSH(fx.droplets, {
+        x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.6,
+        vx: Math.cos(a) * rand(60, 240), vy: Math.sin(a) * rand(50, 190),
+        r: rand(2.4, 5.6), life: rand(0.35, 0.85),
+        c0: "#fff8dc", c1: "#ff9a32", c2: "rgba(255,110,20,0)"
+      }, 90);
+    }
+    if (G.playFireflyShift) G.playFireflyShift();
+    return true;
+  };
+
   G.sparkBurst = (x, y, color, n) => { for (let i = 0; i < (n || 8); i++) { const a = rand(0, Math.PI * 2), sp = rand(90, 260); PUSH(fx.sparks, { x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rand(0.3, 0.55), c: color }, 90); } fx.sparkColor = color; };
   /* 彩纸屑爆炸（鱼群巡游命中特效）：多彩小纸条四溅 + 金色扩散环（参考图的彩虹 confetti + 金圈） */
   G.confettiBurst = (x, y) => {
@@ -1152,12 +1533,16 @@ module.exports = function (G) {
   };
 
   G.ripple = (x, y, miss) => {
-    if (G.scene.type !== "fish" && G.scene.type !== "pool") return;
+    const typ = G.scene.type;
+    if (typ !== "fish" && typ !== "pool" && typ !== "frog") return;
     const th = G.seaThemeNow();
-    const col = G.scene.type === "pool"
+    const col = typ === "pool"
       ? (miss ? null : "rgba(226,255,150,.9)")
-      : (miss ? null : (th && th.ripple));
-    PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss, color: col }, 30);
+      : typ === "frog"
+        ? (miss ? null : "rgba(190,250,232,.85)")
+        : (miss ? null : (th && th.ripple));
+    // 荷塘是俯视水面：波纹压成扁椭圆更贴合透视
+    PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss, color: col, flat: typ === "frog" }, 30);
   };
   G.laserTrail = (x, y, key) => PUSH(fx.trails, { x, y, life: 0.4, key: key || "red" }, 30);
   G.laserFlash = (x, y, key) => PUSH(fx.scorches, { x, y, life: 0.32, flash: true, key: key || "red" }, 20);
@@ -1210,6 +1595,11 @@ module.exports = function (G) {
       p.x += p.vx * d + Math.sin(t * 2 + p.y) * 0.4; p.y += p.vy * d;
       if (p.ambient && (p.y < -10 || p.y > G.platform.H + 10)) return false;
     });
+    /* 换关火花：几乎原地明灭，只轻微飘动 */
+    step(fx.shower, (p, d) => {
+      p.x += p.vx * d; p.y += p.vy * d;
+      p.vy *= 0.985;
+    });
     step(fx.scales, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vx *= 0.96; });
     step(fx.sparks, (p, d) => { p.x += p.vx * d; p.y += p.vy * d; p.vx *= 0.9; p.vy = p.vy * 0.9 + 300 * d; });
     step(fx.ripples, (p, d) => { p.r += (p.big ? 160 : 90) * d; });
@@ -1239,6 +1629,7 @@ module.exports = function (G) {
   };
 
   fx.draw = (ctx) => {
+    const nowT = performance.now() / 1000;            // 渲染层没有 t 参数，自己取时间做闪烁相位
     fx.bubbles.forEach(p => {
       ctx.globalAlpha = Math.min(p.life, 0.8);
       ctx.strokeStyle = "rgba(255,255,255,.28)"; ctx.lineWidth = 1;
@@ -1252,6 +1643,22 @@ module.exports = function (G) {
       ctx.fillStyle = p.snow ? "#ffffff" : "#c9b28c";
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (p.snow ? 1 : (1.4 - p.life * 0.5)), 0, Math.PI * 2); ctx.fill();
     });
+    /* 换关火花：满屏小金点，各自按自己的相位闪，最后随 life 淡出 */
+    fx.shower.forEach(p => {
+      const tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(nowT * p.tw + p.ph));
+      ctx.globalAlpha = Math.min(1, p.life * 1.4) * tw;
+      ctx.fillStyle = p.c;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (0.75 + 0.35 * tw), 0, Math.PI * 2); ctx.fill();
+      if (p.r > 2.0 && tw > 0.70) {
+        const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 3.4);
+        gr.addColorStop(0, "rgba(255,208,120,.34)");
+        gr.addColorStop(0.4, "rgba(255,170,70,.14)");
+        gr.addColorStop(1, "rgba(255,140,40,0)");
+        ctx.fillStyle = gr;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3.4, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    ctx.globalAlpha = 1;
     fx.pollen.forEach(p => {
       ctx.globalAlpha = Math.min(p.life, 0.9);
       ctx.fillStyle = p.glow || "#ffe27a";
@@ -1277,18 +1684,35 @@ module.exports = function (G) {
       ctx.globalAlpha = Math.max(p.life * (p.miss ? 0.3 : 0.85), 0);
       const col = p.miss ? "rgba(255,255,255,.3)" : (p.color || "rgba(255,255,255,.85)");
       ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      // flat=贴水面的水波：俯视透视下压成扁椭圆（池塘/泳池用）
+      if (p.flat) ctx.ellipse(p.x, p.y, p.r, p.r * 0.42, 0, 0, Math.PI * 2);
+      else ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.stroke();
     });
     /* 光爆碎点：发光小球（黄绿=暗夜萤光默认，泳池金橙水花走逐粒自带色） */
     fx.droplets.forEach(p => {
       const a = Math.min(p.life * 1.5, 0.95);
       ctx.globalAlpha = a;
-      const rg = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 0, p.x, p.y, p.r);
-      rg.addColorStop(0, p.c0 || "#ffffff");
-      rg.addColorStop(0.5, p.c1 || "#f2ff9c");
-      rg.addColorStop(1, p.c2 || "rgba(150,240,130,.5)");
-      ctx.fillStyle = rg;
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      if (p.star) {
+        // 五角星：截图里的金色小星星
+        ctx.fillStyle = p.c1 || "#ffd75a";
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const ang = (p.rot || 0) + i * Math.PI / 5 - Math.PI / 2;
+          const rr = (i % 2 ? 0.44 : 1) * p.r;
+          const px = p.x + Math.cos(ang) * rr, py = p.y + Math.sin(ang) * rr;
+          if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+        }
+        ctx.closePath(); ctx.fill();
+      } else {
+        const rg = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 0, p.x, p.y, p.r);
+        rg.addColorStop(0, p.c0 || "#ffffff");
+        rg.addColorStop(0.5, p.c1 || "#f2ff9c");
+        rg.addColorStop(1, p.c2 || "rgba(150,240,130,.5)");
+        ctx.fillStyle = rg;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
+      }
     });
     /* 冲击环：glow=true 时光斑实心扩散，否则空心环 */
     fx.shockwaves.forEach(p => {

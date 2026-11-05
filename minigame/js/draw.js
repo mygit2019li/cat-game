@@ -654,7 +654,10 @@ module.exports = function (G) {
         try {
           const img = (typeof wx !== "undefined" && wx.createImage) ? wx.createImage() : new Image();
           img.onload = () => { slot[key === "n" ? "nOk" : "dOk"] = true; };
-          img.src = url;
+          // 浏览器垫片页面在 test/ 下：拼一层 ../ 才能找到 assets（真机不受影响）
+          const sub = (typeof location !== "undefined" && location.protocol === "file:" &&
+                       /\/test\/[^/]*$/.test(decodeURIComponent(location.pathname))) ? "../" : "";
+          img.src = sub + url;
           slot[key] = img;
         } catch (e) {}
       });
@@ -766,140 +769,411 @@ module.exports = function (G) {
     }
   };
 
-  /* ---------- 暗夜萤光：发光小虫（俯视爬行：六足步态 + 鞘翅背线 + 萤火尾灯，头朝爬行方向） ---------- */
+  /* ---------- 暗夜萤光：三种发光玩具动物（小狗 / 老鼠 / 瓢虫） ----------
+     造型与配色取自参考截图（Peppy Cat 底部选择栏的三个玩具图标 + Paw Action 实机图），
+     逐点取样得到的色值：
+       主体荧光渐变 #FDF000 → #FFD200 → #FF9800（黄到橙，暗底上最亮的一层）
+       暖细节 #FF9100 / #E06A00（狗口鼻、耳内、瓢虫斑点与鞘缝）
+       冷细节 #0081FF / #00CAC8（老鼠鼻头与四只脚掌、拖在地上的逗猫杆线）
+     三者共用同一套驱动量：p.pulseK 呼吸、p.elytraK「闪一下」（0.28 常态 → 0.95 峰值）、
+     p.stepK 步态相位、p.moveK 移动强度——站着不动时耳朵/脚/线也跟着停，不像上发条。 */
+
+  /* 五角星（三张截图里的小星星都是实心五角星，不是圆点） */
+  function ffStar(c2, x, y, r, rot) {
+    c2.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = (rot || 0) + i * Math.PI / 5 - Math.PI / 2;
+      const rr = i % 2 ? r * 0.44 : r;
+      const px = x + Math.cos(a) * rr, py = y + Math.sin(a) * rr;
+      if (i) c2.lineTo(px, py); else c2.moveTo(px, py);
+    }
+    c2.closePath();
+  }
+  /* 每种虫周围自带 2–4 颗小星星，跟着呼吸明灭（截图里的静态星点） */
+  function ffBeads(c2, R, t, ph, tint) {
+    for (let i = 0; i < 4; i++) {
+      const a = t * 0.7 + i * 1.9 + ph;
+      const rr = R * (1.05 + 0.10 * Math.sin(t * 2 + i));
+      const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(t * 5.5 + i * 2.1 + ph));
+      c2.save();
+      c2.globalAlpha = 0.45 + 0.55 * tw;
+      c2.fillStyle = tint || "#ffe9a8";
+      ffStar(c2, Math.cos(a) * rr, Math.sin(a) * rr * 0.82, R * (0.10 + 0.05 * tw), a);
+      c2.fill();
+      c2.restore();
+    }
+  }
+  /* 通用的贴地暗影 + 暖光雾 */
+  function ffBase(c2, p, R, tint) {
+    const fade = p.fade == null ? 1 : Math.max(0, Math.min(1, p.fade));
+    c2.fillStyle = "rgba(0,0,0,.28)";
+    c2.beginPath(); c2.ellipse(0, R * 0.72, R * 0.82, R * 0.22, 0, 0, Math.PI * 2); c2.fill();
+    const pk = p.pulseK == null ? 0.5 : p.pulseK;
+    const gr = R * (3.0 + 0.5 * (0.9 + 0.2 * pk));
+    const g = c2.createRadialGradient(0, 0, 0, 0, 0, gr);
+    g.addColorStop(0, tint.replace("ALPHA", (0.30 + 0.16 * pk).toFixed(3)));
+    g.addColorStop(0.45, tint.replace("ALPHA", "0.10"));
+    g.addColorStop(1, tint.replace("ALPHA", "0"));
+    c2.fillStyle = g;
+    c2.beginPath(); c2.arc(0, 0, gr, 0, Math.PI * 2); c2.fill();
+    return fade;
+  }
+
   D.poolLight = (ctx, p, t) => {
-    const panic = G.session && G.session.combo >= 5;
-    const moving = p.state === "crawl";
-    const sc = p.sc || 1;
-    const ph = p.ph || 0;
-    const R = 33 * sc;                                  // 视觉半径（命中盒 66）
-    // 朝向：平滑跟随爬行方向（停驻换向也柔和过渡）
-    if (p.crawlAng != null) {
-      if (p._headAng == null) p._headAng = p.crawlAng;
-      else {
-        let d = p.crawlAng - p._headAng;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        p._headAng += d * 0.18;
-      }
-    }
-    const head = p._headAng == null ? 0 : p._headAng;
-    // 步足摆动相位：爬行时快、停驻时慢颤
-    const gait = t * (moving ? 18 : 1.8) + ph * 4;
-    const gaitAmp = moving ? 1 : 0.18;
-    const jitter = panic ? 1.2 * Math.sin(t * 40) : 0;
+    if (p.species === "mouse") _ffMouse(ctx, p, t);
+    else if (p.species === "ladybug") _ffLadybug(ctx, p, t);
+    else _ffDog(ctx, p, t);
+  };
+
+  /* 三种动物共用的取样色（集中一处，改配色不会漏掉某一只） */
+  const FF_WARM = "#FF9100";     // 狗口鼻 / 鼠耳圈 / 瓢虫斑点
+  const FF_DEEP = "#E06A00";     // 鼻头 / 眉毛 / 鞘缝
+  const FF_COOL = "#0081FF";     // 鼠鼻球与后脚（参考图里最冷的那颗点）
+  const FF_COOL2 = "#00CAC8";    // 逗猫杆线 / 前脚
+
+  /* 主体渐变：左上受光 → 右下压暗（三张参考图的玩具都是这个光向） */
+  function ffBodyGrad(c2, R, r) {
+    const g = c2.createRadialGradient(-R * 0.24, -R * 0.28, R * 0.05, 0, 0, r);
+    g.addColorStop(0, "#FDF000");
+    g.addColorStop(0.34, "#FFE400");
+    g.addColorStop(0.64, "#FFC800");
+    g.addColorStop(0.86, "#FFB400");
+    g.addColorStop(1, "#FF9800");
+    return g;
+  }
+  /* 塑料玩具那层反光：大面积白色高光 + 一圈很淡的冷色描边 */
+  function ffSheen(c2, R, pathFn) {
+    c2.save(); pathFn(c2); c2.clip();
+    const hi = c2.createRadialGradient(-R * 0.28, -R * 0.36, 0, -R * 0.28, -R * 0.36, R * 1.05);
+    hi.addColorStop(0, "rgba(255,255,255,.40)");
+    hi.addColorStop(0.42, "rgba(255,255,255,.10)");
+    hi.addColorStop(1, "rgba(255,255,255,0)");
+    c2.fillStyle = hi;
+    c2.fillRect(-R * 1.6, -R * 1.6, R * 3.2, R * 3.2);
+    c2.restore();
+    c2.save(); pathFn(c2);
+    c2.strokeStyle = "rgba(120,225,255,.40)";
+    c2.lineWidth = Math.max(1, R * 0.05);
+    c2.stroke();
+    c2.restore();
+  }
+
+  /* ============ ① 小狗：黄头 + 一垂一支两只耳 + 橙口鼻 + 两颗门牙 ============
+     参考图里它的辨识点是耳朵——左耳长长垂下、右耳短短支起，所以走路时甩的是"不对称"的两片 */
+  const _ffDog = (ctx, p, t) => {
+    const R = 30 * (p.sc || 1);
+    if ((p.fade == null ? 1 : p.fade) <= 0.02) return;
+    const fade = ffBase(ctx, p, R, "rgba(255,168,86,ALPHA)");
+    const pk = p.pulseK == null ? 0.5 : p.pulseK;
+    const fl = (p.elytraK == null ? 0.28 : p.elytraK) - 0.28;   // 0 → 0.67，"闪一下"
+    const mv = Math.min(1, p.moveK == null ? 0.5 : p.moveK);
+    const gait = (p.stepK || 0) * 2.2 + (p.ph || 0);
+    const k = 0.97 + 0.045 * pk + fl * 0.05;
+
     ctx.save();
-    ctx.translate(jitter, jitter * 0.6);
-    ctx.rotate(head + Math.sin(t * 2.1 + ph) * 0.04);   // 轻微起伏
-    // 1) 外发光（黄绿，大范围柔和）——暗底上的"发光"感来源；连击时光晕增大增亮（只加光效不加速度）
-    const comboK = 1 + Math.min(G.session.combo || 0, 10) * 0.06;
-    const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 2.35 * comboK);
-    glow.addColorStop(0, moving ? "rgba(220,255,120,.56)" : "rgba(236,255,150,.68)");
-    glow.addColorStop(0.42, "rgba(178,240,92,.24)");
-    glow.addColorStop(1, "rgba(150,230,70,0)");
-    ctx.fillStyle = glow;
-    ctx.beginPath(); ctx.arc(0, 0, R * 2.35 * comboK, 0, Math.PI * 2); ctx.fill();
-    // 2) 六足（俯视步足：三对 tripod 交替摆动，足尖小点；停驻时只微颤）
-    const legPairs = [
-      { x: R * 0.42, sweep: R * 0.30 },    // 前足（朝前张）
-      { x: R * 0.16, sweep: 0 },           // 中足（横张）
-      { x: -R * 0.10, sweep: -R * 0.26 }   // 后足（朝后张）
-    ];
-    ctx.strokeStyle = "#8a5a18";
-    ctx.fillStyle = "#8a5a18";
-    ctx.lineWidth = Math.max(1.2, R * 0.075); ctx.lineCap = "round";
-    for (let s = 1; s >= -1; s -= 2) {
-      legPairs.forEach((lp, i) => {
-        const swing = Math.sin(gait + ((i + (s > 0 ? 0 : 1)) % 2) * Math.PI) * R * 0.24 * gaitAmp;
-        const sx0 = lp.x, sy0 = s * R * 0.22;
-        const fx0 = sx0 + lp.sweep + swing, fy0 = s * (R * 0.24 + R * 0.72);
-        const kx = (sx0 + fx0) / 2 + s * R * 0.10, ky = (sy0 + fy0) / 2;
-        ctx.beginPath(); ctx.moveTo(sx0, sy0);
-        ctx.quadraticCurveTo(kx, ky, fx0, fy0);
-        ctx.stroke();
-        ctx.beginPath(); ctx.arc(fx0, fy0, R * 0.045, 0, Math.PI * 2); ctx.fill();
-      });
-    }
-    // 3) 腹部鞘翅（俯视：两片壳合拢 + 背中线 + 两道横纹）
-    const bg = ctx.createLinearGradient(-R * 0.9, 0, R * 0.6, 0);
-    bg.addColorStop(0, "#ffe97a");
-    bg.addColorStop(0.45, "#ffb81c");
-    bg.addColorStop(1, "#f79e12");
-    ctx.fillStyle = bg;
-    ctx.beginPath(); ctx.ellipse(-R * 0.16, 0, R * 0.74, R * 0.35, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(150,80,10,.42)"; ctx.lineWidth = Math.max(1, R * 0.05); ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(R * 0.50, 0); ctx.lineTo(-R * 0.78, 0); ctx.stroke();   // 背中线（鞘翅合缝）
-    [-R * 0.42, -R * 0.08].forEach(sx0 => {                                             // 横纹
-      ctx.beginPath(); ctx.moveTo(sx0, -R * 0.28);
-      ctx.quadraticCurveTo(sx0 - R * 0.07, 0, sx0, R * 0.28);
-      ctx.stroke();
-    });
-    // 4) 膜翅（半透明小翅收拢在背上，持续快频煽动——萤火虫爬行时也会颤翅）
-    const wingPath = (L, Wd) => {
+    ctx.globalAlpha = fade;
+
+    const swing = Math.sin(gait) * (0.14 + 0.26 * mv) + Math.sin(t * 1.5) * 0.04 + fl * 0.34;
+    /* 耳朵画成头轮廓（0.74R）之外的两片叶瓣：左耳长长垂下、右耳短短支起——
+       参考图标里这两只不对称的耳朵就是这个玩具的辨识点，糊成一圈就不像狗了 */
+    const ear = (sgn, cx, cy, rx, ry, tilt, top, bot) => {
+      ctx.save();
+      ctx.scale(sgn, 1);
+      const g = ctx.createLinearGradient(cx, cy - ry, cx, cy + ry);
+      g.addColorStop(0, top);
+      g.addColorStop(0.55, "#FFB01F");
+      g.addColorStop(1, bot);
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(Wd, L * 0.22, Wd * 0.8, L * 0.8, 0, L);
-      ctx.bezierCurveTo(-Wd * 0.8, L * 0.8, -Wd, L * 0.22, 0, 0);
+      ctx.ellipse(cx * R * k, cy * R * k, rx * R * k, ry * R * k, tilt, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+    ear(-1, 0.60, 0.40 + swing * 0.06, 0.23, 0.46 + swing * 0.04, 0.34 + swing * 0.42, "#FFD84A", "#E87C00");
+    ear(1, 0.64, -0.14 - swing * 0.05, 0.22, 0.30, -0.52 - swing * 0.34, "#FFE468", "#F08A00");
+
+    const head = (c2) => { c2.beginPath(); c2.ellipse(0, 0, R * 0.74 * k, R * 0.70 * k, 0, 0, Math.PI * 2); };
+    head(ctx);
+    ctx.fillStyle = ffBodyGrad(ctx, R, R * 0.92 * k);
+    ctx.fill();
+
+    // 眉（参考图标里眼睛上方那两个小三角，压淡一点，不然看着像在生气）
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = FF_DEEP;
+    for (let i = 0; i < 2; i++) {
+      const sgn = i ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(sgn * R * 0.35, -R * 0.48);
+      ctx.lineTo(sgn * R * 0.20, -R * 0.36);
+      ctx.lineTo(sgn * R * 0.41, -R * 0.33);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+    // 眼
+    for (let i = 0; i < 2; i++) {
+      const sgn = i ? 1 : -1;
+      ctx.fillStyle = "#8A3B06";
+      ctx.beginPath(); ctx.arc(sgn * R * 0.26, -R * 0.15, R * 0.085 * (1 + 0.10 * pk), 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.72)";
+      ctx.beginPath(); ctx.arc(sgn * R * 0.26 - R * 0.03, -R * 0.18, R * 0.028, 0, Math.PI * 2); ctx.fill();
+    }
+    // 口鼻 + 鼻头
+    const mz = ctx.createRadialGradient(-R * 0.10, R * 0.22, R * 0.03, 0, R * 0.32, R * 0.48);
+    mz.addColorStop(0, "#FFC258");
+    mz.addColorStop(0.55, FF_WARM);
+    mz.addColorStop(1, "#EF7800");
+    ctx.fillStyle = mz;
+    ctx.beginPath(); ctx.ellipse(0, R * 0.31 * k, R * 0.44 * k, R * 0.33 * k, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = FF_DEEP;
+    ctx.beginPath(); ctx.ellipse(0, R * 0.13, R * 0.17, R * 0.125, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.45)";
+    ctx.beginPath(); ctx.ellipse(-R * 0.05, R * 0.10, R * 0.05, R * 0.028, -0.4, 0, Math.PI * 2); ctx.fill();
+    // 两颗门牙
+    const tooth = (cx) => {
+      const w = R * 0.135, h = R * 0.17, y = R * 0.50;
+      ctx.beginPath();
+      ctx.moveTo(cx - w / 2, y);
+      ctx.lineTo(cx + w / 2, y);
+      ctx.lineTo(cx + w / 2, y + h * 0.62);
+      ctx.quadraticCurveTo(cx, y + h, cx - w / 2, y + h * 0.62);
       ctx.closePath();
     };
-    const flutter = Math.sin(t * 24 + ph * 6) * 0.38;
-    for (let s = 1; s >= -1; s -= 2) {
+    ctx.fillStyle = "#FFFDF2";
+    tooth(-R * 0.078); ctx.fill();
+    tooth(R * 0.078); ctx.fill();
+
+    ffSheen(ctx, R, head);
+    ffBeads(ctx, R, t, p.ph || 0, "#ffe9a8");
+    ctx.restore();
+  };
+
+  /* ============ ② 老鼠：黄水滴身 + 蓝鼻球 + 橙圆耳 + 四只青蓝脚 + 身后一根逗猫杆线 ============
+     造型取自 Paw Action 实机图；那根青蓝杆线是玩具的本体特征，永远拖在行进方向后方 */
+  const _ffMouse = (ctx, p, t) => {
+    const R = 30 * (p.sc || 1);
+    if ((p.fade == null ? 1 : p.fade) <= 0.02) return;
+    const fade = ffBase(ctx, p, R, "rgba(255,206,74,ALPHA)");
+    const pk = p.pulseK == null ? 0.5 : p.pulseK;
+    const fl = (p.elytraK == null ? 0.28 : p.elytraK) - 0.28;
+    const mv = Math.min(1, p.moveK == null ? 0.5 : p.moveK);
+    const gait = (p.stepK || 0) * 2.6 + (p.ph || 0);
+    const ph = p.ph || 0;
+    const k = 0.97 + 0.05 * pk + fl * 0.06;
+
+    ctx.save();
+    ctx.globalAlpha = fade;
+
+    // 逗猫杆线：静止时垂着轻摆，急爬时被拉直甩到身后
+    const back = (p.crawlAng == null ? Math.PI * 0.5 : p.crawlAng) + Math.PI;
+    const sway = Math.sin(t * 2.1 + ph) * 0.24 * (0.35 + mv) + fl * 0.3;
+    const len = R * (1.50 + 0.42 * mv + fl * 0.2);
+    const lg = ctx.createLinearGradient(0, 0, Math.cos(back) * len, Math.sin(back) * len);
+    lg.addColorStop(0, "#38E8F2");
+    lg.addColorStop(0.5, FF_COOL2);
+    lg.addColorStop(1, "rgba(0,120,210,.10)");
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = Math.max(1.6, R * 0.10);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(back) * R * 0.40, Math.sin(back) * R * 0.40);
+    ctx.quadraticCurveTo(
+      Math.cos(back + sway) * len * 0.64, Math.sin(back + sway) * len * 0.64,
+      Math.cos(back + sway * 1.9) * len, Math.sin(back + sway * 1.9) * len);
+    ctx.stroke();
+
+    // 耳朵（走在身下，只露出外圈）
+    const twitch = Math.sin(t * 3.4 + ph) * 0.10 + Math.sin(gait * 1.3) * 0.09 * mv;
+    const ear = (sgn, rot) => {
       ctx.save();
-      ctx.translate(R * 0.30, s * R * 0.14);
-      ctx.rotate(s * (0.96 + flutter));
-      ctx.scale(1, s);                      // 沿身体轴镜像：两片翅膀分列身体两侧、都朝后掠
-      const wg = ctx.createLinearGradient(0, 0, 0, R * 0.9);
-      wg.addColorStop(0, "rgba(215,250,255,.48)");
-      wg.addColorStop(1, "rgba(130,232,246,.08)");
+      ctx.translate(sgn * R * 0.42, -R * 0.48);
+      ctx.rotate(rot);
+      ctx.fillStyle = FF_WARM;
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.27 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#FFD84A";
+      ctx.beginPath(); ctx.arc(0, 0, R * 0.165 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    ear(-1, -0.26 + twitch);
+    ear(1, 0.26 - twitch);
+
+    // 四只脚：对角轮替，站着不动时不瞎划
+    const foot = (fx, fy, c, lift) => {
+      ctx.fillStyle = c;
+      ctx.beginPath(); ctx.arc(fx, fy + lift, R * 0.175 * k, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.34)";
+      ctx.beginPath(); ctx.arc(fx - R * 0.05, fy + lift - R * 0.055, R * 0.05, 0, Math.PI * 2); ctx.fill();
+    };
+    const s1 = Math.sin(gait), s2 = Math.sin(gait + Math.PI);
+    foot(-R * 0.68, R * 0.04, FF_COOL, s1 * R * 0.075 * mv);
+    foot(R * 0.68, R * 0.04, FF_COOL, s2 * R * 0.075 * mv);
+    foot(-R * 0.52, R * 0.54, FF_COOL2, s2 * R * 0.06 * mv);
+    foot(R * 0.52, R * 0.54, FF_COOL2, s1 * R * 0.06 * mv);
+
+    const body = (c2) => {
+      c2.beginPath();
+      c2.moveTo(0, -R * 0.84 * k);
+      c2.bezierCurveTo(R * 0.44 * k, -R * 0.68 * k, R * 0.78 * k, -R * 0.08 * k, R * 0.65 * k, R * 0.38 * k);
+      c2.bezierCurveTo(R * 0.52 * k, R * 0.84 * k, -R * 0.52 * k, R * 0.84 * k, -R * 0.65 * k, R * 0.38 * k);
+      c2.bezierCurveTo(-R * 0.78 * k, -R * 0.08 * k, -R * 0.44 * k, -R * 0.68 * k, 0, -R * 0.84 * k);
+      c2.closePath();
+    };
+    body(ctx);
+    ctx.fillStyle = ffBodyGrad(ctx, R, R * 0.98 * k);
+    ctx.fill();
+
+    // 腮（参考图里身体上部那两个橙色小椭圆）
+    ctx.fillStyle = "rgba(255,158,18,.85)";
+    for (let i = 0; i < 2; i++) {
+      const sgn = i ? 1 : -1;
+      ctx.beginPath(); ctx.ellipse(sgn * R * 0.32, -R * 0.28, R * 0.135, R * 0.105, sgn * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
+    // 眼（两颗蓝点）
+    ctx.fillStyle = "#2FA8FF";
+    for (let i = 0; i < 2; i++) {
+      const sgn = i ? 1 : -1;
+      ctx.beginPath(); ctx.arc(sgn * R * 0.15, -R * 0.50, R * 0.055 * (1 + 0.12 * pk), 0, Math.PI * 2); ctx.fill();
+    }
+    // 鼻球：全身最冷、最亮的一点，自己带一圈蓝光
+    ctx.fillStyle = FF_COOL;
+    ctx.beginPath(); ctx.arc(0, -R * 0.76 * k, R * 0.135 * k, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    const ng = ctx.createRadialGradient(0, -R * 0.76, 0, 0, -R * 0.76, R * 0.36);
+    ng.addColorStop(0, "rgba(120,220,255,.55)");
+    ng.addColorStop(1, "rgba(120,220,255,0)");
+    ctx.fillStyle = ng;
+    ctx.beginPath(); ctx.arc(0, -R * 0.76, R * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    ffSheen(ctx, R, body);
+    ffBeads(ctx, R, t, ph, "#ffe9a0");
+    ctx.restore();
+  };
+
+  /* ============ ③ 瓢虫：圆盘被斜鞘缝分成橙帽 + 黄底橙点 ============
+     参考图标里那条缝是斜的（右上 → 左下），缝上方一整片橙、下方黄底带橙点；
+     "闪一下"在这里就是鞘翅沿缝张开，露出中间一薄片翅膜 */
+  const _ffLadybug = (ctx, p, t) => {
+    const R = 30 * (p.sc || 1);
+    if ((p.fade == null ? 1 : p.fade) <= 0.02) return;
+    const fade = ffBase(ctx, p, R, "rgba(255,152,72,ALPHA)");
+    const pk = p.pulseK == null ? 0.5 : p.pulseK;
+    const fl = (p.elytraK == null ? 0.28 : p.elytraK) - 0.28;
+    const mv = Math.min(1, p.moveK == null ? 0.5 : p.moveK);
+    const gait = (p.stepK || 0) * 3.0 + (p.ph || 0);
+    const ph = p.ph || 0;
+    const k = 0.97 + 0.05 * pk + fl * 0.04;
+    const SEAM = 0.62;                        // 鞘缝倾角：参考图标里橙帽在右上、黄底在左下
+    const Rd = R * 0.84 * k;
+    const gap = fl * R * 0.26;                // 张翅量
+
+    ctx.save();
+    ctx.globalAlpha = fade;
+
+    // 六只青蓝小脚：从圆盘下缘探出来，对角轮替抬起
+    ctx.strokeStyle = "#1FB6E0";
+    ctx.lineWidth = Math.max(1.4, R * 0.065);
+    ctx.lineCap = "round";
+    for (let i = 0; i < 6; i++) {
+      const a = (i - 2.5) * 0.52 + Math.PI * 0.5;
+      const ang = a + Math.sin(gait + i * 1.05) * 0.14 * mv;
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const ix = ca * Rd * 0.80, iy = sa * Rd * 0.80;
+      const ox = ca * Rd * 1.16, oy = sa * Rd * 1.16;
+      ctx.beginPath();
+      ctx.moveTo(ix, iy);
+      ctx.lineTo(ox, oy);
+      ctx.stroke();
+      ctx.fillStyle = i % 2 ? FF_COOL : FF_COOL2;
+      ctx.beginPath(); ctx.arc(ox + (ox - ix) * 0.3, oy + (oy - iy) * 0.3, R * 0.06, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 张翅时缝里露出的翅膜（很薄一片冷白，不抢主体）
+    if (gap > 0.4) {
+      ctx.save();
+      ctx.rotate(SEAM);
+      ctx.globalCompositeOperation = "lighter";
+      const wg = ctx.createLinearGradient(0, -gap * 2.2, 0, gap * 2.2);
+      wg.addColorStop(0, "rgba(150,240,255,0)");
+      wg.addColorStop(0.5, `rgba(190,250,255,${(0.16 + fl * 0.5).toFixed(3)})`);
+      wg.addColorStop(1, "rgba(150,240,255,0)");
       ctx.fillStyle = wg;
-      wingPath(R * 0.88, R * 0.32); ctx.fill();
-      ctx.strokeStyle = "rgba(235,255,255,.38)"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(0, 0, Rd * 1.02, gap * 2.4, 0, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
     }
-    // 5) 腹尾亮灯（呼吸脉动的"萤火"）：亮核 + 柔光
-    const lampP = 0.72 + 0.28 * Math.sin(t * 5 + ph * 3);
-    const lamp = ctx.createRadialGradient(-R * 0.86, 0, 0, -R * 0.86, 0, R * 0.5);
-    lamp.addColorStop(0, "rgba(255,255,235," + (0.35 + 0.6 * lampP).toFixed(2) + ")");
-    lamp.addColorStop(0.4, "rgba(240,255,150," + (0.5 * lampP).toFixed(2) + ")");
-    lamp.addColorStop(1, "rgba(230,255,120,0)");
-    ctx.fillStyle = lamp;
-    ctx.beginPath(); ctx.arc(-R * 0.86, 0, R * 0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#fffbe0";
-    ctx.beginPath(); ctx.arc(-R * 0.86, 0, R * 0.16, 0, Math.PI * 2); ctx.fill();
-    // 6) 前胸盾板 + 头（俯视：盾板带中线，头在前进方向）
-    ctx.fillStyle = "#f7a41b";
-    ctx.beginPath(); ctx.ellipse(R * 0.38, 0, R * 0.34, R * 0.30, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(150,80,10,.28)"; ctx.lineWidth = Math.max(1, R * 0.045);
-    ctx.beginPath(); ctx.moveTo(R * 0.12, 0); ctx.lineTo(R * 0.64, 0); ctx.stroke();
-    ctx.fillStyle = "#ffd45e";
-    ctx.beginPath(); ctx.arc(R * 0.72, 0, R * 0.23, 0, Math.PI * 2); ctx.fill();
-    // 7) 大眼睛（俯视：头两侧鼓出的萌系大眼 + 白高光）
-    ctx.fillStyle = "#22335f";
-    ctx.beginPath(); ctx.arc(R * 0.74, -R * 0.17, R * 0.12, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(R * 0.74, R * 0.17, R * 0.12, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.92)";
-    ctx.beginPath(); ctx.arc(R * 0.78, -R * 0.21, R * 0.045, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(R * 0.78, R * 0.13, R * 0.045, 0, Math.PI * 2); ctx.fill();
-    // 8) 触角：向前外弯的两根细须 + 顶端小圆点（停驻时轻轻摆动探头）
-    const aw = Math.sin(t * 3.2 + ph * 2) * (moving ? 0.06 : 0.16);
-    ctx.strokeStyle = "rgba(96,74,22,.75)";
-    ctx.lineWidth = Math.max(1, R * 0.045); ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(R * 0.84, -R * 0.06);
-    ctx.quadraticCurveTo(R * (1.12 + aw), -R * 0.26, R * (1.26 + aw), -R * 0.10); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(R * 0.84, R * 0.06);
-    ctx.quadraticCurveTo(R * (1.12 - aw), R * 0.26, R * (1.26 - aw), R * 0.10); ctx.stroke();
-    ctx.fillStyle = "rgba(96,74,22,.75)";
-    ctx.beginPath(); ctx.arc(R * (1.26 + aw), -R * 0.10, R * 0.05, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(R * (1.26 - aw), R * 0.10, R * 0.05, 0, Math.PI * 2); ctx.fill();
-    // 9) 高光点（胸部受光）
-    ctx.fillStyle = "rgba(255,255,255,.55)";
-    ctx.beginPath(); ctx.ellipse(R * 0.34, -R * 0.10, R * 0.10, R * 0.16, -0.3, 0, Math.PI * 2); ctx.fill();
-    // 10) 停驻外圈：主要命中窗口的视觉暗示
-    if (p.state === "pause") {
-      ctx.strokeStyle = "rgba(232,255,160,.85)";
-      ctx.lineWidth = 2.4;
-      ctx.beginPath(); ctx.arc(0, 0, R * 1.55 + Math.sin(t * 8) * 3.5, 0, Math.PI * 2); ctx.stroke();
+
+    /* 两片鞘翅：同一个圆盘被缝线切成两半，各自沿法向外移 gap */
+    const half = (up) => {
+      ctx.save();
+      ctx.rotate(SEAM);
+      ctx.beginPath(); ctx.arc(0, 0, Rd, 0, Math.PI * 2); ctx.clip();
+      ctx.beginPath();
+      ctx.rect(-Rd * 1.2, up ? -Rd * 1.2 : 0, Rd * 2.4, Rd * 1.2);
+      ctx.clip();
+      ctx.translate(0, up ? -gap : gap);
+      if (up) {
+        const g = ctx.createLinearGradient(0, -Rd, 0, 0);
+        g.addColorStop(0, "#FFB020");
+        g.addColorStop(0.6, FF_WARM);
+        g.addColorStop(1, "#EF7800");
+        ctx.fillStyle = g;
+        ctx.fillRect(-Rd * 1.4, -Rd * 1.4, Rd * 2.8, Rd * 1.4);
+        // 头部：帽沿上一颗深橙圆头
+        ctx.fillStyle = FF_DEEP;
+        ctx.beginPath(); ctx.arc(0, -Rd * 0.60, Rd * 0.30, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,.30)";
+        ctx.beginPath(); ctx.ellipse(-Rd * 0.10, -Rd * 0.68, Rd * 0.12, Rd * 0.06, -0.4, 0, Math.PI * 2); ctx.fill();
+      } else {
+        const g = ctx.createLinearGradient(-Rd * 0.6, 0, Rd * 0.7, Rd);
+        g.addColorStop(0, "#FFEA00");
+        g.addColorStop(0.55, "#FFC800");
+        g.addColorStop(1, "#FFA800");
+        ctx.fillStyle = g;
+        ctx.fillRect(-Rd * 1.4, 0, Rd * 2.8, Rd * 1.4);
+        // 橙点：参考图标里黄底上那几颗
+        ctx.fillStyle = "#F58A00";
+        const dots = [[-0.46, 0.30, 0.135], [0.46, 0.30, 0.135], [-0.24, 0.68, 0.11], [0.24, 0.68, 0.11], [0, 0.46, 0.09]];
+        dots.forEach(d => {
+          ctx.beginPath(); ctx.arc(d[0] * Rd, d[1] * Rd, d[2] * Rd * (1 + 0.06 * pk), 0, Math.PI * 2); ctx.fill();
+        });
+      }
+      // 鞘缝：每片自己的边线
+      ctx.strokeStyle = "rgba(190,92,10,.95)";
+      ctx.lineWidth = Math.max(1.5, R * 0.075);
+      ctx.beginPath(); ctx.moveTo(-Rd * 1.2, 0); ctx.lineTo(Rd * 1.2, 0); ctx.stroke();
+      ctx.restore();
+    };
+    half(false);
+    half(true);
+
+    // 圆盘外沿冷色描边 + 大面积高光
+    ctx.save();
+    ctx.beginPath(); ctx.arc(0, 0, Rd, 0, Math.PI * 2); ctx.clip();
+    const hi = ctx.createRadialGradient(-Rd * 0.34, -Rd * 0.30, 0, -Rd * 0.34, -Rd * 0.30, Rd * 1.25);
+    hi.addColorStop(0, "rgba(255,255,255,.34)");
+    hi.addColorStop(0.42, "rgba(255,255,255,.08)");
+    hi.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = hi;
+    ctx.fillRect(-Rd, -Rd, Rd * 2, Rd * 2);
+    ctx.restore();
+    ctx.strokeStyle = "rgba(120,225,255,.42)";
+    ctx.lineWidth = Math.max(1, R * 0.05);
+    ctx.beginPath(); ctx.arc(0, 0, Rd, 0, Math.PI * 2); ctx.stroke();
+
+    // 帽沿两侧两颗青蓝亮点（这套玩具的冷色"眼睛"）
+    for (let i = 0; i < 2; i++) {
+      const sgn = i ? 1 : -1;
+      const tw = 0.5 + 0.5 * Math.sin(t * 4.6 + i * 1.8 + ph);
+      ctx.save();
+      ctx.globalAlpha = fade * (0.55 + 0.45 * tw);
+      ctx.fillStyle = sgn > 0 ? "#5BE8FF" : "#37B6FF";
+      ctx.beginPath(); ctx.arc(sgn * Rd * 0.42, -Rd * 0.34, R * (0.075 + 0.03 * tw), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
     }
+
+    ffBeads(ctx, R, t, ph, "#fff0b8");
     ctx.restore();
   };
 

@@ -268,7 +268,7 @@ module.exports = function (G) {
     { key: "frog",      name: "青蛙跳",   desc: "荷叶之间来回跳" },
     { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
     { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
-    { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" },
+    { key: "pool",      name: "暗夜萤光", desc: "三种发光小动物慢慢爬" },
     { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈

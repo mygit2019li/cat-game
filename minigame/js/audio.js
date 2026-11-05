@@ -104,6 +104,65 @@ module.exports = function (G) {
     G.summonPlaying = false;
   };
 
+  /* ---------- 暗夜萤光（三种发光玩具动物）音效 ----------
+     素材是 tools/gen_firefly_sfx.py 按参考视频的实测参数合成的原创音：
+       · 拍中：视频量到重心 0.72–1.79kHz、衰减 40–190ms，三种动物各占一段
+         小狗 798Hz（最闷 + 低频"汪"）/ 老鼠 1531Hz（+ 一记短吱）/ 瓢虫 1892Hz（最脆 + 翅膜嗡）
+       · 张翅：1.6–3.6kHz 的极轻摩擦声，音量压到 0.16，满屏五只也不会吵 */
+  const FF_HIT = "assets/sfx/firefly-hit.wav";
+  const FF_HIT_V = {
+    dog: "assets/sfx/firefly-hit-dog.wav",
+    mouse: "assets/sfx/firefly-hit-mouse.wav",
+    ladybug: "assets/sfx/firefly-hit-ladybug.wav"
+  };
+  /* 没有音频能力时的合成回退：同样按物种换中心频率与低频垫底 */
+  const FF_HIT_TONE = { dog: [780, 520, 1], mouse: [1300, 980, 0], ladybug: [1720, 1240, 0] };
+  const FF_FLARE = "assets/sfx/firefly-flare.wav";
+  const FF_SPAWN = "assets/sfx/firefly-spawn.wav";
+  const FF_SHIFT = "assets/sfx/firefly-shift.wav";
+  let ffHitAt = 0, ffFlareAt = 0, ffSpawnAt = 0;
+  G.playFireflyHit = (species) => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (ffHitAt && now - ffHitAt < 70) return;      // 连击时不要变成机关枪
+    ffHitAt = now;
+    if (G.platform.sfx && G.platform.sfx(FF_HIT_V[species] || FF_HIT, 0.5)) return;
+    // 回退：两层合成近似（主叮 + 低频落点）
+    const v = FF_HIT_TONE[species] || [1040, 780, 0];
+    tone("sine", v[0], v[1], 0.05, 0.26);
+    if (v[2]) tone("sine", 150, 110, 0.07, 0.14);
+    else tone("sine", 120, 80, 0.07, 0.10, 0.01);
+  };
+  G.playFireflyFlare = () => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (ffFlareAt && now - ffFlareAt < 900) return;  // 五只同时张翅 = 一片沙沙声，限流
+    ffFlareAt = now;
+    if (G.platform.sfx && G.platform.sfx(FF_FLARE, 0.16)) return;
+    tone("triangle", 2400, 3000, 0.05, 0.05);
+  };
+  /* 出现/重生：视频里是一串极轻的 ~1kHz 小 ticks（1.9–3.3s 那一串），音量 0.24 */
+  G.playFireflySpawn = () => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (ffSpawnAt && now - ffSpawnAt < 260) return;      // 多只同时出现不要叠成一片
+    ffSpawnAt = now;
+    if (G.platform.sfx && G.platform.sfx(FF_SPAWN, 0.24)) return;
+    tone("sine", 1200, 900, 0.03, 0.07);
+  };
+  /* 换关：柔和高亮 shimmer（配满屏金色火花 + 整屏交叉淡入） */
+  G.playFireflyShift = () => {
+    if (!G.config.sound) return;
+    if (G.platform.sfx && G.platform.sfx(FF_SHIFT, 0.34)) return;
+    tone("sine", 1050, 2100, 0.28, 0.10);
+    tone("sine", 1560, 2600, 0.24, 0.07, 0.10);
+  };
+  G.preloadFireflySfx = () => {
+    if (!G.platform.preloadSfx) return;
+    [FF_HIT, FF_FLARE, FF_SPAWN, FF_SHIFT].concat(Object.keys(FF_HIT_V).map(k => FF_HIT_V[k]))
+      .forEach(src => G.platform.preloadSfx(src));
+  };
+
   G.playHit = (combo) => {
     const baseF = 480 + Math.min(combo || 0, 10) * 40;
     tone("sine", baseF, 150, 0.16, 0.32); tone("triangle", baseF * 2, 340, 0.1, 0.1);

@@ -4,6 +4,15 @@ module.exports = function (G) {
   const rand = G.rand, clamp = G.clamp;
   let preys = [];
   G.preys = preys;
+  /* 三种发光玩具动物的抽取（等权，见 G.FF_TOYS）：返回整条配置，key 给绘制/音效分支用 */
+  const pickFfToy = () => {
+    const T = G.FF_TOYS;
+    let tot = 0;
+    T.forEach(x => { tot += x.w || 1; });
+    let r = Math.random() * tot;
+    for (let i = 0; i < T.length; i++) { r -= (T[i].w || 1); if (r < 0) return T[i]; }
+    return T[T.length - 1];
+  };
   /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
   const inPoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "pool");
   /* 鱼群信息：其他鱼的平均位置（聚拢目标），无同伴时返回 null */
@@ -101,6 +110,9 @@ module.exports = function (G) {
            蓄力末尾把落点荷叶点亮（pad.hint），是猫唯一的预判依据 */
         this.fState = "crouch"; this.fT = 0;
         this.padIdx = -1; this.targetPadIdx = -1;
+        this.slot = -1; this.targetSlot = -1;   // 荷叶上的座位号（同叶多只错开摆放）
+        this.shareScale = 1;                    // 同叶多只时略微缩小，减少相互遮挡
+        this.drownK = 0;                        // 沉入水中的进度（渲染用）
         this.jumpH = 0; this.leapK = 0;
         this.chain = 0;                 // 本次跳组已完成的跳跃数（阶段③ 最多 2）
         this.rspT = 0;                  // 被拍后的重生等待
@@ -113,6 +125,7 @@ module.exports = function (G) {
       this.comboSpeed = 1; this.comboSpeedTarget = 1; this.comboSize = 1;
       const D0 = G.DIFF[G.config.difficulty];
       this.sizeMul = D0.size;
+      this.ffSizeBase = D0.size;                       // 暗夜萤光换玩具时按它重算体型
       this.speedMul = D0.speed * ((D0.typeSpeed || {})[type] || 1);   // 标准/激烈下蝴蝶与老鼠额外提速
       this.applySize();
       this.spawn();
@@ -139,6 +152,13 @@ module.exports = function (G) {
       this.stalking = true; this.stalkT = rand(0.8, 1.8);
       this.hopPhase = rand(0, Math.PI * 2); this.hopCyc = null; this.hopOff = 0;
       this.trail = []; this.yarnAcc = 0;
+    }
+    /* 换一个发光玩具：key 给绘制/音效分支，体型进命中盒，节奏倍率给 updateFirefly */
+    applyToy(toy) {
+      this.toy = toy;
+      this.species = toy.key;
+      this.sizeMul = this.ffSizeBase * toy.size;
+      this.applySize();
     }
     applySize() {
       const S = G.platform.S || 1;
@@ -168,14 +188,24 @@ module.exports = function (G) {
         const s0 = this.laserSpot();
         this.x = s0.x; this.y = s0.y;
         if (this.type === "pool") {
-          // pool 出生点压进固定容器内，直接以爬行状态入场
-          const pad = 26 * Math.pow(G.platform.S || 1, 0.4);
+          /* 萤火虫：出生点压在屏内边距里，直接进入爬行态。
+             造形/步态/亮度全对齐参考视频：慢爬与急爬交替、腹部呼吸、鞘翅周期性张开"闪"一下。 */
+          const pad = 34 * Math.pow(G.platform.S || 1, 0.4);
           this.x = Math.min(Math.max(this.x, b.x + pad), b.x + b.w - pad);
           this.y = Math.min(Math.max(this.y, b.y + pad), b.y + b.h - pad);
-          this.crawlAng = rand(0, Math.PI * 2);
-          this.straight = Math.random() < 0.5;        // 一半虫子走直线（撞边反射），一半蛇行
-          this.state = "crawl"; this.stateT = 0;
-          this.stateDur = rand(0.65, 1.1);
+          this.driftAng = rand(0, Math.PI * 2);        // 行进方向（身体朝向固定朝上，不跟着转）
+          this.driftTurn = rand(-0.4, 0.4);
+          this.pulseT = rand(0, Math.PI * 2);          // 腹部呼吸相位（每只错开，不同步闪）
+          this.ph = rand(0, Math.PI * 2);              // 触须/发光点的相位
+          this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
+          this.gaitT = 0; this.fast = false; this.spd = 0; this.moveK = 0;
+          this.stepK = rand(0, Math.PI * 2);           // 六足步态相位
+          this.applyToy(pickFfToy());                   // 小狗 / 老鼠 / 瓢虫 随机一种
+          this.elytraK = 0.28; this.flareCd = rand(0.8, 2.2); this.flare = null;
+          this.tpNext = rand(9, 13); this.tp = null; this.darkT = 0;
+          this.emberAcc = 0;
+          this.crawlAng = this.driftAng;               // 兼容旧字段
+          this.state = "crawl"; this.stateT = 0; this.stateDur = 99;
           this.fade = 1;
           return;
         }
@@ -224,25 +254,39 @@ module.exports = function (G) {
     }
 
     /* ============ 青蛙：荷叶跳跃四态机 ============ */
-    /* 落到一片没被其他青蛙占用的荷叶 */
+    /* 落到一片荷叶上：优先空叶（避免多只挤在一起），没有空叶则挑最空的一片并坐不同座位 */
     spawnOnPad() {
       const pads = (G.scene && G.scene.pads) || [];
       if (!pads.length) {
         const b = G.bounds();
-        this.x = b.x + b.w / 2; this.y = b.y + b.h / 2; this.padIdx = -1;
+        this.x = b.x + b.w / 2; this.y = b.y + b.h / 2;
+        this.padIdx = -1; this.slot = -1; this.targetSlot = -1;
       } else {
-        const taken = {};
-        preys.forEach(q => { if (q !== this && q.type === "frog" && q.padIdx >= 0) taken[q.padIdx] = 1; });
-        let free = [];
-        pads.forEach((p, i) => { if (!taken[i] && i !== this.padIdx) free.push(i); });
-        if (!free.length) free = pads.map((_, i) => i).filter(i => i !== this.padIdx);
+        const occ = pads.map((_, i) => (G.padOccupants ? G.padOccupants(i).length : 0));
+        const floating = (i) => (pads[i].sinkState || "float") === "float";   // 正在沉/已沉的叶不能落
+        const freeSlot = (i) => (G.padFreeSlot ? G.padFreeSlot(i, this, true) : 0);
+        let free = pads.map((_, i) => i).filter(i => i !== this.padIdx && floating(i) && occ[i] < 3 && freeSlot(i) >= 0);
+        const empty = free.filter(i => occ[i] === 0);        // 空叶优先：多只青蛙不往同一片叶上堆
+        if (empty.length) free = empty;
+        else if (free.length) {
+          const minOcc = Math.min.apply(null, free.map(i => occ[i]));
+          free = free.filter(i => occ[i] === minOcc);
+        }
+        if (!free.length) free = pads.map((_, i) => i).filter(i => i !== this.padIdx && floating(i));
         if (!free.length) free = [0];
         const pick = free[Math.floor(rand(0, free.length))];
+        const slot = freeSlot(pick);
         this.padIdx = pick;
-        this.x = pads[pick].x; this.y = pads[pick].y;
+        this.slot = slot >= 0 ? slot : 0;
+        this.targetSlot = -1;
+        this.shareScale = occ[pick] >= 1 ? 0.88 : 1;
+        const off = G.padSlotPos ? G.padSlotPos(pads[pick], this.slot) : { dx: 0, dy: 0 };
+        this.x = pads[pick].x + off.dx;
+        this.y = pads[pick].y + off.dy;
       }
       this.fState = "crouch"; this.fT = 0; this.leapK = 0; this.jumpH = 0;
       this.chain = 0; this.rspT = 0; this.vanishT = 0; this.fade = 1;
+      this.drownK = 0;
       this._visRot = 0; this._squash = 1;
       if (G.session && G.session.stage) this.stage = G.session.stage;
       this.pickTargetPad();
@@ -250,13 +294,33 @@ module.exports = function (G) {
     /* 选下一片落点荷叶：阶段①只挑最近的（短弧线好追），连跳第二跳必跨远 */
     pickTargetPad() {
       const pads = (G.scene && G.scene.pads) || [];
-      if (!pads.length) { this.targetPadIdx = -1; return; }
+      if (!pads.length) { this.targetPadIdx = -1; this.targetSlot = -1; return; }
       const P = G.FROG_PARAMS[this.stage || 1] || G.FROG_PARAMS[1];
-      const taken = {};
-      preys.forEach(q => { if (q !== this && q.type === "frog" && q.padIdx >= 0) taken[q.padIdx] = 1; });
-      let cands = pads.map((_, i) => i).filter(i => i !== this.padIdx && !taken[i]);
-      if (!cands.length) cands = pads.map((_, i) => i).filter(i => i !== this.padIdx);
-      if (!cands.length) { this.targetPadIdx = this.padIdx; return; }
+      // 占用：已落定的青蛙（slot ≥ 0 表示蹲在叶上）。跃空中的青蛙把"落点"也预留下来，
+      // 否则两只同时跳向同一片叶会叠在一起（之前看到的重叠就是这么来的）
+      const occ = pads.map((_, i) => (G.padOccupants ? G.padOccupants(i).length : 0));
+      const booked = {};
+      preys.forEach(q => {
+        if (q === this || q.type !== "frog") return;
+        if (q.fState === "leap" && q.targetPadIdx >= 0 && q.targetPadIdx !== this.padIdx) booked[q.targetPadIdx] = 1;
+      });
+      const freeSlot = (i) => (G.padFreeSlot ? G.padFreeSlot(i, this, true) : 0);
+      const floating = (i) => (pads[i].sinkState || "float") === "float";
+      const usable = (i) => i !== this.padIdx && floating(i) && occ[i] < 3 && freeSlot(i) >= 0;
+      let cands = pads.map((_, i) => i).filter(i => usable(i) && !booked[i]);
+      const empty = cands.filter(i => occ[i] === 0);            // 空叶优先
+      if (empty.length) cands = empty;
+      else if (cands.length) {
+        // 只剩别人占着的叶：挑最空的那片（青蛙数多于空叶时才会走到这里）
+        const minOcc = Math.min.apply(null, cands.map(i => occ[i]));
+        cands = cands.filter(i => occ[i] === minOcc);
+      }
+      if (!cands.length) {
+        // 全被预订：退一步允许与空中的青蛙同叶，但仍避开"已经三只"的叶
+        cands = pads.map((_, i) => i).filter(i => usable(i));
+      }
+      if (!cands.length) cands = pads.map((_, i) => i).filter(i => i !== this.padIdx && floating(i) && occ[i] < 3);
+      if (!cands.length) { this.targetPadIdx = this.padIdx; this.targetSlot = this.slot; return; }
       const cur = pads[this.padIdx] || pads[0];
       const dist = (i) => Math.hypot(pads[i].x - cur.x, pads[i].y - cur.y);
       if (P.nearFirst > 0) {
@@ -267,10 +331,34 @@ module.exports = function (G) {
         cands = cands.slice(0, Math.max(1, Math.ceil(cands.length / 2)));
       }
       this.targetPadIdx = cands[Math.floor(rand(0, cands.length))];
+      // 预订落点座位：两只青蛙跳同一片叶时也坐不同位置，不会落到同一个点上
+      const ts = freeSlot(this.targetPadIdx);
+      this.targetSlot = ts >= 0 ? ts : 0;
+    }
+    /* 蹲在叶上：跟随荷叶的漂浮（叶在缓慢移动，青蛙不能留在原地漂走） */
+    followPad(pads) {
+      const p = pads[this.padIdx];
+      if (!p || this.slot < 0) return;
+      const off = G.padSlotPos ? G.padSlotPos(p, this.slot) : { dx: 0, dy: 0 };
+      this.x = p.x + off.dx;
+      this.y = p.y + off.dy;
+      this.baseY = this.y;
+    }
+    /* 荷叶被压沉：这只青蛙跟着落水（视觉下沉 + 淡出，随后换叶重生） */
+    startDrown(pad) {
+      if (this.fState === "drown" || this.vanishT > 0 || this.rspT > 0) return;
+      this.slot = -1;
+      this.drownX0 = this.x; this.drownY0 = this.y;
+      this.drownDepth = (pad ? pad.r : 26) * rand(0.55, 0.9);
+      this.drownK = 0; this.fT = 0;
+      this.fState = "drown";
+      if (G.padSplash) G.padSplash(this.x, this.y, (pad ? pad.r : 26) * 0.55, false);
     }
     startLeap() {
       const pads = (G.scene && G.scene.pads) || [];
       if (this.targetPadIdx < 0 || this.targetPadIdx === this.padIdx || !pads[this.targetPadIdx]) this.pickTargetPad();
+      this.leapFromX = this.x; this.leapFromY = this.y;   // 从当前叶上的座位起跳
+      this.slot = -1; this.shareScale = 1;                // 离叶即释放座位，别的青蛙可落这里
       this.fState = "leap"; this.fT = 0; this.leapK = 0;
       if (this.targetPadIdx >= 0 && pads[this.targetPadIdx]) pads[this.targetPadIdx].hint = performance.now();
       // 起跳不配音（只留视觉与落点光圈），声音全部留给落地后的"呱呱"
@@ -291,6 +379,22 @@ module.exports = function (G) {
         if (this.rspT <= 0) { this.rspT = 0; this.spawnOnPad(); }
         return;
       }
+      // 荷叶被三只青蛙压沉：跟着一起落水（沉下去 → 缩小淡出 → 换叶重生）
+      if (this.fState === "drown") {
+        this.fT += dt;
+        const dk = Math.min(1, this.fT / 0.5);
+        this.drownK = dk;
+        this.x = this.drownX0;
+        this.y = this.drownY0 + this.drownDepth * dk;
+        this._squash = 1 - dk * 0.18;
+        this._visRot = 0;
+        if (dk >= 1) {
+          this.drownK = 0; this.fade = 0; this.rspT = 1.0; this.fT = 0;
+          this.fState = "crouch";
+          if (G.padSplash) G.padSplash(this.x, this.y, 14, false);   // 入水的一小圈
+        }
+        return;
+      }
       this.fade = 1;
       // 时长缩放：难度 / 自适应辅助 / 连击提速 全部压进同一乘子（与现有玩法一致）
       const k = clamp((this.speedMul || 1) * (this.adaptiveSlow || 1) * (this.comboSpeed || 1), 0.45, 2.4);
@@ -298,6 +402,7 @@ module.exports = function (G) {
       const MS = Math.pow(G.platform.S || 1, 0.5);
 
       if (this.fState === "crouch") {
+        this.followPad(pads);                 // 荷叶在漂：蹲着的青蛙跟着走
         // 蓄力末段点亮落点荷叶：猫的预判窗口
         if (P.crouch - this.fT <= P.prep && this.targetPadIdx >= 0 && pads[this.targetPadIdx]) {
           pads[this.targetPadIdx].hint = performance.now();
@@ -310,27 +415,42 @@ module.exports = function (G) {
         return;
       }
       if (this.fState === "leap") {
-        const A = pads[this.padIdx], B = pads[this.targetPadIdx];
+        const B = pads[this.targetPadIdx];
         this.leapK = Math.min(1, this.fT / P.leap);
         const k2 = this.leapK;
-        if (A && B) {
-          this.x = A.x + (B.x - A.x) * k2;
-          this.y = A.y + (B.y - A.y) * k2;
+        if (B) {
+          // 终点取"预订座位"的当前位置（目标叶也在漂，所以每帧重算，落点始终准）
+          const off = G.padSlotPos ? G.padSlotPos(B, this.targetSlot >= 0 ? this.targetSlot : 0) : { dx: 0, dy: 0 };
+          const bx = B.x + off.dx, by = B.y + off.dy;
+          const ax = this.leapFromX != null ? this.leapFromX : this.x;
+          const ay = this.leapFromY != null ? this.leapFromY : this.y;
+          this.x = ax + (bx - ax) * k2;
+          this.y = ay + (by - ay) * k2;
           this.jumpH = 4 * 66 * MS * k2 * (1 - k2);        // 抛物线：最高点 ~66px
-          this.faceDir = B.x < A.x ? -1 : 1;
+          this.faceDir = bx < ax ? -1 : 1;
         }
         this._visRot = (0.5 - k2) * 0.85;                  // 起跳抬头 → 落地低头
         this._squash = 1 + Math.sin(k2 * Math.PI) * 0.08;
         if (this.leapK >= 1) {
           this.padIdx = this.targetPadIdx;
+          this.slot = this.targetSlot >= 0 ? this.targetSlot : 0;
+          this.targetSlot = -1;
+          const mine = (G.padOccupants ? G.padOccupants(this.padIdx).length : 0);
+          this.shareScale = mine >= 2 ? 0.88 : 1;          // 同叶不止一只：略缩一点，少挡彼此
+          this.followPad(pads);
           this.fState = "land"; this.fT = 0; this.jumpH = 0; this._squash = 0.82;
           if (G.playFrogLandCroak) G.playFrogLandCroak();   // 落地后"呱呱"两声（不再有起跳音）
-          if (G.ripple) G.ripple(this.x, this.y, false);
+          const pad = pads[this.padIdx];
+          if (G.padSplash) G.padSplash(this.x, this.y, (pad ? pad.r : 40) * 0.95, false);   // 叶缘一圈水花
+          else if (G.ripple) G.ripple(this.x, this.y, false);
           if (G.padSway) G.padSway(this.x, this.y);
+          // 第三只落上来 → 荷叶被压沉，叶上的青蛙一起落水
+          if (mine >= 3 && G.padSink) G.padSink(this.padIdx);
         }
         return;
       }
       if (this.fState === "land") {
+        this.followPad(pads);
         this._squash = 0.82 + Math.min(1, this.fT / 0.18) * 0.18;
         this._visRot = 0;
         if (this.fT >= P.land) {
@@ -350,6 +470,7 @@ module.exports = function (G) {
         return;
       }
       // settle 静坐：呼吸起伏，随时可拍（+1）
+      this.followPad(pads);
       this._squash = 1 + Math.sin(this.fT * 6) * 0.015;
       this._visRot = 0;
       if (this.fT >= P.settle) { this.fState = "crouch"; this.fT = 0; this.pickTargetPad(); }
@@ -674,6 +795,8 @@ module.exports = function (G) {
       if (this.type === "butterfly" && this.state === "STARTLED") return;   // 惊飞中防重入
       // 青蛙：拍中要"干脆消失"，只留 0.16s 残影，观感交给 frogPop 的爆开特效
       if (this.type === "frog") { this.burstT = 0; this.vanishT = 0.16; return; }
+      // 萤火：一拍就"灭"，别留 0.3s 残影（暗底上会像"拍了没反应"）
+      if (this.type === "pool") { this.burstT = 0; this.vanishT = 0.08; return; }
       this.vanishT = 0.3;
       this.burstT = 0;
       if (this.type === "butterfly") {
@@ -733,7 +856,7 @@ module.exports = function (G) {
       }
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
       if (this.type === "frog") { this.updateFrog(dt, t); return; }
-      if (this.type === "pool") { this.updateCrawl(dt, t); return; }
+      if (this.type === "pool") { this.updateFirefly(dt, t); return; }
       if (this.type === "laser") { this.updateLaser(dt, t); return; }
       // ---- 鱼：三阶段 ----
       const d = this.def;
@@ -1225,89 +1348,170 @@ module.exports = function (G) {
     }
     /* 暗夜萤光：虫子在石板地上爬行（慢速爬 → 停驻命中窗口 → 原地转向再爬），
        全程在固定容器内连续移动，不瞬移不消失 */
-    updateCrawl(dt, t) {
+    /* ============ 萤火：慢漂移 + 呼吸脉动 + 偶发"熄灭重亮" ============
+       刻意和蝴蝶/激光区分：不冲刺、不闪避、不硬瞬移，始终"慢慢飘"。
+       参考视频里它 24 秒只瞬移 2 次，且是"暗下去→别处亮起来"，不是画面里平移。 */
+    /* ============ 萤火虫：爬行（慢爬/急爬两档）+ 鞘翅开合 + 腹部呼吸 ============
+       参考视频的测量结果决定了这里的节奏：
+         · 帧速度中位 18% 屏宽/秒、90 分位 53%/秒，段落内速度方差高达 2.1
+           → 不是"匀速漂移"，而是"走两步、急爬一下"的两档步态；
+         · 身体朝向不跟着行进方向转（视频里轮廓始终是正的）→ 这里只转向位移方向，不旋转贴图；
+         · 每 2–4 秒把鞘翅张开"闪"一下（视频里红色面积会突然翻三倍）。 */
+    updateFirefly(dt, t) {
       const b = G.bounds();
       if (this.stage !== G.session.stage) this.stage = G.session.stage;
-      const P = G.POOL_PARAMS[this.stage] || G.POOL_PARAMS[1];
+      const P = G.FIREFLY[this.stage] || G.FIREFLY[1];
+      const toy = this.toy || { spd: 1, fastP: 0, gait: 1, flare: 1 };
+      const S = G.platform.S || 1;
+      const MS = Math.pow(S, 0.5);
+      const inset = 32 * Math.pow(S, 0.4);
+      const L = b.x + inset, Rt = b.x + b.w - inset, T = b.y + inset, Bm = b.y + b.h - inset;
+
+      // 腹部呼吸（绘制层用它做大小/亮度起伏）
+      this.pulseT = (this.pulseT || 0) + dt * Math.PI * 2 * (P.pulse || 1.9);
+      this.pulseK = 0.5 + 0.5 * Math.sin(this.pulseT);
+
+      /* ---------- 被拍中：0.08s 收光 → 暗 0.1–0.6s → 别处亮起
+         视频里 9 段的间隔是 0.1–1.7s，不是拍完立刻原地出现 ---------- */
       if (this.vanishT > 0) {
         this.vanishT -= dt;
+        this.fade = Math.max(0, Math.min(1, this.vanishT / 0.08));
         if (this.vanishT <= 0) {
           this.vanishT = 0;
-          const s0 = this.laserSpot();
-          this.x = s0.x; this.y = s0.y;
-          this.crawlAng = rand(0, Math.PI * 2);
-          this.straight = Math.random() < 0.5;        // 一半虫子走直线（撞边反射），一半蛇行
-          this.state = "crawl"; this.stateT = 0;
-          this.stateDur = rand(P.dart[0], P.dart[1]);
+          this.fade = 0;
+          this.darkT = rand(0.12, 0.55);
         }
         return;
       }
-      const MS = Math.pow(G.platform.S || 1, 0.5);
-      const inset = 26 * Math.pow(G.platform.S || 1, 0.4);   // 只留极窄边距防裁切，虫子可爬到屏幕边缘
-      const L = b.x + inset, Rt = b.x + b.w - inset, T = b.y + inset, Bm = b.y + b.h - inset;
-      if (this.crawlAng == null) this.crawlAng = rand(0, Math.PI * 2);
-      this.stateT += dt;
-      if (this.state === "crawl") {
-        // 爬行：前进 + 行为分流——直线虫走直线撞边才转向，蛇行虫带正弦微摆
-        const stage = G.session.stage || 1;
-        const sp = (195 + (stage - 1) * 72) * MS * this.speedMul * (this.adaptiveSlow || 1);   // 连击只加光效不加速度
-        if (!this.straight) this.crawlAng += Math.sin(t * 3.1 + this.phase) * 1.5 * dt;
-        // 同伴避让：靠近其他虫子时平滑转向离开（避免重叠）
-        const keepOut = 115 * MS;
-        preys.forEach(q => {
-          if (q === this || q.type !== "pool" || q.vanishT > 0) return;
-          const dx = this.x - q.x, dy = this.y - q.y;
-          const d = Math.hypot(dx, dy);
-          if (d > 0.01 && d < keepOut) {
-            let da = Math.atan2(dy, dx) - this.crawlAng;
-            while (da > Math.PI) da -= Math.PI * 2;
-            while (da < -Math.PI) da += Math.PI * 2;
-            this.crawlAng += da * Math.min(1, (1 - d / keepOut) * 6) * dt * 6;
-          }
-        });
-        this.x += Math.cos(this.crawlAng) * sp * dt;
-        this.y += Math.sin(this.crawlAng) * sp * dt;
-        // 边界处理：直线虫像台球一样沿边反射（撞边才改变方向）；蛇行虫朝中心折返
-        if (this.x < L || this.x > Rt || this.y < T || this.y > Bm) {
-          this.x = Math.min(Math.max(this.x, L), Rt);
-          this.y = Math.min(Math.max(this.y, T), Bm);
-          if (this.straight) {
-            if (this.x <= L || this.x >= Rt) this.crawlAng = Math.PI - this.crawlAng;
-            if (this.y <= T || this.y >= Bm) this.crawlAng = -this.crawlAng;
-          } else {
-            this.crawlAng = Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x) + rand(-0.5, 0.5);
+      if (this.darkT > 0) {
+        this.darkT -= dt;
+        this.fade = 0;
+        if (this.darkT <= 0) {
+          this.darkT = 0;
+          this.tp = { phase: "in", t: 0 };
+          this.relocate(true);
+        }
+        return;
+      }
+
+      /* ---------- 自发换位：罕见（视频 24 秒只有 2 次）。0.18s 暗下去 → 别处亮起来 ---------- */
+      if (this.tp) {
+        this.tp.t += dt;
+        if (this.tp.phase === "out") {
+          this.fade = Math.max(0, 1 - this.tp.t / 0.18);
+          if (this.tp.t >= 0.18) { this.tp = { phase: "in", t: 0 }; this.relocate(); }
+        } else {
+          this.fade = Math.min(1, this.tp.t / 0.26);
+          if (this.tp.t >= 0.26) {
+            this.tp = null; this.fade = 1;
+            this.tpNext = rand(P.tele[0], P.tele[1]);
+            if (G.playFireflySpawn) G.playFireflySpawn();      // 亮起来的那一下：细碎噼啪
           }
         }
-        // 爬行留下荧光足迹
-        this.trailAcc += Math.hypot(this.x - (this.lastTrailX || this.x), this.y - (this.lastTrailY || this.y));
-        if (this.trailAcc > 26) { this.trailAcc = 0; G.laserTrail(this.x, this.y, "pool"); }
-        this.lastTrailX = this.x; this.lastTrailY = this.y;
-        if (this.stateT >= this.stateDur) {
-          this.state = "pause"; this.stateT = 0;
-          this.stateDur = rand(P.hold[0], P.hold[1]) * 1.5;   // 停驻 = 主要命中窗口
-        }
-      } else {
-        // 停驻：原地不动，触角轻摆；被同伴逼近时缓慢挪开（避免叠在一起）
-        this.crawlAng += Math.sin(t * 1.7 + this.phase) * 0.25 * dt;
-        const keepOut2 = 95 * MS;
-        preys.forEach(q => {
-          if (q === this || q.type !== "pool" || q.vanishT > 0) return;
-          const dx = this.x - q.x, dy = this.y - q.y;
-          const d = Math.hypot(dx, dy);
-          if (d > 0.01 && d < keepOut2) {
-            const push = 55 * MS * dt * (1 - d / keepOut2);
-            this.x = Math.min(Math.max(this.x + dx / d * push, L), Rt);
-            this.y = Math.min(Math.max(this.y + dy / d * push, T), Bm);
-          }
-        });
-        if (this.stateT >= this.stateDur / Math.sqrt(Math.max(this.comboSpeed || 1, 1))) {
-          this.stateT = 0;
-          this.state = "crawl";
-          this.stateDur = rand(P.dart[0], P.dart[1]);
-          if (!this.straight) this.crawlAng += rand(-1.3, 1.3);   // 蛇行虫起步前原地转向；直线虫保持原方向
-        }
+        return;
       }
       this.fade = 1;
+
+      /* ---------- 两档步态：慢爬 / 急爬，各自持续 0.4–1.2s（每种动物有自己的倍率，见 G.FF_TOYS） ---------- */
+      this.gaitT = (this.gaitT || 0) - dt;
+      if (this.gaitT <= 0) {
+        this.fast = Math.random() < clamp((P.fastP || 0.4) + (toy.fastP || 0), 0.05, 0.85);
+        this.gaitT = (this.fast ? rand(P.gait[0], P.gait[0] * 1.6) : rand(P.gait[1] * 0.8, P.gait[1] * 1.5)) * (toy.gait || 1);
+        this.driftAng += rand(-0.55, 0.55);           // 换挡时略改方向，像虫子临时拐弯
+      }
+      const targetSp = (this.fast ? P.fast : P.slow) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1) * (toy.spd || 1);
+      // 速度平滑：不一瞬间变速（否则像瞬移），但 0.15s 就到位，仍有"急爬"的突然感
+      this.spd = this.spd == null ? targetSp : this.spd + (targetSp - this.spd) * Math.min(1, dt * 7);
+      const slowRef = Math.max(20, P.slow * MS);
+      this.moveK = Math.max(0, Math.min(1.4, this.spd / slowRef - 0.15));
+      // 步态相位跟着实际速度走：停在原地时脚也不乱划
+      this.stepK = (this.stepK || 0) + dt * (2.6 + this.spd * 0.035) * (0.12 + 0.88 * Math.min(1, this.moveK));
+
+      /* ---------- 缓慢转向 + 边界处理（先软推，贴上再镜像反弹） ---------- */
+      this.driftTurn = (this.driftTurn || 0) + rand(-1, 1) * 0.75 * dt;
+      this.driftTurn = Math.max(-0.5, Math.min(0.5, this.driftTurn));
+      this.driftAng = (this.driftAng || 0) + this.driftTurn * dt;
+      const m = 62 * MS;
+      if (this.x < L + m && Math.cos(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
+      if (this.x > Rt - m && Math.cos(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
+      if (this.y < T + m && Math.sin(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
+      if (this.y > Bm - m && Math.sin(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
+      if (this.x <= L + 2 && Math.cos(this.driftAng) < 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
+      if (this.x >= Rt - 2 && Math.cos(this.driftAng) > 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
+      if (this.y <= T + 2 && Math.sin(this.driftAng) < 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
+      if (this.y >= Bm - 2 && Math.sin(this.driftAng) > 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
+
+      /* ---------- 同伴避让：别叠成一坨（轻柔推离，不改航向感） ---------- */
+      preys.forEach(q => {
+        if (q === this || q.type !== "pool" || q.vanishT > 0) return;
+        const dx = this.x - q.x, dy = this.y - q.y;
+        const d = Math.hypot(dx, dy);
+        const keep = 96 * MS;
+        if (d > 0.01 && d < keep) {
+          const push = (1 - d / keep) * 30 * MS * dt;
+          this.x = Math.min(Math.max(this.x + dx / d * push, L), Rt);
+          this.y = Math.min(Math.max(this.y + dy / d * push, T), Bm);
+        }
+      });
+
+      /* ---------- 位移 ---------- */
+      this.x += Math.cos(this.driftAng) * this.spd * dt;
+      this.y += Math.sin(this.driftAng) * this.spd * dt;
+      this.x = Math.min(Math.max(this.x, L), Rt);
+      this.y = Math.min(Math.max(this.y, T), Bm);
+      this.crawlAng = this.driftAng;
+      this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
+
+      /* ---------- 尾迹：走过的地面留几点金色碎屑（急爬时更密） ---------- */
+      this.emberAcc = (this.emberAcc || 0) + this.spd * dt;
+      const emberStep = this.fast ? 26 : 54;
+      if (this.emberAcc > emberStep) {
+        this.emberAcc = 0;
+        if (G.emberTrail) G.emberTrail(this.x - Math.cos(this.driftAng) * 10, this.y + 20);
+      }
+
+      /* ---------- "闪一下"：狗甩耳 / 鼠抖杆线 / 瓢虫开鞘翅，常态微亮，周期性放大一档 ---------- */
+      this.flareCd = (this.flareCd == null ? rand(P.flare[0], P.flare[1]) * (toy.flare || 1) : this.flareCd) - dt;
+      if (this.flareCd <= 0 && !this.flare) {
+        this.flare = { t: 0 };
+        this.flareCd = rand(P.flare[0], P.flare[1]) * (toy.flare || 1);
+        if (G.playFireflyFlare) G.playFireflyFlare();
+      }
+      let op = 0.28 + 0.05 * Math.sin(t * 1.6 + (this.ph || 0));
+      if (this.flare) {
+        this.flare.t += dt;
+        const ft = this.flare.t;
+        if (ft < 0.10) op = 0.28 + 0.67 * (ft / 0.10);              // 快速张开
+        else if (ft < 0.20) op = 0.95;                              // 保持一下
+        else if (ft < 0.58) op = 0.95 - 0.67 * ((ft - 0.20) / 0.38); // 慢慢收回
+        else { op = 0.28; this.flare = null; }
+      }
+      this.elytraK = op;
+
+      /* ---------- 下一次自发换位 ---------- */
+      this.tpNext = (this.tpNext == null ? rand(P.tele[0], P.tele[1]) : this.tpNext) - dt;
+      if (this.tpNext <= 0) this.tp = { phase: "out", t: 0 };
+    }
+    /* 换一个"别处"：至少离当前位置 42% 屏宽，避免原地闪烁 */
+    relocate(fresh) {
+      const b = G.bounds();
+      const inset = 40 * Math.pow(G.platform.S || 1, 0.4);
+      const far = Math.min(b.w, b.h) * 0.42;
+      let nx = this.x, ny = this.y;
+      for (let i = 0; i < 14; i++) {
+        nx = rand(b.x + inset, b.x + b.w - inset);
+        ny = rand(b.y + inset, b.y + b.h - inset);
+        if (Math.hypot(nx - this.x, ny - this.y) > far) break;
+      }
+      this.x = nx; this.y = ny;
+      this.driftAng = rand(0, Math.PI * 2);
+      this.driftTurn = rand(-0.4, 0.4);
+      this.crawlAng = this.driftAng;
+      this.emberAcc = 0;
+      this.gaitT = 0; this.spd = 0; this.moveK = 0; this.flare = null;
+      if (fresh) this.applyToy(pickFfToy());      // 被拍重生：换一种动物，画面不单调
+      this.flareCd = rand(0.6, 1.8) * ((this.toy && this.toy.flare) || 1);
+      if (G.emberTrail && !fresh) G.emberTrail(this.x, this.y);     // 亮起那一下撒几点冷色火星
     }
     laserTeleport() {      const s0 = this.laserSpot();
       this.x = s0.x; this.y = s0.y;
@@ -1402,8 +1606,8 @@ module.exports = function (G) {
     hittable(x, y) {
       if (this.vanishT > 0) return false;
       if (this.type === "frog") {
-        // 重生等待期不可拍；命中盒外扩 15%（落水瞬间放宽到 25%，只要拍在荷叶上都算）
-        if (this.rspT > 0 || this.fade < 0.4) return false;
+        // 重生等待期不可拍；正沉入水里的也不可拍（已经掉进荷塘了）；命中盒外扩 15%（落水瞬间放宽到 25%，只要拍在荷叶上都算）
+        if (this.rspT > 0 || this.fade < 0.4 || this.fState === "drown") return false;
         const pad = this.fState === "land" ? 1.25 : 1.15;
         const hw = this.baseW * this.sc * 0.5 * pad, hh = this.baseH * this.sc * 0.5 * pad;
         const cy = this.y - (this.jumpH || 0);
@@ -1416,7 +1620,9 @@ module.exports = function (G) {
       const bPad = this.type === "butterfly" ? 1.7
         : (this.type === "fish" && inSchoolMode()) ? 1.5
         : this.type === "laser" ? 1.25 : 1;              // 激光光点小：命中区外扩 25% 好拍
-      const fMin = this.type === "butterfly" ? 0.25 : 0.4;
+      // 萤火有"熄灭→重亮"的淡入淡出：把可命中阈值放松到 0.08，
+      // 否则猫在它暗下去的 0.5 秒里拍中反而算 miss（对猫不公平）
+      const fMin = this.type === "butterfly" ? 0.25 : this.type === "pool" ? 0.08 : 0.4;
       if (this.fade < fMin) return false;
       const hw = this.baseW * this.sc * (this.sxMul || 1) / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
       const cy = this.y - (this.hopOff || 0);       // hop 弹跳偏移：命中跟着视觉走
@@ -1480,6 +1686,8 @@ module.exports = function (G) {
         if (this.type === "pool") G.draw.poolLight(ctx, this, t);
         else G.draw.laser(ctx, this, t);
       } else if (this.type === "frog") {
+        const drownK0 = this.drownK || 0;
+        if (drownK0 > 0) ctx.globalAlpha *= Math.max(0.06, 1 - drownK0 * 0.92);   // 沉入水中：整体淡出
         // 水面投影：与身体分离来表达"跳起来了"（跳跃中影子留在地面并变小）
         const lift = this.jumpH || 0;
         ctx.save();
@@ -1509,7 +1717,9 @@ module.exports = function (G) {
         ctx.translate(this.x, this.y - lift - 6);
         ctx.rotate(this._visRot || 0);
         // 视觉尺寸 0.85：让荷叶从身体两侧露出一圈，才像"蹲在叶子上"（命中盒仍按原尺寸，判定不受影响）
-        const s = this.sc * vs * 0.85;
+        // 同叶多只时再略缩一点（shareScale）；沉入水中时缩小淡出
+        const dk = this.drownK || 0;
+        const s = this.sc * vs * 0.85 * (this.shareScale || 1) * (1 - dk * 0.34);
         ctx.scale(s * (this.faceDir || 1), s * (this._squash || 1));
         ctx.translate(-48, -39);
         G.draw.frog(ctx, this, t);
@@ -1608,10 +1818,12 @@ module.exports = function (G) {
     }
     // 水面追光：光斑太多会满屏乱闪，封顶 3→4→5
     if (G.config.targetType === "pool") return ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3;
-    // 青蛙跳：每只独占一片荷叶，封顶按荷叶数（6 片）留 1 片空叶供轮换
+    // 青蛙跳：荷叶数 6，按阶段封顶（3/4/5），留 1 片空叶供轮换；漂着/正沉的叶不计
     if (G.config.targetType === "frog") {
-      const padN = (G.scene && G.scene.pads ? G.scene.pads.length : 6);
-      return Math.min(({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3, Math.max(1, padN - 1));
+      const pads = (G.scene && G.scene.pads) || [];
+      const padN = pads.length || 6;
+      const floatN = pads.filter(p => (p.sinkState || "float") === "float").length || padN;
+      return Math.min(({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3, Math.max(1, floatN - 1));
     }
     // 鱼群巡游：极小的鱼聚成发光"饵球"，数量（24→32→40）——太多会看花也更费电
     if (G.config.targetType === "fish" && G.session.sea && G.session.sea.key === "school") {
