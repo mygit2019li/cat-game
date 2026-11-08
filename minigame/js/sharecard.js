@@ -19,7 +19,7 @@ module.exports = function (G) {
     fish: "深海捕鱼", butterfly: "蝴蝶花园", mouse: "捕鼠行动", laser: "激光暗室", pool: "暗夜萤光", frog: "青蛙跳"
   };
   // 「最常玩」格里的短名要能独立看懂：写「花园」「萤光」读者不知道指的是什么玩法
-  const TYPE_SHORT = { fish: "捕鱼", butterfly: "蝴蝶", mouse: "捕鼠", laser: "激光", pool: "萤光动物", frog: "青蛙跳" };
+  const TYPE_SHORT = { fish: "捕鱼", butterfly: "蝴蝶", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙跳" };
 
   /* ---------- 绘制小工具（不依赖 G.rr，避免和主 UI 坐标耦合） ---------- */
   function rr(ctx, x, y, w, h, r) {

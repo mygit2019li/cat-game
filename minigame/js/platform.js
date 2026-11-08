@@ -239,6 +239,37 @@ module.exports = function (G) {
         return true;
       } catch (e) { return false; }
     },
+    /* 循环播放（瓢虫出现到消失）：返回 { stop, setVolume }；不支持时返回 null */
+    loopSfx(src, vol) {
+      if (!src) return null;
+      try {
+        const inWx = typeof wx !== "undefined" && typeof wx.createInnerAudioContext === "function";
+        let a;
+        if (inWx) {
+          a = wx.createInnerAudioContext();
+          a.src = src;
+          a.loop = true;
+          a.volume = vol == null ? 0.5 : vol;
+          if (typeof a.onError === "function") a.onError(() => { a._bad = true; });
+        } else if (typeof Audio !== "undefined") {
+          const abs = /^(?:data:|blob:|https?:|\/|wxfile:\/\/)/i.test(src);
+          a = new Audio(abs || typeof location === "undefined" ? src : "../" + src);
+          a.loop = true;
+          a.volume = vol == null ? 0.5 : vol;
+          if (typeof a.addEventListener === "function") a.addEventListener("error", () => { a._bad = true; });
+        } else {
+          return null;
+        }
+        a._bad = false;
+        const play = () => { try { const r = a.play(); if (r && r.catch) r.catch(() => {}); } catch (e) {} };
+        play();
+        return {
+          audio: a,
+          stop() { try { a.pause(); a.currentTime = 0; } catch (e) {} try { if (a.destroy) a.destroy(); } catch (e) {} },
+          setVolume(v) { try { a.volume = v; } catch (e) {} }
+        };
+      } catch (e) { return null; }
+    },
     /* 预取：进入玩法时先把音频实例建好，首次触发就不用等下载 */
     preloadSfx(src) {
       if (!src) return;

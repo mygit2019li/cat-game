@@ -114,6 +114,19 @@ module.exports = function (G) {
       [[-0.42, -0.38, 0.16], [0.0, -0.5, 0.17], [0.42, -0.36, 0.15]].forEach(([dx, dy, rr2]) => {
         ctx.beginPath(); ctx.arc(r * dx, r * dy, r * rr2, 0, Math.PI * 2); ctx.fill();
       });
+    } else if (key === "sound") {
+      // 声音：喇叭主体（实心）+ 两道声波弧
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.92, -r * 0.20);
+      ctx.lineTo(-r * 0.44, -r * 0.20);
+      ctx.lineTo(-r * 0.02, -r * 0.58);
+      ctx.lineTo(-r * 0.02, r * 0.58);
+      ctx.lineTo(-r * 0.44, r * 0.20);
+      ctx.lineTo(-r * 0.92, r * 0.20);
+      ctx.closePath(); ctx.fill();
+      ctx.lineWidth = Math.max(1.5, s * 0.12);
+      ctx.beginPath(); ctx.arc(r * 0.08, 0, r * 0.38, -0.62, 0.62); ctx.stroke();
+      ctx.beginPath(); ctx.arc(r * 0.08, 0, r * 0.72, -0.58, 0.58); ctx.stroke();
     } else if (key === "album") {
       // 相册：相框 + 小太阳 + 一座山（线框用 rrPath，G.rr 会顺手把形状填成实心）
       ctx.lineWidth = Math.max(1.4, s * 0.11);
@@ -233,7 +246,7 @@ module.exports = function (G) {
         o.primary ? "#fff" : (o.on ? C.ink : C.ink2));
     }
     ctx.restore();
-    btn(x, y, w, h, o.cb);
+    if (o.key) btnKey(x, y, w, h, o.key, o.cb); else btn(x, y, w, h, o.cb);
   }
   ui.panel = panel; ui.text = text; ui.drawBtn = drawBtn;
   /* 按内容量算按钮宽度：文案短就窄一些，避免"内容少却撑成大宽条"（有图标时额外留图标位） */
@@ -268,7 +281,7 @@ module.exports = function (G) {
     { key: "frog",      name: "青蛙跳",   desc: "荷叶之间来回跳" },
     { key: "laser",     name: "激光暗室", desc: "甩动与停留的红点" },
     { key: "mouse",     name: "捕鼠行动", desc: "打地鼠式两排洞口" },
-    { key: "pool",      name: "暗夜萤光", desc: "三种发光小动物慢慢爬" },
+    { key: "pool",      name: "暗夜萤光", desc: "萤光小虫爬过石板地" },
     { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
@@ -411,6 +424,7 @@ module.exports = function (G) {
       const rowBtns = [
         { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
         { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
+        { label: "声音", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } },
         { label: "本周记录", icon: "chart", cb: () => { G.openModal("records"); } },
         { label: "好友排行", icon: "trophy", cb: () => {
           G.openModal("lb");
@@ -430,7 +444,7 @@ module.exports = function (G) {
         rowBtns.forEach((b, i) => rowXs.push(edgeL + (eq + gap) * i));
         rowW.fill(eq);
       }
-      rowBtns.forEach((b, i) => drawBtn(rowXs[i], rowY, rowW[i], rowH, b.label, { icon: b.icon, cb: b.cb }));
+      rowBtns.forEach((b, i) => drawBtn(rowXs[i], rowY, rowW[i], rowH, b.label, { icon: b.icon, cb: b.cb, key: b.key }));
 
       const cardTop = topY + m;
       const cardBottomLimit = rowY - m;
@@ -460,7 +474,7 @@ module.exports = function (G) {
         const nInRow = (r < rows - 1) ? cols : (MODES.length % cols || cols);
         const offX = (cols - nInRow) * (cw + gap) / 2;
         const x = gx + c * (cw + gap) + offX, y = gy + r * (ch + gap);
-        const sel = G.config.targetType === mItem.key;
+        const sel = mItem.key === "night" ? G.config.targetType === "butterfly" && G.config.bg_butterfly === "night" : G.config.targetType === mItem.key && (mItem.key !== "butterfly" || G.config.bg_butterfly !== "night");
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) {
           ctx.save();
@@ -476,13 +490,14 @@ module.exports = function (G) {
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
         const bob = Math.sin(Date.now() / 500 + i) * 2;
-        G.draw.icon(ctx, mItem.key, 0, bob, scl);
+        G.draw.icon(ctx, mItem.key === "night" ? "butterfly" : mItem.key, 0, bob, scl);
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
-          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
-          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
+          const type = mItem.key === "night" ? "butterfly" : mItem.key;
+          if (G.config.targetType !== type || (mItem.key === "night") !== (G.config.bg_butterfly === "night")) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = type; if (type === "butterfly") G.config.bg_butterfly = mItem.key === "night" ? "night" : "garden"; G.saveConfig(); G.playTick();
         });
       });
     } else {
@@ -505,7 +520,7 @@ module.exports = function (G) {
         const nInRow = (r < rowsP - 1) ? colsP : (MODES.length % colsP || colsP);
         const offX = (colsP - nInRow) * (cw + 14) / 2;
         const x = gx + c * (cw + 14) + offX, y = gy2 + r * (ch + 14);
-        const sel = G.config.targetType === mItem.key;
+        const sel = mItem.key === "night" ? G.config.targetType === "butterfly" && G.config.bg_butterfly === "night" : G.config.targetType === mItem.key && (mItem.key !== "butterfly" || G.config.bg_butterfly !== "night");
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) {
           ctx.save();
@@ -520,22 +535,28 @@ module.exports = function (G) {
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
         const bob = Math.sin(Date.now() / 500 + i) * 2;
-        G.draw.icon(ctx, mItem.key, 0, bob, scl);
+        G.draw.icon(ctx, mItem.key === "night" ? "butterfly" : mItem.key, 0, bob, scl);
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
-          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
-          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
+          const type = mItem.key === "night" ? "butterfly" : mItem.key;
+          if (G.config.targetType !== type || (mItem.key === "night") !== (G.config.bg_butterfly === "night")) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = type; if (type === "butterfly") G.config.bg_butterfly = mItem.key === "night" ? "night" : "garden"; G.saveConfig(); G.playTick();
         });
       });
-      // 召唤猫咪 / 电子猫粮 两个入口并排（半宽，给下方圆形开始按钮留高度）
+      // 召唤猫咪 / 电子猫粮 / 声音 三个入口等宽并排（半宽改三列，给下方圆形开始按钮留高度）
       const cardBottom = cardY + cardH;
       let afterCard = cardBottom + 12;
       if (SHOW_SUMMON) {
-        const halfW = (availW - 10) / 2;
-        drawBtn(edgeL, afterCard, halfW, 44, "召唤猫咪", { icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } });
-        drawBtn(edgeL + halfW + 10, afterCard, halfW, 44, "电子猫粮", { icon: "bowl", cb: () => { G.feederEnter(); } });
+        const rowGap = 8, nBtn = 3;
+        const halfW = (availW - rowGap * (nBtn - 1)) / nBtn;
+        const entries = [
+          { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
+          { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
+          { label: "声音", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } }
+        ];
+        entries.forEach((e, i) => drawBtn(edgeL + i * (halfW + rowGap), afterCard, halfW, 44, e.label, { icon: e.icon, cb: e.cb, key: e.key }));
         afterCard += 44 + 12;
       }
       const by = afterCard;
@@ -603,7 +624,7 @@ module.exports = function (G) {
           c.fillRect(gx, gy, cell, cell);
         }
       }
-      // 荧光小点（示意猎物）
+      // 微光小点（示意猎物）
       const fx2 = x + w * 0.68, fy2 = y + h * 0.42;
       const rg = c.createRadialGradient(fx2, fy2, 0, fx2, fy2, 20);
       rg.addColorStop(0, "rgba(226,255,130,.45)"); rg.addColorStop(1, "rgba(226,255,130,0)");
@@ -1127,8 +1148,11 @@ module.exports = function (G) {
     if (open) {
       btn(xcx - xr - 4, xcy - xr - 4, (xr + 4) * 2, (xr + 4) * 2, () => G.closeSettings());
     }
-    // 关闭动画播完：真正切回首页（面板此时已完全滑出屏幕）
-    if (closing && k >= 1) { G.settings = null; G.screen = "home"; }
+    // 关闭动画播完：回到打开抽屉前的页面（首页 / 结算页），面板此时已完全滑出屏幕
+    if (closing && k >= 1) {
+      const back = (G.settings && G.settings.back) || "home";
+      G.settings = null; G.screen = back;
+    }
   };
 
   /* ================= 弹窗壳（本周记录 / 好友排行共用） =================
@@ -1313,7 +1337,7 @@ module.exports = function (G) {
         G.rr(ctx, x, y, cellW, rowH, 12); ctx.stroke();
         const cy = y + rowH / 2;
         text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙" }[L.type] || "";
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "玩具", frog: "青蛙" }[L.type] || "";
         // 玩法标签：浅色药丸，比纯文字更好扫读
         const tagW = 38, tagX = x + 56;
         ctx.fillStyle = "rgba(21,154,140,.10)";
@@ -1900,6 +1924,610 @@ module.exports = function (G) {
 
   /* ================= 召唤猫咪（猫种卡牌 + 专属召唤语音） =================
      展现形式为卡牌滑动切换，点击卡牌或下方大按钮播放语音 */
+  /* ================= 声音库（猫 / 狗情绪音） =================
+     插画：Q 版漫画头像。猫取「奶油大橘」、狗取「奶黄柴犬」——国内最常见的两种萌系形象。
+     圆润大头 + 扁平色块 + 暖棕描边 + 大眼高光 + 粉腮红，同一个头型按 12 种情绪换
+     眼睛 / 眉毛 / 嘴 / 表情小符号，全部矢量绘制，不额外占包体。 */
+  const FACE_TINT = {
+    angry: "#ffe3dc", alert: "#e1f1ff", confused: "#efe6ff", cry: "#e2edff",
+    happy: "#fff0c7", grumpy: "#ffe2cd", bliss: "#ffe4ef", hungry: "#fff1d6",
+    sad: "#e7ebff", sorry: "#e2f5ea", surprise: "#fff6d2", tired: "#eaeef3"
+  };
+  const FACE_EXPR = {
+    angry:    { brow: "angry",   eye: "narrow",  mouth: "grit",    extra: "vein",    tilt: -0.03 },
+    alert:    { brow: "up",      eye: "wide",    mouth: "small",   extra: "",        tilt: -0.05 },
+    confused: { brow: "one",     eye: "squint",  mouth: "wave",    extra: "quest",   tilt: 0.08 },
+    cry:      { brow: "sad",     eye: "cry",     mouth: "wail",    extra: "tears",   tilt: 0 },
+    happy:    { brow: "soft",    eye: "happy",   mouth: "smile",   extra: "",        tilt: 0 },
+    grumpy:   { brow: "angry",   eye: "angry",   mouth: "frown",   extra: "steam",   tilt: 0.03 },
+    bliss:    { brow: "soft",    eye: "happy",   mouth: "small",   extra: "hearts",  tilt: 0 },
+    hungry:   { brow: "sad",     eye: "wide",    mouth: "tongue",  extra: "drool",   tilt: 0 },
+    sad:      { brow: "sad",     eye: "sad",     mouth: "frown",   extra: "tear",    tilt: 0 },
+    sorry:    { brow: "worried", eye: "side",    mouth: "awkward", extra: "sweat",   tilt: 0.04 },
+    surprise: { brow: "up",      eye: "huge",    mouth: "o",       extra: "sparkle", tilt: 0 },
+    tired:    { brow: "soft",    eye: "half",    mouth: "yawn",    extra: "zzz",     tilt: 0.05 }
+  };
+  /* 暖色扁平盘：奶油白 + 橘（猫）、奶黄 + 白面罩（狗），描边统一暖棕，不用写实渐变 */
+  const CAT_PAL = {
+    base: "#FFF4E5", base2: "#FFE6CC", patch: "#F7AC55", patchDark: "#E38C39",
+    earInner: "#FFB7C3", muzzle: "#FFFCF5", blush: "rgba(255,138,163,.58)",
+    outline: "#714F3D", ink: "#4A332A", iris: "#453029", nose: "#F58CA3"
+  };
+  const DOG_PAL = {
+    base: "#F9CD72", base2: "#EDAE56", patch: "#E9A64C", patchDark: "#D8913F",
+    earInner: "#F8BEA6", muzzle: "#FFF9EF", blush: "rgba(255,140,158,.52)",
+    outline: "#714F3D", ink: "#45301F", iris: "#453029", nose: "#4A342B"
+  };
+
+  /* 只建圆角矩形路径（不填充），给咬牙嘴这类小形状用 */
+  function faceRR(c2, x, y, w, h, r) {
+    c2.beginPath();
+    c2.moveTo(x + r, y);
+    c2.lineTo(x + w - r, y); c2.quadraticCurveTo(x + w, y, x + w, y + r);
+    c2.lineTo(x + w, y + h - r); c2.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    c2.lineTo(x + r, y + h); c2.quadraticCurveTo(x, y + h, x, y + h - r);
+    c2.lineTo(x, y + r); c2.quadraticCurveTo(x, y, x + r, y);
+    c2.closePath();
+  }
+
+  /* 单只眼睛：白眼球 + 大瞳孔 + 双高光（国产萌系最标志性的画法），
+     上眼睑用脸底色压出不同眼型；happy/closed/cry 直接画弯月眼。 */
+  function faceEye(c2, style, x, y, side, pal) {
+    c2.save(); c2.translate(x, y);
+    c2.lineCap = "round"; c2.lineJoin = "round";
+    if (style === "happy" || style === "closed" || style === "cry") {
+      c2.strokeStyle = pal.ink; c2.lineWidth = 4.4;
+      c2.beginPath();
+      if (style === "cry") { c2.moveTo(-12, -4); c2.quadraticCurveTo(0, 9, 12, -4); }
+      else { c2.moveTo(-12, 4); c2.quadraticCurveTo(0, -12, 12, 4); }
+      c2.stroke();
+      c2.restore(); return;
+    }
+    const dim = { normal: [14, 16], wide: [14, 17], huge: [16, 19], sad: [14, 16],
+      angry: [14, 16], narrow: [14, 16], half: [14, 16], side: [14, 16] }[style] || [14, 16];
+    const rw = dim[0], rh = dim[1];
+    c2.fillStyle = "#FFFDF8";
+    c2.beginPath(); c2.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2); c2.fill();
+    c2.save();
+    c2.beginPath(); c2.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2); c2.clip();
+
+    // 瞳孔：不同表情的视线 / 大小 / 高低
+    let px = 0, py = 2, pr = 8.6;
+    if (style === "sad") { py = 6; pr = 7.8; }
+    else if (style === "angry" || style === "narrow") { py = 5; pr = 7.4; }
+    else if (style === "half") { py = 6; pr = 7.6; }
+    else if (style === "side") { px = 5.2; pr = 8.2; }
+    else if (style === "wide") { py = 1; pr = 9.2; }
+    else if (style === "huge") { py = 1; pr = 10.2; }
+    c2.fillStyle = pal.iris;
+    c2.beginPath(); c2.ellipse(px, py, pr * 0.88, pr * 1.08, 0, 0, Math.PI * 2); c2.fill();
+    c2.fillStyle = "#fff";
+    c2.beginPath(); c2.arc(px - pr * 0.34, py - pr * 0.42, pr * 0.38, 0, Math.PI * 2); c2.fill();
+    c2.beginPath(); c2.arc(px + pr * 0.42, py + pr * 0.46, pr * 0.17, 0, Math.PI * 2); c2.fill();
+
+    // 上眼睑：用脸底色压住眼球上半，形成生气 / 困倦 / 悲伤眼型
+    if (style === "angry") {
+      c2.fillStyle = pal.base;
+      c2.beginPath();
+      c2.moveTo(-rw - 6, -rh - 8); c2.lineTo(rw + 6, -rh - 8);
+      c2.lineTo(rw + 6, -3 - 6 * side); c2.lineTo(-rw - 6, -3 + 6 * side);
+      c2.closePath(); c2.fill();
+      c2.strokeStyle = pal.ink; c2.lineWidth = 3;
+      c2.beginPath(); c2.moveTo(-rw - 4, -3 + 6 * side); c2.lineTo(rw + 4, -3 - 6 * side); c2.stroke();
+    } else if (style === "sad" || style === "narrow" || style === "half") {
+      const cut = style === "half" ? 1 : (style === "narrow" ? -3 : 0);
+      c2.fillStyle = pal.base; c2.fillRect(-rw - 6, -rh - 8, rw * 2 + 12, rh + 8 + cut);
+      c2.strokeStyle = pal.ink; c2.lineWidth = 3;
+      c2.beginPath(); c2.moveTo(-rw - 4, cut); c2.lineTo(rw + 4, cut); c2.stroke();
+    }
+    c2.restore();
+
+    // 上眼线：粗一点才有漫画感，缩小到卡片里依然清楚
+    c2.strokeStyle = pal.ink; c2.lineWidth = 2.8;
+    c2.beginPath(); c2.ellipse(0, 0, rw, rh, 0, Math.PI * 1.08, Math.PI * 1.92); c2.stroke();
+    c2.restore();
+  }
+
+  function faceBrow(c2, style, x, y, side, ink) {
+    c2.save(); c2.translate(x, y); c2.scale(side, 1);  // 局部 +x 恒为「外侧」，两边自然对称
+    c2.strokeStyle = ink; c2.lineWidth = 3.4; c2.lineCap = "round";
+    c2.beginPath();
+    if (style === "angry") { c2.moveTo(-12, 5); c2.lineTo(11, -7); }        // 倒八：皱眉生气
+    else if (style === "sad") { c2.moveTo(-12, -7); c2.lineTo(11, 5); }     // 八字：委屈
+    else if (style === "up") { c2.moveTo(-11, 3); c2.quadraticCurveTo(0, -10, 11, 1); }
+    else if (style === "soft") { c2.moveTo(-9, 1); c2.quadraticCurveTo(0, -6, 9, 1); }
+    else if (style === "worried") { c2.moveTo(-11, 5); c2.quadraticCurveTo(0, -6, 11, -1); }
+    else { c2.moveTo(-9, 0); c2.lineTo(9, 0); }
+    c2.stroke();
+    c2.restore();
+  }
+
+  function faceMouth(c2, style, ink) {
+    const dark = "#8E4A55", tongue = "#FF9DB0", white = "#FFFCF6";
+    c2.save(); c2.translate(0, 51);
+    c2.strokeStyle = ink; c2.fillStyle = ink; c2.lineWidth = 3; c2.lineCap = "round"; c2.lineJoin = "round";
+    if (style === "smile") {
+      c2.fillStyle = dark;
+      c2.beginPath(); c2.moveTo(-17, -5); c2.quadraticCurveTo(0, 2, 17, -5);
+      c2.quadraticCurveTo(0, 22, -17, -5); c2.closePath(); c2.fill();
+      c2.fillStyle = tongue; c2.beginPath(); c2.ellipse(0, 8, 8, 5, 0, 0, Math.PI * 2); c2.fill();
+    } else if (style === "small") {
+      // ω 形三瓣嘴：猫狗表情包里最常见的一笔
+      c2.beginPath();
+      c2.moveTo(-12, -1); c2.quadraticCurveTo(-6, 9, 0, 1);
+      c2.quadraticCurveTo(6, 9, 12, -1); c2.stroke();
+    } else if (style === "flat") {
+      c2.beginPath(); c2.moveTo(-9, 0); c2.lineTo(9, 0); c2.stroke();
+    } else if (style === "frown") {
+      c2.beginPath(); c2.moveTo(-12, 5); c2.quadraticCurveTo(0, -11, 12, 5); c2.stroke();
+    } else if (style === "wave") {
+      c2.beginPath();
+      c2.moveTo(-15, 1); c2.bezierCurveTo(-9, -8, -3, 9, 3, 1); c2.bezierCurveTo(8, -5, 12, 4, 16, 0);
+      c2.stroke();
+    } else if (style === "grit") {
+      faceRR(c2, -19, -8, 38, 17, 6);
+      c2.fillStyle = white; c2.fill(); c2.lineWidth = 3; c2.stroke();
+      c2.strokeStyle = "rgba(113,79,61,.55)"; c2.lineWidth = 1.6;
+      for (let i = -1; i <= 1; i++) { c2.beginPath(); c2.moveTo(i * 9, -7); c2.lineTo(i * 9, 8); c2.stroke(); }
+      c2.strokeStyle = ink; c2.lineWidth = 3;
+      c2.beginPath(); c2.moveTo(-22, 13); c2.quadraticCurveTo(0, 7, 22, 13); c2.stroke();
+    } else if (style === "wail") {
+      c2.fillStyle = dark; c2.beginPath(); c2.ellipse(0, 3, 16, 19, 0, 0, Math.PI * 2); c2.fill();
+      c2.fillStyle = tongue; c2.beginPath(); c2.ellipse(0, 13, 9, 6, 0, 0, Math.PI * 2); c2.fill();
+    } else if (style === "o") {
+      c2.fillStyle = dark; c2.beginPath(); c2.ellipse(0, 2, 10, 12, 0, 0, Math.PI * 2); c2.fill();
+      c2.fillStyle = tongue; c2.beginPath(); c2.ellipse(0, 8, 5, 3, 0, 0, Math.PI * 2); c2.fill();
+    } else if (style === "tongue") {
+      c2.fillStyle = dark; c2.beginPath(); c2.ellipse(0, 0, 15, 12, 0, 0, Math.PI * 2); c2.fill();
+      c2.fillStyle = tongue;
+      c2.beginPath(); c2.moveTo(-8, 5); c2.quadraticCurveTo(-7, 23, 0, 24);
+      c2.quadraticCurveTo(7, 23, 8, 5); c2.closePath(); c2.fill();
+      c2.strokeStyle = "rgba(150,60,80,.35)"; c2.lineWidth = 1.3;
+      c2.beginPath(); c2.moveTo(0, 7); c2.lineTo(0, 19); c2.stroke();
+    } else if (style === "awkward") {
+      c2.beginPath();
+      c2.moveTo(-11, 2); c2.quadraticCurveTo(-5, -5, 0, 1); c2.quadraticCurveTo(5, 7, 11, 0);
+      c2.stroke();
+    } else if (style === "yawn") {
+      c2.fillStyle = dark; c2.beginPath(); c2.ellipse(0, 3, 15, 18, 0, 0, Math.PI * 2); c2.fill();
+      c2.fillStyle = tongue; c2.beginPath(); c2.ellipse(0, 14, 8, 5, 0, 0, Math.PI * 2); c2.fill();
+    }
+    c2.restore();
+  }
+
+  /* 情绪小符号：放在脸外缘，尺寸压小，避免盖住五官 */
+  function faceExtra(c2, extra, t, pal) {
+    const blue = "rgba(104,178,214,.85)";
+    if (extra === "tears" || extra === "tear") {
+      const sides = extra === "tears" ? [-1, 1] : [1];
+      sides.forEach(side => {
+        c2.strokeStyle = "rgba(126,187,217,.75)"; c2.lineWidth = 4.4; c2.lineCap = "round";
+        c2.beginPath(); c2.moveTo(side * 34, 14); c2.quadraticCurveTo(side * 38, 34, side * 41, 48); c2.stroke();
+        c2.fillStyle = "#9BD6EE";
+        c2.beginPath(); c2.ellipse(side * 41, 51, 3.4, 5, side * 0.16, 0, Math.PI * 2); c2.fill();
+      });
+    } else if (extra === "drool") {
+      c2.strokeStyle = "rgba(126,187,217,.65)"; c2.lineWidth = 2.8; c2.lineCap = "round";
+      c2.beginPath(); c2.moveTo(17, 61); c2.quadraticCurveTo(20, 72, 17, 79); c2.stroke();
+      c2.fillStyle = "#9BD6EE"; c2.beginPath(); c2.ellipse(17, 81, 2.6, 4, 0, 0, Math.PI * 2); c2.fill();
+    } else if (extra === "sweat") {
+      c2.globalAlpha = 0.9; c2.fillStyle = "#6FC7E8";
+      const d = (t * 0.5) % 1;
+      c2.beginPath();
+      const sx = -74, sy = -56 + d * 10, r = 7;
+      c2.moveTo(sx, sy - r * 1.3);
+      c2.bezierCurveTo(sx + r, sy - r * 0.2, sx + r, sy + r * 0.6, sx, sy + r);
+      c2.bezierCurveTo(sx - r, sy + r * 0.6, sx - r, sy - r * 0.2, sx, sy - r * 1.3);
+      c2.fill(); c2.globalAlpha = 1;
+    } else if (extra === "hearts") {
+      for (let i = 0; i < 3; i++) {
+        const d = (t * 0.42 + i * 0.33) % 1;
+        const hx = -74 - i * 9 + Math.sin((t + i) * 2) * 3, hy = -66 - d * 30;
+        c2.globalAlpha = 0.25 + 0.72 * (1 - d);
+        c2.fillStyle = i === 1 ? "#FF8FB1" : "#FF6F9B";
+        c2.beginPath();
+        c2.moveTo(hx, hy + 7);
+        c2.bezierCurveTo(hx - 11, hy - 3, hx - 6, hy - 12, hx, hy - 4);
+        c2.bezierCurveTo(hx + 6, hy - 12, hx + 11, hy - 3, hx, hy + 7);
+        c2.fill();
+      }
+      c2.globalAlpha = 1;
+    } else if (extra === "sparkle") {
+      c2.fillStyle = "#FFC93C";
+      [[-80, -66, 1], [84, -30, 0.8], [88, 24, 0.6], [-84, 22, 0.55]].forEach(([sx, sy, ss], i) => {
+        c2.globalAlpha = 0.5 + 0.45 * Math.abs(Math.sin(t * 2.4 + i));
+        const k = 8 * ss;
+        c2.beginPath();
+        c2.moveTo(sx, sy - k); c2.quadraticCurveTo(sx + 2, sy - 2, sx + k, sy);
+        c2.quadraticCurveTo(sx + 2, sy + 2, sx, sy + k);
+        c2.quadraticCurveTo(sx - 2, sy + 2, sx - k, sy);
+        c2.quadraticCurveTo(sx - 2, sy - 2, sx, sy - k);
+        c2.fill();
+      });
+      c2.globalAlpha = 1;
+    } else if (extra === "zzz") {
+      c2.fillStyle = "#8A93A6"; c2.textAlign = "center"; c2.textBaseline = "middle";
+      for (let i = 0; i < 3; i++) {
+        const d = (t * 0.35 + i * 0.3) % 1;
+        c2.globalAlpha = 0.3 + 0.65 * (1 - d);
+        c2.font = "bold " + (28 - i * 6) + "px sans-serif";
+        c2.fillText("Z", -64 - i * 11 - d * 7, -62 - i * 14 - d * 12);
+      }
+      c2.globalAlpha = 1;
+    } else if (extra === "steam") {
+      c2.fillStyle = "rgba(255,255,255,.9)";
+      [[-88, -60], [88, -46]].forEach(([sx, sy], i) => {
+        for (let k = 0; k < 2; k++) {
+          const d = (t * 0.55 + k * 0.4 + i * 0.2) % 1;
+          c2.globalAlpha = 0.5 * (1 - d);
+          c2.beginPath(); c2.arc(sx + Math.sin((t + k) * 2) * 4, sy - d * 22, 6 + d * 5, 0, Math.PI * 2); c2.fill();
+        }
+      });
+      c2.globalAlpha = 1;
+    } else if (extra === "vein") {
+      c2.strokeStyle = "#F2686A"; c2.lineWidth = 4; c2.lineCap = "round";
+      const vx = -76, vy = -68;
+      [[-1, 0], [1, 0], [0, -1], [0, 1]].forEach(([dx, dy]) => {
+        c2.beginPath(); c2.moveTo(vx + dx * 3, vy + dy * 3); c2.lineTo(vx + dx * 11, vy + dy * 11); c2.stroke();
+      });
+    } else if (extra === "quest" || extra === "excl") {
+      c2.fillStyle = extra === "quest" ? "#8A7BD8" : "#EF8A3C";
+      c2.font = "bold 42px sans-serif"; c2.textAlign = "center"; c2.textBaseline = "middle";
+      c2.fillText(extra === "quest" ? "?" : "!", -72, -66 + Math.sin(t * 4) * 2);
+    }
+  }
+
+  function drawAnimalFace(c2, kind, emotion, cx, cy, R, t) {
+    const ex = FACE_EXPR[emotion] || FACE_EXPR.happy;
+    const pal = kind === "dog" ? DOG_PAL : CAT_PAL;
+    const cat = kind !== "dog";
+    c2.save();
+    c2.translate(cx, cy);
+    c2.scale(R / 100, R / 100);
+    c2.rotate((ex.tilt || 0) + Math.sin(t * 1.5 + (cat ? 0 : 1.1)) * 0.013);
+    const breathe = 1 + Math.sin(t * 2 + (cat ? 0 : 1.6)) * 0.012;
+    c2.scale(breathe, breathe);
+    c2.lineCap = "round"; c2.lineJoin = "round";
+
+    /* 耳朵：猫是大尖耳（橘 + 粉内耳），柴犬是小立耳（深黄 + 粉内耳）；先画头后压耳根 */
+    const drawEar = (side) => {
+      c2.save(); c2.scale(side, 1);
+      c2.fillStyle = cat ? pal.patch : pal.base2;
+      c2.strokeStyle = pal.outline; c2.lineWidth = 3.4;
+      c2.beginPath();
+      if (cat) {
+        c2.moveTo(-76, -38);
+        c2.quadraticCurveTo(-85, -78, -66, -92);
+        c2.quadraticCurveTo(-56, -99, -49, -91);
+        c2.quadraticCurveTo(-30, -77, -23, -56);
+      } else {
+        c2.moveTo(-67, -40);
+        c2.quadraticCurveTo(-79, -72, -65, -87);
+        c2.quadraticCurveTo(-55, -95, -47, -85);
+        c2.quadraticCurveTo(-32, -71, -31, -51);
+      }
+      c2.closePath(); c2.fill(); c2.stroke();
+      c2.fillStyle = pal.earInner;
+      c2.beginPath();
+      if (cat) {
+        c2.moveTo(-69, -48);
+        c2.quadraticCurveTo(-74, -74, -63, -82);
+        c2.quadraticCurveTo(-42, -71, -36, -54);
+      } else {
+        c2.moveTo(-61, -48);
+        c2.quadraticCurveTo(-69, -70, -62, -78);
+        c2.quadraticCurveTo(-46, -68, -42, -52);
+      }
+      c2.closePath(); c2.fill();
+      c2.restore();
+    };
+    drawEar(-1); drawEar(1);
+
+    /* 头型：略扁的圆润大脸，脸颊鼓出来，下巴收圆 */
+    const headPath = () => {
+      c2.beginPath();
+      c2.moveTo(0, -70);
+      c2.bezierCurveTo(50, -70, 84, -40, 84, 8);
+      c2.bezierCurveTo(84, 54, 52, 82, 0, 82);
+      c2.bezierCurveTo(-52, 82, -84, 54, -84, 8);
+      c2.bezierCurveTo(-84, -40, -50, -70, 0, -70);
+      c2.closePath();
+    };
+    const hg = c2.createLinearGradient(0, -70, 0, 84);
+    hg.addColorStop(0, pal.base); hg.addColorStop(1, pal.base2);
+    c2.fillStyle = hg; headPath(); c2.fill();
+
+    c2.save(); headPath(); c2.clip();
+    if (cat) {
+      // 橘色「帽子」：下缘走一道 M 形波浪，是国产大橘猫最经典的记号
+      c2.fillStyle = pal.patch;
+      c2.beginPath();
+      c2.moveTo(-90, -80); c2.lineTo(90, -80); c2.lineTo(90, -32);
+      c2.bezierCurveTo(66, -20, 42, -36, 24, -30);
+      c2.quadraticCurveTo(12, -26, 0, -16);
+      c2.quadraticCurveTo(-12, -26, -24, -30);
+      c2.bezierCurveTo(-42, -36, -66, -20, -90, -32);
+      c2.closePath(); c2.fill();
+      // 额上三道虎斑纹
+      c2.strokeStyle = pal.patchDark; c2.lineWidth = 5;
+      [[-26, -62, -20, -40], [0, -66, 0, -40], [26, -62, 20, -40]].forEach(([x1, y1, x2, y2]) => {
+        c2.beginPath(); c2.moveTo(x1, y1); c2.quadraticCurveTo((x1 + x2) / 2 + 3, (y1 + y2) / 2, x2, y2); c2.stroke();
+      });
+      // 两颊浅色口鼻区
+      c2.fillStyle = pal.muzzle;
+      c2.beginPath(); c2.ellipse(-20, 43, 32, 26, -0.08, 0, Math.PI * 2); c2.fill();
+      c2.beginPath(); c2.ellipse(20, 43, 32, 26, 0.08, 0, Math.PI * 2); c2.fill();
+    } else {
+      // 柴犬白色面罩：上缘呈心形起伏，覆盖两颊与吻部
+      c2.fillStyle = pal.muzzle;
+      c2.beginPath();
+      c2.moveTo(-90, 8);
+      c2.bezierCurveTo(-78, -8, -62, -8, -52, 6);
+      c2.quadraticCurveTo(-28, 22, 0, 16);
+      c2.quadraticCurveTo(28, 22, 52, 6);
+      c2.bezierCurveTo(62, -8, 78, -8, 90, 8);
+      c2.lineTo(90, 92); c2.lineTo(-90, 92);
+      c2.closePath(); c2.fill();
+      // 额上两枚浅色眉点（柴犬标志）
+      c2.fillStyle = "rgba(255,250,238,.92)";
+      c2.beginPath(); c2.ellipse(-31, -48, 9, 6, -0.16, 0, Math.PI * 2); c2.fill();
+      c2.beginPath(); c2.ellipse(31, -48, 9, 6, 0.16, 0, Math.PI * 2); c2.fill();
+    }
+    // 粉腮红：除愤怒 / 哭喊 / 疲倦外常驻，营造软萌感
+    const blushA = (emotion === "angry" || emotion === "grumpy" || emotion === "cry" || emotion === "tired") ? 0.24 : 0.62;
+    c2.globalAlpha = blushA;
+    c2.fillStyle = pal.blush;
+    c2.beginPath(); c2.ellipse(-58, 25, 15, 9, -0.12, 0, Math.PI * 2); c2.fill();
+    c2.beginPath(); c2.ellipse(58, 25, 15, 9, 0.12, 0, Math.PI * 2); c2.fill();
+    c2.globalAlpha = 1;
+    c2.restore();
+    c2.strokeStyle = pal.outline; c2.lineWidth = 3.4; headPath(); c2.stroke();
+
+    /* 猫胡须：两侧各两根短弧，画在头外，短而翘才不显老气 */
+    if (cat) {
+      c2.strokeStyle = "rgba(113,79,61,.62)"; c2.lineWidth = 2.2;
+      [[-52, 28, -84, 20], [-54, 42, -86, 44], [52, 28, 84, 20], [54, 42, 86, 44]].forEach(([x1, y1, x2, y2]) => {
+        c2.beginPath(); c2.moveTo(x1, y1);
+        c2.quadraticCurveTo((x1 + x2) / 2, y1 + (x2 > 0 ? -4 : -4), x2, y2);
+        c2.stroke();
+      });
+    }
+
+    // 眼睛 / 眉毛
+    if (ex.eye === "squint") {
+      faceEye(c2, "closed", -32, -3, -1, pal);
+      faceEye(c2, "wide", 32, -3, 1, pal);
+    } else {
+      faceEye(c2, ex.eye, -32, -3, -1, pal);
+      faceEye(c2, ex.eye, 32, -3, 1, pal);
+    }
+    if (ex.brow === "one") {
+      faceBrow(c2, "up", -32, -34, -1, pal.ink);
+      faceBrow(c2, "flat", 32, -36, 1, pal.ink);
+    } else {
+      faceBrow(c2, ex.brow, -32, -36, -1, pal.ink);
+      faceBrow(c2, ex.brow, 32, -36, 1, pal.ink);
+    }
+
+    // 鼻子：猫是粉色小三角，狗是黑色圆鼻，都留一点高光
+    if (cat) {
+      c2.fillStyle = pal.nose; c2.strokeStyle = pal.outline; c2.lineWidth = 2;
+      c2.beginPath();
+      c2.moveTo(-9, 24); c2.quadraticCurveTo(0, 20, 9, 24);
+      c2.quadraticCurveTo(7, 33, 0, 34); c2.quadraticCurveTo(-7, 33, -9, 24);
+      c2.closePath(); c2.fill(); c2.stroke();
+      c2.strokeStyle = pal.ink; c2.lineWidth = 2.4;
+      c2.beginPath(); c2.moveTo(0, 34); c2.lineTo(0, 41); c2.stroke();
+    } else {
+      c2.fillStyle = pal.nose;
+      c2.beginPath();
+      c2.moveTo(-14, 22); c2.quadraticCurveTo(0, 17, 14, 22);
+      c2.quadraticCurveTo(16, 32, 0, 35); c2.quadraticCurveTo(-16, 32, -14, 22);
+      c2.closePath(); c2.fill();
+      c2.fillStyle = "rgba(255,255,255,.55)";
+      c2.beginPath(); c2.ellipse(-4, 24, 4.2, 2.4, -0.3, 0, Math.PI * 2); c2.fill();
+      c2.strokeStyle = pal.ink; c2.lineWidth = 2.4;
+      c2.beginPath(); c2.moveTo(0, 35); c2.lineTo(0, 41); c2.stroke();
+    }
+
+    faceMouth(c2, ex.mouth, pal.ink);
+    faceExtra(c2, ex.extra, t, pal);
+
+    c2.restore();
+  }
+
+  ui.drawSound = () => {
+    const { W, H, safe } = layout();
+    const now = performance.now();
+    const packs = G.SOUND_PACKS || [];
+    const pack = packs.find(p => p.key === (G.soundTab || "cat")) || packs[0];
+    if (!pack) return;
+    ui.buttons.length = 0;
+
+    // 背景：与首页同一套浅青渐变 + 慢速气泡，页与页之间不跳色
+    const bg = ctx.createLinearGradient(0, 0, W, H);
+    bg.addColorStop(0, C.homeBg1); bg.addColorStop(0.55, C.homeBg2); bg.addColorStop(1, C.homeBg3);
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(255,255,255,.30)"; ctx.lineWidth = 1;
+    for (let i = 0; i < 7; i++) {
+      const bx = (i * 61 + 30) % W, by = H - ((now / 32 + i * 89) % (H * 0.72));
+      const r = 4 + (i % 3) * 3;
+      ctx.beginPath(); ctx.arc(bx, by, r, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    const active = G.soundPadActive ? G.soundPadActive() : !!(G.soundPad && G.soundPad.playing);
+    const sp = G.soundPad || {};
+    const playingCard = active ? sp.key : "";
+    const playingPack = active ? sp.animal : "";
+    const animBase = G.soundAnimT0 || now;
+
+    // 顶部：返回 / 标题（停止键放在下面的 tab 行，避开微信胶囊）
+    const bs = 40, bX = safe.left + 14, bY = safe.top + 8;
+    ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.strokeStyle = C.line; ctx.lineWidth = 1.1;
+    G.rr(ctx, bX, bY, bs, bs, 12); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = C.ink2; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(bX + bs * 0.60, bY + bs * 0.31); ctx.lineTo(bX + bs * 0.39, bY + bs * 0.50);
+    ctx.lineTo(bX + bs * 0.60, bY + bs * 0.69);
+    ctx.stroke();
+    btnKey(bX, bY, bs, bs, "sound-back", () => { G.closeSound(); });
+
+    text("声音", W / 2, safe.top + 28, "bold 21px sans-serif", C.ink);
+
+    // 猫 / 狗 分段 tab
+    const tabW = Math.min(240, Math.max(184, W * 0.30));
+    const tabH = 36, tabX = (W - tabW) / 2, tabY = safe.top + 48;
+    ctx.fillStyle = "rgba(255,255,255,.62)"; ctx.strokeStyle = "rgba(255,255,255,.95)"; ctx.lineWidth = 1.2;
+    G.rr(ctx, tabX, tabY, tabW, tabH, tabH / 2); ctx.fill(); ctx.stroke();
+    const segW = (tabW - 8) / packs.length;
+    packs.forEach((p, i) => {
+      const on = p.key === pack.key;
+      const sx = tabX + 4 + i * segW;
+      if (on) {
+        const tg = ctx.createLinearGradient(sx, tabY, sx, tabY + tabH);
+        tg.addColorStop(0, C.startGrad0); tg.addColorStop(1, C.startGrad1);
+        ctx.fillStyle = tg;
+        G.rr(ctx, sx, tabY + 4, segW, tabH - 8, (tabH - 8) / 2); ctx.fill();
+      }
+      text(p.name, sx + segW / 2, tabY + tabH / 2 + 1, "bold 15px sans-serif", on ? "#fff" : C.ink2);
+      btnKey(sx, tabY + 3, segW, tabH - 6, "sound-tab-" + p.key, () => G.setSoundTab(p.key));
+    });
+    /* 停止键放在 tab 右侧而不是屏幕右上角：右上角是微信胶囊（···/关闭）的固定地盘，
+       横屏时还会被「游戏中心」手柄入口再占一格。放在 tab 同一行既避开胶囊，也不压标题。 */
+    if (active) {
+      const sw = 46, sh = tabH - 4, sx = tabX + tabW + 10, sy = tabY + 2;
+      if (sx + sw <= W - safe.right - 8) {
+        const g2 = ctx.createLinearGradient(sx, sy, sx, sy + sh);
+        g2.addColorStop(0, C.startGrad0); g2.addColorStop(1, C.startGrad1);
+        ctx.fillStyle = g2;
+        G.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill();
+        ctx.fillStyle = "#fff";
+        G.rr(ctx, sx + 8, sy + sh / 2 - 3.5, 7, 7, 2); ctx.fill();
+        text("停止", sx + 18, sy + sh / 2 + 1, "bold 11px sans-serif", "#fff", "left");
+        btnKey(sx, sy, sw, sh, "sound-stop", () => { G.stopAnimalSound(); G.playTick(); });
+      }
+    }
+
+    // 网格：三套候选布局里取单格最大，横屏手机自然落到 6×2
+    const gridTop = tabY + tabH + 13;
+    const gridBottom = H - safe.bottom - 32;
+    const gridW = W - safe.left - safe.right - 28;
+    const gridH = Math.max(80, gridBottom - gridTop);
+    const gap = Math.min(12, Math.max(8, W * 0.012));
+    const n = pack.sounds.length;
+    const cands = n <= 6 ? [[3, 2], [2, 3]] : [[6, 2], [4, 3], [3, 4]];
+    let best = null;
+    cands.forEach(([cols, rows]) => {
+      if (cols * rows < n) return;
+      const cw = (gridW - gap * (cols - 1)) / cols;
+      const ch = (gridH - gap * (rows - 1)) / rows;
+      if (cw < 36 || ch < 36) return;
+      // 过于扁长/瘦长的格子不好看：按 min(cw,ch) 打分，再用 1.45 的宽高比偏好做轻微修正
+      const score = Math.min(cw, ch) - Math.abs(cw / ch - 1.08) * 8;
+      if (!best || score > best.score) best = { cols, rows, cw, ch, score };
+    });
+    if (!best) return;
+    const { cols, rows, cw, ch } = best;
+    const totalW = cw * cols + gap * (cols - 1);
+    const totalH = ch * rows + gap * (rows - 1);
+    const gx = safe.left + (W - safe.left - safe.right - totalW) / 2;
+    const gy = gridTop + Math.max(0, (gridH - totalH) / 2);
+
+    pack.sounds.forEach((snd, i) => {
+      const r = Math.floor(i / cols), c = i % cols;
+      const nInRow = (r < rows - 1) ? cols : (n % cols || cols);
+      const offX = (cols - nInRow) * (cw + gap) / 2;
+      const x = gx + c * (cw + gap) + offX;
+      const y = gy + r * (ch + gap);
+      const isPlaying = active && playingCard === snd.key && playingPack === pack.key;
+      const tint = FACE_TINT[snd.face] || "#e8f4ef";
+      const ek = clamp((now - animBase - i * 18) / 240, 0, 1);
+      const ease = 1 - Math.pow(1 - ek, 3);
+      const press = ui.pressedBtn && Math.abs(ui.pressedBtn.x - x) < 0.5 &&
+        Math.abs(ui.pressedBtn.y - y) < 0.5 ? 0.965 : 1;
+
+      ctx.save();
+      ctx.globalAlpha = ease;
+      ctx.translate(x + cw / 2, y + ch / 2 + (1 - ease) * 12);
+      ctx.scale(press, press);
+      ctx.translate(-(x + cw / 2), -(y + ch / 2));
+
+      // 卡片：播放中青绿描边 + 柔光，其余白卡细边
+      ctx.save();
+      if (isPlaying) { ctx.shadowColor = "rgba(21,154,140,.35)"; ctx.shadowBlur = 16; ctx.shadowOffsetY = 4; }
+      else { ctx.shadowColor = "rgba(20,49,58,.10)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3; }
+      ctx.fillStyle = isPlaying ? "#ffffff" : "rgba(255,255,255,.95)";
+      G.rr(ctx, x, y, cw, ch, 16); ctx.fill();
+      ctx.restore();
+      ctx.strokeStyle = isPlaying ? C.teal : "rgba(220,235,230,.95)";
+      ctx.lineWidth = isPlaying ? 2.2 : 1.1;
+      rrPath(x, y, cw, ch, 16); ctx.stroke();
+
+      // 插画：淡色圆底 + 矢量猫/狗脸，播放中向外扩散两道声波
+      const labelH = Math.min(24, Math.max(18, ch * 0.15));
+      const faceCy = y + (ch - labelH) * 0.50 + 2;
+      const faceR = Math.max(12, Math.min(cw * 0.40, (faceCy - y - 6) / 1.12,
+        (y + ch - labelH - faceCy) / 0.92, 52));
+      const cx = x + cw / 2;
+      ctx.save();
+      rrPath(x, y, cw, ch, 16); ctx.clip();
+      ctx.fillStyle = tint;
+      ctx.beginPath(); ctx.arc(cx, faceCy, Math.min(faceR * 1.16, cw * 0.47), 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,.85)"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, faceCy, Math.min(faceR * 1.16, cw * 0.47) - 1.5, 0, Math.PI * 2); ctx.stroke();
+      if (isPlaying) {
+        const ph = (now / 900) % 1;
+        for (let k = 0; k < 2; k++) {
+          const alpha = Math.max(0, 0.55 * (1 - ph - k * 0.22));
+          if (alpha <= 0) continue;
+          ctx.strokeStyle = "rgba(21,154,140," + alpha.toFixed(3) + ")";
+          ctx.lineWidth = 2;
+          const rad = faceR * (1.22 + k * 0.16 + ph * 0.14);
+          ctx.beginPath(); ctx.arc(cx, faceCy, rad, -0.62, 0.62); ctx.stroke();
+          ctx.beginPath(); ctx.arc(cx, faceCy, rad, Math.PI - 0.62, Math.PI + 0.62); ctx.stroke();
+        }
+      }
+      drawAnimalFace(ctx, pack.key, snd.face, cx, faceCy + Math.sin(now / 620 + i) * 1.1, faceR, now / 1000);
+      ctx.restore();
+
+      // 右上角播放标记：小三角（待播） / 三格跳动（播放中）
+      const badgeX = x + cw - 15, badgeY = y + 15, badgeR = Math.min(10, cw * 0.09);
+      ctx.fillStyle = isPlaying ? "rgba(21,154,140,.14)" : "rgba(20,49,58,.055)";
+      ctx.beginPath(); ctx.arc(badgeX, badgeY, badgeR, 0, Math.PI * 2); ctx.fill();
+      if (isPlaying) {
+        ctx.fillStyle = C.teal;
+        for (let k = 0; k < 3; k++) {
+          const bh = 3.5 + Math.abs(Math.sin(now / 150 + k * 1.2)) * 7;
+          G.rr(ctx, badgeX - 5 + k * 4, badgeY - bh / 2, 2.4, bh, 1.2); ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = C.ink3;
+        ctx.beginPath();
+        ctx.moveTo(badgeX - 2.5, badgeY - 3.6); ctx.lineTo(badgeX + 4, badgeY);
+        ctx.lineTo(badgeX - 2.5, badgeY + 3.6); ctx.closePath(); ctx.fill();
+      }
+
+      // 情绪名
+      text(snd.name, cx, y + ch - Math.min(13, labelH * 0.56),
+        "bold " + Math.min(14, Math.max(11, cw * 0.11)) + "px sans-serif",
+        isPlaying ? C.tealDeep : C.ink);
+      ctx.restore();
+
+      btnKey(x, y, cw, ch, "sound-card-" + pack.key + "-" + snd.key, () => {
+        G.playSoundCard(pack.key, snd);
+      });
+    });
+
+    // 底部提示：播放中显示当前曲目，音效关闭时给出开启指引
+    let foot;
+    if (G.config && G.config.sound === false) foot = "音效已在设置中关闭，去首页设置里打开后即可试听";
+    else if (active) foot = "正在播放：" + (packs.find(p => p.key === playingPack) || pack).name + " · " + (sp.name || "");
+    else foot = pack.desc + " · 点一下卡片就能听";
+    text(foot, W / 2, H - safe.bottom - 13, "12px sans-serif", active ? C.tealDeep : C.ink3);
+    // 正在淡出到别的页面：本帧不再接收点击，避免"返回后又被点响一条"
+    if (G.nextScreen && G.nextScreen !== "sound") ui.buttons.length = 0;
+  };
+
   ui.drawSummon = () => {
     const { W, H, land, m, safe } = layout();
     const kinds = G.summonKinds ? G.summonKinds() : (G.CAT_KINDS || []);
@@ -2262,7 +2890,7 @@ module.exports = function (G) {
     const R = G.result || {};
     // 模式名：结算页标题要标出这一局选的是哪种玩法（鱼玩法再带海域主题名）
     const seaName = G.config.targetType === "fish" && G.session.sea ? " · " + G.session.sea.name : "";
-    const modeName = ((MODES.find(md => md.key === G.config.targetType) || {}).name || "") + seaName;
+    const modeName = (((G.config.targetType === "butterfly" && G.currentBg() === "night") ? MODES.find(md => md.key === "night") : MODES.find(md => md.key === G.config.targetType)) || {}).name + seaName;
     // 背景半透明：下层是当前玩法的场景（由 game.js 在结算时绘制），透出来才能看出是哪个模式。
     // 蒙版从 .76 降到 .50 一档——之前场景几乎被洗白，截图存图后看不出玩法差异。
     // 文字可读性不再靠压低透明度，改由「标题区柔光 + 文字白描边」解决，见下。
@@ -2293,6 +2921,17 @@ module.exports = function (G) {
       ["触碰次数", R.touches || 0], ["总捕获", R.hits || 0],
       ["命中率", (R.acc || 0) + "%"], ["最高连击", R.maxCombo || 0]
     ];
+    /* 左上角设置入口：结算页也能直接改设置。横竖屏共用，不挤占底部四个主按钮；
+       关闭抽屉后回到本页而不是跳回首页（见 G.openSettings(back)）。 */
+    {
+      const sw = 76, sh = 34, sx = safe.left + 12, sy = safe.top + 10;
+      ctx.fillStyle = "rgba(255,255,255,.94)";
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
+      G.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill(); ctx.stroke();
+      drawVecIcon("gear", sx + 17, sy + sh / 2, 12, C.tealDeep);
+      text("设置", sx + 46, sy + sh / 2 + 1, "bold 13px sans-serif", C.tealDeep);
+      btn(sx, sy, sw, sh, () => G.openSettings("result"));
+    }
     if (land) {
       const edgeL = safe.left + 24, edgeR = W - safe.right - 24;
       const availW = Math.min(edgeR - edgeL, 760);

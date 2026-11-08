@@ -9,7 +9,7 @@ module.exports = function (G) {
   G.GAME_NAME = "逗猫触屏玩具";
 
   const DEFAULTS = {
-    targetType: "fish", preyCount: 3, difficulty: "normal", duration: 180, infinite: false,
+    targetType: "fish", preyCount: 1, difficulty: "normal", duration: 180, infinite: false,
     keepScreen: true,        // 屏幕常亮（给猫玩时不自动锁屏）
     antiMistouch: true,      // 进入游戏首次弹「系统防误触」引导
     sound: true,             // 音效默认开
@@ -87,6 +87,49 @@ module.exports = function (G) {
     }].concat(list);
   };
 
+  /* ===== 声音库（首页「声音」模块）=====
+     参考视频里的情绪声音板：猫 / 狗两套，各 12 种情绪。每张卡 = 一个按钮，
+     点一下播放对应的本地音频（同一时间只播一条，点另一张会切走）。
+     24 条音频按视频中选中卡片的顺序，从用户提供的录屏提取：猫 / 狗各 12 种情绪。
+     统一去首尾静音、归一到 -16 LUFS、64kbps 单声道；dur 与提取后的实际时长对齐。
+     dur 用于 UI 的播放中动效（音频 onEnded 触发前的兜底时长），单位秒。 */
+  G.SOUND_PACKS = [
+    {
+      key: "cat", name: "猫", desc: "喵星人的十二种情绪",
+      sounds: [
+        { key: "angry",    name: "生气", face: "angry",    src: "视频提取·cat", path: "assets/sounds/cat_angry.mp3",    dur: 0.81 },
+        { key: "alert",    name: "注意", face: "alert",    src: "视频提取·cat", path: "assets/sounds/cat_alert.mp3",    dur: 1.41 },
+        { key: "confused", name: "困惑", face: "confused", src: "视频提取·cat", path: "assets/sounds/cat_confused.mp3", dur: 0.91 },
+        { key: "cry",      name: "哭喊", face: "cry",      src: "视频提取·cat", path: "assets/sounds/cat_cry.mp3",      dur: 0.68 },
+        { key: "happy",    name: "高兴", face: "happy",    src: "视频提取·cat", path: "assets/sounds/cat_happy.mp3",    dur: 1.07 },
+        { key: "grumpy",   name: "暴躁", face: "grumpy",   src: "视频提取·cat", path: "assets/sounds/cat_grumpy.mp3",   dur: 0.86 },
+        { key: "bliss",    name: "幸福", face: "bliss",    src: "视频提取·cat", path: "assets/sounds/cat_bliss.mp3",    dur: 1.12 },
+        { key: "hungry",   name: "饥饿", face: "hungry",   src: "视频提取·cat", path: "assets/sounds/cat_hungry.mp3",   dur: 2.14 },
+        { key: "sad",      name: "悲伤", face: "sad",      src: "视频提取·cat", path: "assets/sounds/cat_sad.mp3",      dur: 1.12 },
+        { key: "sorry",    name: "抱歉", face: "sorry",    src: "视频提取·cat", path: "assets/sounds/cat_sorry.mp3",    dur: 1.15 },
+        { key: "surprise", name: "惊讶", face: "surprise", src: "视频提取·cat", path: "assets/sounds/cat_surprise.mp3", dur: 1.02 },
+        { key: "tired",    name: "疲倦", face: "tired",    src: "视频提取·cat", path: "assets/sounds/cat_tired.mp3",    dur: 1.44 }
+      ]
+    },
+    {
+      key: "dog", name: "狗", desc: "汪星人的十二种情绪",
+      sounds: [
+        { key: "angry",    name: "生气", face: "angry",    src: "视频提取·dog", path: "assets/sounds/dog_angry.mp3",    dur: 2.82 },
+        { key: "alert",    name: "注意", face: "alert",    src: "视频提取·dog", path: "assets/sounds/dog_alert.mp3",    dur: 1.41 },
+        { key: "confused", name: "困惑", face: "confused", src: "视频提取·dog", path: "assets/sounds/dog_confused.mp3", dur: 1.72 },
+        { key: "cry",      name: "哭喊", face: "cry",      src: "视频提取·dog", path: "assets/sounds/dog_cry.mp3",      dur: 0.99 },
+        { key: "happy",    name: "高兴", face: "happy",    src: "视频提取·dog", path: "assets/sounds/dog_happy.mp3",    dur: 1.70 },
+        { key: "grumpy",   name: "暴躁", face: "grumpy",   src: "视频提取·dog", path: "assets/sounds/dog_grumpy.mp3",   dur: 3.29 },
+        { key: "bliss",    name: "幸福", face: "bliss",    src: "视频提取·dog", path: "assets/sounds/dog_bliss.mp3",    dur: 3.32 },
+        { key: "hungry",   name: "饥饿", face: "hungry",   src: "视频提取·dog", path: "assets/sounds/dog_hungry.mp3",   dur: 1.67 },
+        { key: "sad",      name: "悲伤", face: "sad",      src: "视频提取·dog", path: "assets/sounds/dog_sad.mp3",      dur: 2.17 },
+        { key: "sorry",    name: "抱歉", face: "sorry",    src: "视频提取·dog", path: "assets/sounds/dog_sorry.mp3",    dur: 1.38 },
+        { key: "surprise", name: "惊讶", face: "surprise", src: "视频提取·dog", path: "assets/sounds/dog_surprise.mp3", dur: 1.62 },
+        { key: "tired",    name: "疲倦", face: "tired",    src: "视频提取·dog", path: "assets/sounds/dog_tired.mp3",    dur: 2.93 }
+      ]
+    }
+  ];
+
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
   const TYPES = ["fish", "butterfly", "mouse", "laser", "pool", "frog"];
@@ -108,6 +151,10 @@ module.exports = function (G) {
     /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
     frog: [
       { key: "pond", name: "夏夜荷塘", desc: "荷叶 · 睡莲 · 萤火" }
+    ],
+    butterfly: [
+      { key: "garden", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
+      { key: "night", name: "暗夜荧光", desc: "四种发光昆虫轮番登场" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
@@ -126,6 +173,9 @@ module.exports = function (G) {
     if (typeof saved !== "object" || Array.isArray(saved)) saved = {};
     const c = Object.assign({}, DEFAULTS, saved);
     c.preyCount = Number(c.preyCount) === 1 ? 1 : 3;   // 两档：单只/多只
+    /* 默认改为「单只」：saveConfig 会把整个 config 写进本地存档，旧存档里往往已有显式 3，
+       这里用 pcV1 标记做一次性迁移，把它们也拉回新默认；之后用户在设置里改「多只」会一直保留。 */
+    if (!saved.pcV1) { c.preyCount = 1; c.pcV1 = 1; }
     // 音效/震动/自适应辅助默认开启：旧版本存档里是旧逻辑写入的显式 false，
     // 用 sndV1 标记做一次性迁移（重置为默认开），此后用户在设置里手动关闭的会一直保留
     if (!saved.sndV1) {
@@ -309,8 +359,9 @@ module.exports = function (G) {
     mouse: { 1: "阶段① 慢速探头", 2: "阶段② 快速轮换", 3: "阶段③ 闪电地鼠" },
     butterfly: { 1: "阶段① 轻舞飞扬", 2: "阶段② 花间穿梭", 3: "阶段③ 疾风蝶影" },
     laser: { 1: "阶段① 缓缓游走", 2: "阶段② 快速闪现", 3: "阶段③ 疯狂光点" },
-    pool:  { 1: "阶段① 萤火初现", 2: "阶段② 暗夜疾行", 3: "阶段③ 疯狂萤光" },
-    frog:  { 1: "阶段① 荷叶慢跳", 2: "阶段② 跨叶远跳", 3: "阶段③ 连跳追击" }
+    pool:  { 1: "阶段① 慢慢转", 2: "阶段② 转得更快", 3: "阶段③ 疯狂旋转" },
+    frog:  { 1: "阶段① 荷叶慢跳", 2: "阶段② 跨叶远跳", 3: "阶段③ 连跳追击",
+             4: "阶段④ 荷叶变阵" }
   };
   G.stageName = (n) => (STAGE_NAME[G.config.targetType] || STAGE_NAME.fish)[n];
 
@@ -322,10 +373,10 @@ module.exports = function (G) {
   };
   /* 水面追光三阶段：高速掠水（频繁变向）→ 悬停水珠（主要命中窗口）→ 再掠。
      比激光整体快一档、转向更勤，靠"亮斑+水痕"制造 Peppy Cat 式的高速光点追逐 */
-  /* 萤火虫（暗夜萤光）参数，全部取自参考视频的逐帧测量：
-     - 爬行分两档：慢爬 15–20% 屏宽/秒、急爬 50–60% 屏宽/秒，交替周期 0.5–1.4s
+  /* 发光玩具（暗夜萤光）公共步态参数，节奏取自早期参考视频的逐帧测量：
+     - 跑动分两档：慢爬 15–20% 屏宽/秒、急爬 50–60% 屏宽/秒，交替周期 0.5–1.4s
        （视频里帧速度中位 18%/s、90 分位 53%/s，段落速度方差达 2.1，是典型的"走走停停"）
-     - 腹部呼吸 1.9–2.3Hz；鞘翅开合：常态微张，每 2.2–3.6s 张翅"闪"一下（视频里红色面积会突然翻三倍）
+     - 呼吸脉动 1.9–2.3Hz；每 2.2–3.6s 耳朵/翅膀/鞘壳放大"亮一下"，给猫一个动态提示
      - 自发换位很罕见（视频 24 秒只有 2 次），所以间隔给到 7–10s */
   G.FIREFLY = {
     1: { slow: 58,  fast: 150, gait: [0.55, 1.20], fastP: 0.35, pulse: 1.9, flare: [2.6, 3.8], tele: [9, 13] },
@@ -334,17 +385,24 @@ module.exports = function (G) {
   };
   /* 兼容旧字段（其他模块可能还引用） */
   G.POOL_DRIFT = G.FIREFLY;
-  /* 暗夜萤光的三种发光玩具动物（造型来源见 draw.js 的取样注释）。
-     基准节奏仍是上面 G.FIREFLY 那套视频实测值，这里只按动物性格做微调：
-       spd    = 移速倍率（老鼠最机灵，瓢虫最慢悠悠）
-       fastP  = 急爬占比偏移（叠加在阶段基准 fastP 上）
-       gait   = 换挡周期倍率（<1 = 更频繁地换速，看起来更"碎步"）
-       flare  = "闪一下"间隔倍率（<1 = 更常开鞘翅）
-       size   = 体型倍率（同时进命中盒，大狗更好拍、小虫更难拍） */
+  /* 兔子模式（暗夜萤光按 29.8s 实拍视频重做）30fps 逐帧实测：
+     · 走 / 停交替：走 0.9–3.1s、停 0.9–2.0s；停时位移为 0（不是匀速乱飘）。
+     · 走段每帧 4–8px（296 宽）≈ 每步 0.16–0.18s 一小跳，步内有前快后慢的顿挫。
+     · 段内「移动方向」夹角中位仅 2.7°、90 分位 10.2° —— 一直朝前，不随机拐弯；
+       玩具头朝行进方向；路线尽量保持一条直线，撞边才平滑转向。
+     · 猎物可见率 82%，被拍后暗场中位 1.37s 再换点；面积约 2Hz 呼吸脉动。
+     step 单位 = min(屏宽, 屏高×0.75) %/步；横屏不再按屏宽放大速度，横竖屏都约 3–5s 跑完高度。
+     出生方向以左右为主、允许一点上下坡度；移动中不主动拐弯。 */
+  G.RABBIT = {
+    1: { step: 8.0,  hopDur: 0.16, hopGap: 0.020, walk: [1.2, 3.0], rest: [0.9, 1.8], pulse: 2.0, dark: [2.0, 2.6] },
+    2: { step: 9.5,  hopDur: 0.15, hopGap: 0.020, walk: [1.4, 3.0], rest: [0.8, 1.6], pulse: 2.1, dark: [2.2, 2.8] },
+    3: { step: 11.0, hopDur: 0.14, hopGap: 0.020, walk: [1.6, 3.2], rest: [0.7, 1.4], pulse: 2.2, dark: [2.4, 3.0] }
+  };
+  /* 暗夜萤光（第一版）：一只萤光小虫在暗色石板地上爬行，腹尾萤火呼吸脉动。
+     行为引擎是 updateFirefly（慢爬/急爬两档步态 + 罕见自发暗场换位），节奏见 G.FIREFLY；
+     G.RABBIT 表已不再使用。 */
   G.FF_TOYS = [
-    { key: "dog",     name: "萤光小狗", w: 1, spd: 0.94, fastP: -0.06, gait: 1.15, flare: 1.25, size: 1.06 },
-    { key: "mouse",   name: "萤光老鼠", w: 1, spd: 1.12, fastP: 0.10,  gait: 0.92, flare: 0.95, size: 0.98 },
-    { key: "ladybug", name: "萤光瓢虫", w: 1, spd: 0.86, fastP: -0.02, gait: 0.80, flare: 0.70, size: 0.92 }
+    { key: "firefly", name: "萤光小虫", w: 1, spd: 1, fastP: 0, gait: 1, flare: 1, size: 0.85 }
   ];
   G.POOL_PARAMS = {
     1: { hold: [0.55, 0.9], dart: [0.65, 1.1],  tele: 0.05 },
@@ -388,7 +446,10 @@ module.exports = function (G) {
   G.FROG_PARAMS = {
     1: { crouch: 0.60, leap: 0.80, land: 0.28, settle: 1.00, count: 3, prep: 0.35, nearFirst: 2, chain: 1 },
     2: { crouch: 0.52, leap: 0.72, land: 0.26, settle: 0.80, count: 4, prep: 0.35, nearFirst: 0, chain: 1 },
-    3: { crouch: 0.44, leap: 0.64, land: 0.24, settle: 0.62, count: 5, prep: 0.35, nearFirst: 0, chain: 2 }
+    3: { crouch: 0.44, leap: 0.64, land: 0.24, settle: 0.62, count: 5, prep: 0.35, nearFirst: 0, chain: 2 },
+    /* ④ 换场：节奏与阶段②完全一致（不连跳），落点改为「周边 2 片叶距离内任选」；
+       小荷叶被踩到会沉没且不再浮起，见 scenery.js G.rebuildFrogPads / G.padSink */
+    4: { crouch: 0.52, leap: 0.72, land: 0.26, settle: 0.80, count: 5, prep: 0.35, nearFirst: 0, chain: 1, roam: 2 }
   };
   /* 老鼠花色 variants：毛色分层（背→中→腹）/ 耳 / 爪 / 尾 / 眼鼻 + 速度体型差异 */
   G.MOUSE_VARIANTS = [
@@ -452,7 +513,7 @@ module.exports = function (G) {
     mouse:     { w: 116, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
-    /* 水面追光：高亮光斑。命中盒比激光略大（高速目标宽容些），spark 用水花青白 */
+    /* 暗夜萤光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用萤光黄绿 */
     pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" },
     /* 青蛙跳：体型大、移动靠跳跃（不参与巡游速度），spark 用荷叶青绿 */
     frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" }
@@ -611,6 +672,15 @@ module.exports = function (G) {
   G.stageNow = () => {
     const dur = Number(G.config.duration) || 180;
     const elapsed = dur - Math.max(G.session.remaining, 0);
+    /* 青蛙跳有四段，其余玩法仍是三段：其它玩法的参数表只有 1/2/3，
+       共用四段会让它们回落到阶段①参数，所以这里按玩法分流。
+       1 分钟局：0–18 / 18–33 / 33–48 / 48–60 秒。 */
+    if (G.config.targetType === "frog") {
+      const f1 = Math.min(20, dur * 0.30);              // 60s → 18s
+      const f2 = f1 + Math.min(15, dur * 0.25);         // 60s → 33s
+      const f3 = f2 + Math.min(15, dur * 0.25);         // 60s → 48s
+      return elapsed < f1 ? 1 : elapsed < f2 ? 2 : elapsed < f3 ? 3 : 4;
+    }
     const t1 = Math.min(20, dur * 0.3);
     const t2 = t1 + Math.min(50, dur * 0.5);
     return elapsed < t1 ? 1 : elapsed < t2 ? 2 : 3;

@@ -104,20 +104,109 @@ module.exports = function (G) {
     G.summonPlaying = false;
   };
 
-  /* ---------- 暗夜萤光（三种发光玩具动物）音效 ----------
-     素材是 tools/gen_firefly_sfx.py 按参考视频的实测参数合成的原创音：
-       · 拍中：视频量到重心 0.72–1.79kHz、衰减 40–190ms，三种动物各占一段
-         小狗 798Hz（最闷 + 低频"汪"）/ 老鼠 1531Hz（+ 一记短吱）/ 瓢虫 1892Hz（最脆 + 翅膜嗡）
-       · 张翅：1.6–3.6kHz 的极轻摩擦声，音量压到 0.16，满屏五只也不会吵 */
+  /* ---------- 声音库（首页「声音」模块）----------
+     猫/狗各 12 条情绪音，同一时间只播一条：点新卡会先停旧卡再播。
+     只用「一个」InnerAudioContext 反复换 src —— 微信同时存在的实例上限约 10 个，
+     24 条音各自建实例会在用户点过一轮后直接超限；换 src 的复用方式没有这个风险。
+     G.soundPad 是绘制层读取的播放状态；dur 用来兜底（onEnded 少数机型不回调）。 */
+  G.soundPad = { animal: "", key: "", name: "", playing: false, t0: 0, dur: 0 };
+  let padPlayer = null, padBroken = false, padSeq = 0;
+  function ensurePadPlayer() {
+    if (padPlayer || padBroken) return padPlayer;
+    const inWx = typeof wx !== "undefined" && typeof wx.createInnerAudioContext === "function";
+    try {
+      if (inWx) {
+        const a = wx.createInnerAudioContext();
+        a.loop = false;
+        a.volume = 0.95;
+        // 不接 onEnded：换 src 时上一条的 ended 可能晚到，会把新一条误标成已结束。
+        // 播放中判定统一由 G.soundPadActive() 按 dur 兜底，元数据时长是准的。
+        a.onError(() => { G.soundPad.playing = false; });   // 单条素材失败不封死整个播放器
+        padPlayer = a;
+      } else if (typeof Audio !== "undefined") {
+        const a = new Audio();
+        a.preload = "auto";
+        a.volume = 0.95;
+        a.addEventListener("error", () => { G.soundPad.playing = false; });
+        padPlayer = a;
+      }
+    } catch (e) { padBroken = true; }
+    return padPlayer;
+  }
+  function padStop() {
+    if (!padPlayer) return;
+    try { padPlayer.stop(); } catch (e) {}
+    try { padPlayer.pause(); } catch (e) {}
+    try { if (typeof padPlayer.seek === "function") padPlayer.seek(0); } catch (e) {}
+    try { padPlayer.currentTime = 0; } catch (e) {}
+  }
+  G.stopAnimalSound = () => {
+    padSeq++;
+    padStop();
+    G.soundPad.playing = false;
+    G.soundPad.animal = ""; G.soundPad.key = ""; G.soundPad.name = "";
+  };
+  /* 播放一条：animal/snd 来自 G.SOUND_PACKS。返回 true 表示已发起播放。
+     音效总开关关闭时不播（首页设置里可开），由 UI 提示。 */
+  G.playAnimalSound = (animal, snd) => {
+    if (!snd || !snd.path) return false;
+    ensureAudio();
+    if (G.config && G.config.sound === false) { G.stopAnimalSound(); return false; }
+    const p = ensurePadPlayer();
+    if (!p) return false;
+    padStop();
+    try {
+      const abs = /^(?:data:|blob:|https?:|\/|wxfile:\/\/)/i.test(snd.path);
+      const inWx = typeof wx !== "undefined" && typeof wx.createInnerAudioContext === "function";
+      p.src = inWx || abs || typeof location === "undefined" ? snd.path : "../" + snd.path;
+      /* 先同步置状态再 play()：play 的异步回调可能晚于动画首帧 */
+      G.soundPad = {
+        animal: (animal && animal.key) || animal || "", key: snd.key || "", name: snd.name || "",
+        playing: true, t0: performance.now(), dur: (Number(snd.dur) || 1) * 1000
+      };
+      const seq = ++padSeq;
+      const r = p.play();
+      if (r && typeof r.catch === "function") {
+        r.catch((err) => {
+          // 连点换 src 时浏览器会抛 AbortError（正常中断）；旧一次的回调也不能污染新状态
+          if (seq !== padSeq) return;
+          if (err && err.name === "AbortError") return;
+          G.soundPad.playing = false;
+        });
+      }
+      return true;
+    } catch (e) {
+      G.soundPad.playing = false;
+      return false;
+    }
+  };
+  /* 播放中判定：onEnded 之外的兜底（dur + 120ms 后视为结束） */
+  G.soundPadActive = () => {
+    const s = G.soundPad;
+    if (!s || !s.playing) return false;
+    if (s.dur > 0 && performance.now() - s.t0 > s.dur + 120) { s.playing = false; return false; }
+    return true;
+  };
+
+  /* ---------- 暗夜萤光（三种发光玩具）音效 ----------
+     沿用 tools/gen_firefly_sfx.py 按参考视频实测参数合成的原创音：
+       兔子 → 通用中频段；老鼠 → 带短吱的鼠音段；瓢虫 → 最脆的翅膜嗡。
+       张翅摩擦与出现 ticks 三种共用。 */
   const FF_HIT = "assets/sfx/firefly-hit.wav";
   const FF_HIT_V = {
-    dog: "assets/sfx/firefly-hit-dog.wav",
-    mouse: "assets/sfx/firefly-hit-mouse.wav",
+    firefly: "assets/sfx/firefly-hit.wav",
+    rabbit: "assets/sfx/firefly-hit.wav",
     ladybug: "assets/sfx/firefly-hit-ladybug.wav"
   };
   /* 没有音频能力时的合成回退：同样按物种换中心频率与低频垫底 */
-  const FF_HIT_TONE = { dog: [780, 520, 1], mouse: [1300, 980, 0], ladybug: [1720, 1240, 0] };
+  const FF_HIT_TONE = { firefly: [1040, 780, 0], rabbit: [1080, 760, 0], ladybug: [1720, 1240, 0] };
   const FF_FLARE = "assets/sfx/firefly-flare.wav";
+  /* 兔子音效：参考视频里精确截取的“跳一下”轻响（tools/extract_rabbit_sfx.py）
+     只在每次起跳时播放一次，不再按移动计时循环，也不在蹲下时叠音。 */
+  const RABBIT_HOP = "assets/sfx/rabbit-hop.wav";
+  const RABBIT_LAND = "assets/sfx/rabbit-video-2.wav";
+  const RABBIT_HIT = "assets/sfx/rabbit-hit.wav";      // tools/gen_rabbit_hit_sfx.py 合成：低频 pop + 高频星爆 shimmer
+  const LADYBUG_APPEAR = "assets/sfx/ladybug-appear.wav";
   const FF_SPAWN = "assets/sfx/firefly-spawn.wav";
   const FF_SHIFT = "assets/sfx/firefly-shift.wav";
   let ffHitAt = 0, ffFlareAt = 0, ffSpawnAt = 0;
@@ -141,6 +230,20 @@ module.exports = function (G) {
     if (G.platform.sfx && G.platform.sfx(FF_FLARE, 0.16)) return;
     tone("triangle", 2400, 3000, 0.05, 0.05);
   };
+  /* Peppy Cat 式轻量移动提示：偶发短音，不铺持续旋律，避免盖住拍击反馈。 */
+  G.playFireflyMove = (species) => {
+    if (!G.config.sound) return;
+    if (species === "rabbit") {
+      if (G.playRabbitHopSfx) G.playRabbitHopSfx();
+      else {
+        tone("sine", 210, 105, 0.075, 0.055);
+        tone("triangle", 690, 430, 0.045, 0.018, 0.035);
+      }
+    } else {
+      tone("sine", 620, 980, 0.095, 0.022);
+      tone("sine", 1240, 1560, 0.07, 0.009, 0.025);
+    }
+  };
   /* 出现/重生：视频里是一串极轻的 ~1kHz 小 ticks（1.9–3.3s 那一串），音量 0.24 */
   G.playFireflySpawn = () => {
     if (!G.config.sound) return;
@@ -163,18 +266,149 @@ module.exports = function (G) {
       .forEach(src => G.platform.preloadSfx(src));
   };
 
+  /* 兔子跳步：参考视频里精确截取的两记轻响（0.125s）。
+     视频里的轻响约 0.14–0.18s 一记；我们的 hop 周期约 0.18s，
+     所以一次落地只播一声，两段素材交替使用，既有变化又不会叠成机关枪。
+     音量从原来的 0.085/0.075 提到 0.32/0.29：旧音量在手机外放上几乎听不见。 */
+  G.playRabbitHopSfx = () => {
+    if (!G.config.sound) return;
+    if (G.platform.sfx && G.platform.sfx(RABBIT_HOP, 0.32)) return;
+    tone("sine", 210, 105, 0.075, 0.16);
+    tone("triangle", 690, 430, 0.045, 0.05, 0.035);
+  };
+  G.playRabbitLandSfx = () => {
+    if (!G.config.sound) return;
+    if (G.platform.sfx && G.platform.sfx(RABBIT_LAND, 0.29)) return;
+    tone("sine", 190, 95, 0.08, 0.14);
+    tone("triangle", 620, 380, 0.05, 0.045, 0.025);
+  };
+  /* 一次落地一声：hop/land 两段素材交替；全局 110ms 限流，
+     多只兔子同时跑时也只保留最近的一记，避免 3 只 × 5 次/s 叠成噪音。 */
+  let rabbitStepAlt = false, rabbitStepAt = 0;
+  G.playRabbitStepSfx = () => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (rabbitStepAt && now - rabbitStepAt < 110) return;
+    rabbitStepAt = now;
+    rabbitStepAlt = !rabbitStepAlt;
+    if (rabbitStepAlt) G.playRabbitHopSfx();
+    else G.playRabbitLandSfx();
+  };
+  /* 兔子被拍中：低频 pop + 高频星爆 shimmer，0.45s；比跳步明显更响。 */
+  let rabbitHitAt = 0;
+  G.playRabbitHitSfx = (big) => {
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (rabbitHitAt && now - rabbitHitAt < 80) return;
+    rabbitHitAt = now;
+    const vol = big ? 0.65 : 0.55;
+    if (G.platform.sfx && G.platform.sfx(RABBIT_HIT, vol)) return;
+    // 素材不可用时退回原有的短促命中音
+    if (G.playFireflyHit) G.playFireflyHit("rabbit");
+  };
+  G.preloadRabbitVideoSfx = () => {
+    if (!G.platform.preloadSfx) return;
+    [RABBIT_HOP, RABBIT_LAND, RABBIT_HIT, LADYBUG_APPEAR].forEach(src => G.platform.preloadSfx(src));
+  };
+  /* 瓢虫出现：播放从参考视频 0.33s“瓢虫出现”处截取/降噪的轻响 */
+  G.playLadybugAppearSfx = () => {
+    if (!G.config.sound) return;
+    if (G.platform.sfx && G.platform.sfx(LADYBUG_APPEAR, 0.06)) return;
+    // 素材不可用时的合成兜底：极轻的高频振翅
+    tone("sine", 1700, 2500, 0.12, 0.035);
+    tone("triangle", 2400, 3200, 0.08, 0.018, 0.04);
+  };
+  /* 瓢虫：出现即开始循环，直到消失（点击/两回趟完成）才停。
+     多只瓢虫共用一个循环，避免叠成一片。 */
+  let ladybugLoop = null;
+  G.ladybugLoopActive = false;
+  G.stopLadybugLoop = () => {
+    if (ladybugLoop) {
+      try { ladybugLoop.stop(); } catch (e) {}
+      ladybugLoop = null;
+    }
+    G.ladybugLoopActive = false;
+  };
+  G.updateLadybugLoop = () => {
+    const S = G.session || {};
+    const active = G.screen === "playing" && S.running && !S.paused && !S.counting &&
+      G.preys && G.preys.some(p => p.type === "pool" && p.species === "ladybug" &&
+        p.fade > 0.05 && !(p.vanishT > 0) && !(p.darkT > 0));
+    if (active && !ladybugLoop) {
+      ladybugLoop = G.platform.loopSfx ? G.platform.loopSfx(LADYBUG_APPEAR, 0.05) : null;
+      G.ladybugLoopActive = !!ladybugLoop;
+    } else if (!active && ladybugLoop) {
+      G.stopLadybugLoop();
+    }
+  };
   G.playHit = (combo) => {
     const baseF = 480 + Math.min(combo || 0, 10) * 40;
     tone("sine", baseF, 150, 0.16, 0.32); tone("triangle", baseF * 2, 340, 0.1, 0.1);
   };
-  G.playMiss = () => tone("triangle", 150, 95, 0.09, 0.16);
+  /* 捕鼠室内房间：除老鼠叫声（出洞循环"唧唧" + 命中真实录音）外全部静音——
+     拍偏、连击成就、倒计时提示音都不播。群鼠乱窜（swarm）与其它玩法不受影响。 */
+  G.quietMouseRoom = () => G.config.targetType === "mouse" &&
+    G.scene && G.scene.type === "mouse" &&
+    (!G.scene.mouseBg || G.scene.mouseBg === "room");
+  G.playMiss = () => { if (G.quietMouseRoom && G.quietMouseRoom()) return; tone("triangle", 150, 95, 0.09, 0.16); };
   G.playTick = () => tone("sine", 700, 0, 0.06, 0.14);
-  G.playGo = () => tone("sine", 1046, 0, 0.2, 0.2);
-  G.playMilestone = () => { tone("sine", 660, 0, 0.09, 0.18); tone("sine", 880, 0, 0.09, 0.18, 0.08); tone("sine", 1100, 0, 0.12, 0.18, 0.16); };
+  G.playGo = () => { if (G.quietMouseRoom && G.quietMouseRoom()) return; tone("sine", 1046, 0, 0.2, 0.2); };
+  G.playMilestone = () => {
+    if (G.quietMouseRoom && G.quietMouseRoom()) return;
+    tone("sine", 660, 0, 0.09, 0.18); tone("sine", 880, 0, 0.09, 0.18, 0.08); tone("sine", 1100, 0, 0.12, 0.18, 0.16);
+  };
+  /* 老鼠命中叫声：真实录音（用户提供的实拍视频 2.05–3.10s，连着 3 声"唧唧"，
+     峰值已归一到 -3 dBFS）。素材不可用时退回原来的合成音。
+     追击命中（double）只是播得更响一点——录音本身已连着 3 声，不用再叠一遍。 */
+  const MOUSE_SQUEAK = "assets/sfx/mouse-squeak.wav";
+  G.preloadMouseSfx = () => { if (G.platform.preloadSfx) G.platform.preloadSfx(MOUSE_SQUEAK); };
   G.playSqueak = (double) => {
+    if (!G.config.sound) return;
+    if (G.platform.sfx && G.platform.sfx(MOUSE_SQUEAK, double ? 0.62 : 0.5)) return;
     tone("square", 2900, 2100, 0.05, 0.09);
     tone("square", 3300, 2400, 0.05, 0.08, 0.07);
     if (double) tone("square", 3600, 2600, 0.06, 0.09, 0.14);
+  };
+  /* 老鼠出洞期间的循环“唧唧”声：只要有老鼠在 peek/dart 就一直叫，
+     全部回洞后停止。多只老鼠共用一个声部并按数量略微加快，
+     避免 6~8 个洞口各自起一个循环叠成噪音。
+     音源与命中音同一段真实录音（连 3 声，约 1.05s）：每轮放一遍、
+     轮间隔必须 ≥ 录音长度（sfx 池每次调用起新实例，叠了会混成一片）；
+     出洞的鼠越多轮间隔越短，听感上就是“叫得更密”。素材不可用回退合成音。 */
+  let mouseSqueakOn = false, mouseSqueakTimer = null, mouseSqueakN = 0;
+  function mouseSqueakTick() {
+    if (!mouseSqueakOn) return;
+    if (!G.config.sound) { G.stopMouseSqueak(); return; }
+    if (!(G.platform.sfx && G.platform.sfx(MOUSE_SQUEAK, 0.30))) {
+      const f = 2300 + Math.random() * 900;
+      tone("square", f, f * 0.72, 0.045, 0.055);
+      tone("square", f * 1.16, f * 0.82, 0.040, 0.040, 0.060);
+      if (Math.random() < 0.30) tone("square", f * 1.05, f * 0.80, 0.035, 0.032, 0.140);
+    }
+    const base = mouseSqueakN > 2 ? 1075 : mouseSqueakN > 1 ? 1120 : 1200;
+    mouseSqueakTimer = setTimeout(mouseSqueakTick, base + Math.random() * 260);
+  }
+  G.stopMouseSqueak = () => {
+    mouseSqueakOn = false;
+    if (mouseSqueakTimer) { clearTimeout(mouseSqueakTimer); mouseSqueakTimer = null; }
+  };
+  // 测试/调试用：当前是否有老鼠循环声在播、当前出洞鼠数
+  G.mouseSqueakActive = () => mouseSqueakOn;
+  G.mouseSqueakCount = () => mouseSqueakN;
+  G.updateMouseSqueak = () => {
+    const S = G.session || {};
+    const playing = G.screen === "playing" && S.running && !S.paused && !S.counting;
+    let n = 0;
+    if (playing && G.preys) {
+      for (let i = 0; i < G.preys.length; i++) {
+        const p = G.preys[i];
+        if (p.type === "mouse" && (p.state === "peek" || p.state === "dart") &&
+            (p.fade == null || p.fade > 0.5)) n++;
+      }
+    }
+    mouseSqueakN = n;
+    if (!G.config.sound || n === 0) { if (mouseSqueakOn) G.stopMouseSqueak(); return; }
+    if (!mouseSqueakOn) { mouseSqueakOn = true; mouseSqueakTick(); }
   };
   G.playFlutter = () => {
     tone("triangle", 1900, 2400, 0.05, 0.07);

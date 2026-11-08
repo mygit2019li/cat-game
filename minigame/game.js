@@ -19,7 +19,7 @@ G.loadCustomSummon();
 
 const ctx = G.platform.ctx;
 const clamp = G.clamp;
-G.screen = "home";        // home | settings | records | counting | playing | paused | result
+G.screen = "home";        // home | settings | records | leaderboard | summon | sound | feeder | bgpick | counting | playing | paused | result
 G.nextScreen = null;
 G.transitionT = 0;
 G.shake = 0;
@@ -29,11 +29,12 @@ let countT = 0, lastInt = -1;
 
 /* 设置抽屉：从首页左上角滑出，直接切屏（不走整屏淡入淡出），关闭时同样直接回首页。
    G.settings.t0 是抽屉的入场时间戳，绘制层据此算滑入进度。 */
-G.openSettings = () => {
+/* back = 关闭抽屉后回到的页面（默认首页）；结算页传 "result"，改完设置还能回到本局结果。 */
+G.openSettings = (back) => {
   // 先解锁音频再记 t0：ensureAudio 首次创建 WebAudio 上下文可能阻塞上百毫秒，
   // 放在前面会把抽屉的入场时间戳"吃掉"，动画一帧都看不到
   if (G.ensureAudio) G.ensureAudio();
-  G.settings = { t0: performance.now() };
+  G.settings = { t0: performance.now(), back: back || "home" };
   G.screen = "settings"; G.nextScreen = null; G.transitionT = 0;
 };
 /* 关闭：先播反向滑出动画（200ms），动画结束后由 drawSettings 真正切回首页。
@@ -83,10 +84,43 @@ G.closeSettings = () => {
   if (G.playTick) G.playTick();
 };
 
+/* ================= 声音模块（猫 / 狗情绪音） =================
+   首页「声音」入口进入；页面内点猫/狗切 tab，点卡片播放对应音频，右上角可停止。
+   播放状态在 G.soundPad（audio.js），绘制层按它做选中态与声波动效。 */
+G.soundTab = "cat";
+G.openSound = () => {
+  G.ensureAudio();
+  if (G.stopSummonMusic) G.stopSummonMusic();    // 召唤页的喵声不要串进来
+  if (G.stopAnimalSound) G.stopAnimalSound();
+  if (G.SOUND_PACKS && !G.SOUND_PACKS.some(p => p.key === G.soundTab)) G.soundTab = "cat";
+  G.soundAnimT0 = performance.now();
+  G.switchScreen("sound");
+};
+G.closeSound = () => {
+  if (G.stopAnimalSound) G.stopAnimalSound();
+  G.switchScreen("home");
+};
+G.setSoundTab = (key) => {
+  if (!G.SOUND_PACKS || !G.SOUND_PACKS.some(p => p.key === key)) return;
+  if (G.soundTab === key) return;
+  G.soundTab = key;
+  if (G.stopAnimalSound) G.stopAnimalSound();    // 换 tab 先静音，避免上一只动物的声音继续响
+  G.soundAnimT0 = performance.now();
+  G.playTick();
+};
+G.playSoundCard = (animal, snd) => {
+  G.ensureAudio();
+  const ok = G.playAnimalSound ? G.playAnimalSound(animal, snd) : false;
+  if (ok && G.track) G.track("sound_play", { animal, key: snd && snd.key });
+  return ok;
+};
+
 G.switchScreen = (name) => {
   if (G.screen === name) return;
   // 离开召唤页时收起自定义录入面板（面板只在 summon 页画，不收会在下次进页时错弹出来）
   if (G.ui && G.ui.summonEdit && G.ui.closeSummonEdit) G.ui.closeSummonEdit();
+  // 离开声音页时停止试听（含从声音页直接跳设置等所有路径）
+  if (G.screen === "sound" && name !== "sound" && G.stopAnimalSound) G.stopAnimalSound();
   G.nextScreen = name;
   G.transitionT = 0;
 };
@@ -111,9 +145,9 @@ initDebug();
    配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
    量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
 const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只" };
-const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光小动物" };
-/* 暗夜萤光三种动物的命中碎屑主色（和各自本体一致：狗偏琥珀、鼠偏柠檬、瓢虫偏橙） */
-const POOL_SPARK = { dog: "#ffd79a", mouse: "#fdf3a8", ladybug: "#ffbe7a" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "小兔子" };
+/* 兔子场所命中碎屑主色（黄色本体） */
+const POOL_SPARK = { firefly: "#ffe479" };
 G.shareResult = () => {
   const R = G.result || {};
   const hits = Number(R.hits) || 0;
@@ -168,17 +202,21 @@ G.shareInvite = (from) => {
   G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=" + src });
 };
 G.platform.initShare(() => ({
-  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、发光小动物轮着来，看它能抓到几个",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、发光小玩具轮着来，看它能抓到几个",
   query: "from=menu"
 }));
 
 /* ================= 开局 ================= */
 G.startGame = () => {
   G.stopSummonMusic();   // 召唤语音不串进对局
+  if (G.stopLadybugLoop) G.stopLadybugLoop();   // 上一局的瓢虫循环不要带进新一局
+  if (G.stopMouseSqueak) G.stopMouseSqueak();
   G.ensureAudio();
   // 青蛙跳：进局先把两段蛙鸣预取好，第一声"呱"就不用等下载
+  if (G.config.targetType === "pool" && G.preloadRabbitVideoSfx) G.preloadRabbitVideoSfx();
   if (G.config.targetType === "frog" && G.preloadFrogVoices) G.preloadFrogVoices();
-  if (G.config.targetType === "pool" && G.preloadFireflySfx) G.preloadFireflySfx();
+  // 捕鼠：预取真实老鼠叫录音，第一下命中就不等下载
+  if (G.config.targetType === "mouse" && G.preloadMouseSfx) G.preloadMouseSfx();
   const S = G.session;
   S.touches = 0; S.hits = 0; S.bonusHits = 0; S.combo = 0; S.maxCombo = 0;
   S.missStreak = 0; S.dartStreak = 0; S.dartHits = 0;
@@ -187,6 +225,7 @@ G.startGame = () => {
   S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
+  S.nightPhase = 0;   // 暗夜荧光仅在动物到达屏幕边缘时推进周期
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
   // 鱼玩法：海域由背景选择层决定（水草森林 / 泳池追鱼，左右滑动切换、跨局记忆）
   S.sea = G.config.targetType === "fish" ? (G.SEA_THEMES.find(t => t.key === G.currentBg()) || G.SEA_THEMES[0]) : null;
@@ -201,7 +240,7 @@ G.startGame = () => {
     G.track("game_start", {
       mode: G.config.targetType,
       dur: G.config.infinite ? 0 : (Number(G.config.duration) || 180),
-      pc: Number(G.config.preyCount) || 3
+      pc: Number(G.config.preyCount) || 1
     });
   };
   // 防误触引导：首局进游戏弹一次系统防误触说明（微信内无法拦截系统手势，只能靠
@@ -230,6 +269,7 @@ function beginPlay() {
    卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
 G.requestStart = () => {
   const arr = G.bgsFor(G.config.targetType);
+  if (G.config.targetType === "butterfly" && G.currentBg() === "night") { G.startGame(); return; }
   if (arr.length > 1) { G.openBgPick(); return; }
   G.startGame();
 };
@@ -348,37 +388,39 @@ G.summonPickTouchEnd = (x) => {
 };
 
 /* ================= 每秒心跳 ================= */
+/* 阶段切换统一入口：青蛙模式进入第④阶段时换一套荷叶布景，
+   并让在场青蛙重新落位，避免 padIdx 仍指向旧荷叶。 */
+function changeStage(st) {
+  const S = G.session;
+  if (st === S.stage) return;
+  const prev = S.stage;
+  S.stage = st;
+  G.uiFX.stageText = G.stageName(st);
+  G.uiFX.stagePop = 1.6;
+  G.pokeHud();
+  if (G.config.targetType === "frog" && st >= 4 && prev < 4 && G.rebuildFrogPads) {
+    G.rebuildFrogPads(4);
+    (G.preys || []).forEach(p => { if (p.type === "frog" && p.spawnOnPad) p.spawnOnPad(); });
+  }
+  G.topUpPreys();
+}
 function tickSecond() {
   const S = G.session;
-  /* 暗夜萤光：视频约 15.3s 会有一次"满屏金色火花 → 整屏换成龟裂焦土"。
-     一局只切一次，约开局 16 秒触发（无限模式同样）。 */
-  if (G.config.targetType === "pool" && S.time >= 16 && G.scene && !G.scene._shiftDone && G.poolShiftTheme) {
+  /* 兔子模式是单一木地板，这里保留旧钩子但 poolMix=false 时不会触发换景。 */
+  if (G.config.targetType === "pool" && G.scene && S.time >= 20 && !G.scene.poolShift && G.poolShiftTheme) {
     G.poolShiftTheme();
   }
+
   // 无限模式：倒计时仅用于阶段推进，不减到负、不自动结束（给猫玩不中途打断）
   if (S.infinite) {
     if (S.remaining > 0) S.remaining--;
     if (S.remaining < 0) S.remaining = 0;
-    const st = G.stageNow();
-    if (st !== S.stage) {
-      S.stage = st;
-      G.uiFX.stageText = G.stageName(st);
-      G.uiFX.stagePop = 1.6;
-      G.pokeHud();
-      G.topUpPreys();   // 多只蝴蝶/激光：随阶段递增数量（3→5→7）
-    }
+    changeStage(G.stageNow());
     return;
   }
   S.remaining--;
   if (S.remaining <= 0) { G.endGame(); return; }
-  const st = G.stageNow();
-  if (st !== S.stage) {
-    S.stage = st;
-    G.uiFX.stageText = G.stageName(st);
-    G.uiFX.stagePop = 1.6;
-    G.pokeHud();
-    G.topUpPreys();   // 多只蝴蝶/激光：随阶段递增数量（3→5→7）
-  }
+  changeStage(G.stageNow());
 }
 
 /* ================= 结算 ================= */
@@ -386,6 +428,7 @@ G.endGame = (fromPause) => {
   const S = G.session;
   S.running = false;
   S._keepOn = false;
+  if (G.stopMouseSqueak) G.stopMouseSqueak();
   G.platform.keepScreen(false);
   const totalHits = S.hits + (S.bonusHits || 0);
   const acc = S.touches > 0 ? Math.min(100, Math.round((totalHits / S.touches) * 100)) : 0;
@@ -432,7 +475,7 @@ G.endGame = (fromPause) => {
   else if (hpm >= 9 || (interacted && hpm >= 6)) { title = "矫健猎手"; desc = "扑击精准、节奏稳健，状态很好。"; }
   else if (hpm >= 3.5 || interacted) { title = "灵巧学徒"; desc = "全程都有参与，正在建立信心。"; }
   else                { title = "慵懒观察员"; desc = "今天兴趣不大？换个猎物类型试试。"; }
-  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "光爆炸裂" : G.config.targetType === "frog" ? "空中截击" : "奖励命中";
+  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "彩星爆散" : G.config.targetType === "frog" ? "空中截击" : "奖励命中";
   G.result = {
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
     bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
@@ -499,8 +542,9 @@ function onHit(x, y, prey) {
     : isFrog
     ? "#bdf58a"
     : (isMouse || isBfly ? (prey.def.sparkColor || "#ffd76a") : (G.seaThemeNow().spark || prey.def.sparkColor || "#ffd76a"));
-  G.sparkBurst(x, y, sparkC, 8);
-  // 萤火改到枯草地上：不再画水面涟漪（干地上出现水圈很违和），爆散交给 lightPop
+  // 兔子是整只玩具被拍散：星爆/碎光以兔子中心为准，不跟着手指边缘跑
+  G.sparkBurst(isPool ? prey.x : x, isPool ? prey.y : y, sparkC, isPool ? 6 : 8);
+  // 发光玩具在布面上被拍散：不画水面涟漪（布垫上出现水圈很违和），爆散交给 lightPop
   if (isPool) { /* 光爆自带碎光 + 双环，不再叠扬尘 */ }
   else if (!isLaser) G.ripple(x, y, false);
   G.plantsStartle(x, y);
@@ -531,11 +575,9 @@ function onHit(x, y, prey) {
       G.playFlutter();
     }
   } else if (isPool) {
-    // 萤火虫被拍散：一小把碎光（白/金）+ 两点冷色，声音是"脆的一下"（对齐视频实测的 1kHz 短音）
-    G.lightPop(x, y, holding || S.combo >= 5, prey.species);
-    G.playFireflyHit(prey.species);
-    G.playHit(S.combo * 0.5);                     // 只留一层很轻的低频垫底，不抢主角
-    if (holding) { S.bonusHits++; G.playMilestone(); }
+    // 萤光小虫被拍散：一小把暖金色碎光 + 两点冷色，配一声低频 pop + 高频 shimmer 的星爆音。
+    G.lightPop(prey.x, prey.y, holding || S.combo >= 5, prey.species);
+    if (G.playFireflyHit) G.playFireflyHit(prey.species);
   } else if (isLaser) {
     G.sparkBurst(x, y, "#ff5252", 8);
     G.scorch(x, y);
@@ -563,18 +605,19 @@ function onHit(x, y, prey) {
     // 所有目标命中均不触发设备震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
   }
   if (S.combo > 0 && S.combo % 5 === 0) {
-    G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");
+    if (!isPool) G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");
     G.playMilestone();
-  } else {
+  } else if (!isPool) {
+    // 兔子模式不弹"光爆 +1"文字：猫不识字，文字会挡住星爆；分数看左上角 HUD 即可
     if (isMouse) G.floatText(x, y - 20, chasing ? "+2 追击成功！" : "+1 抓住！", chasing ? "big" : "");
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
-    else if (isPool) G.floatText(x, y - 56, holding ? "+2 光爆连击！" : "光爆 +1", holding ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
     else if (isFrog) G.floatText(prey.x, prey.y - (prey.jumpH || 0) - 62, aerial ? "空中截击 +2！" : "抓住！", aerial ? "big" : "");
     else G.floatText(x, y - 20, "+1");
   }
   G.pokeHud();
 }
+
 G.onHit = onHit;                                   // 测试钩子：命中路径可直接驱动
 
 /* ================= 拍偏 ================= */
@@ -605,7 +648,7 @@ function onMiss(x, y) {
   }
   else if (G.config.targetType === "butterfly") G.pollenBurst(x, y, 3);
   else if (G.config.targetType === "pool") {
-    // 拍偏：几点萤火碎屑（明显弱于命中，不抢戏）
+    // 拍偏：几点发光碎屑（明显弱于命中，不抢戏）
     G.sparkBurst(x, y, "#e8ff9a", 3);
     G.dustBurst(x, y, 3);
   }
@@ -615,7 +658,7 @@ function onMiss(x, y) {
     if (G.padSway) G.padSway(x, y);
   }
   else G.bubbleBurst(x, y, 3);
-  G.playMiss();
+  if (G.config.targetType !== "pool") G.playMiss();
   G.pokeHud();
 }
 
@@ -731,9 +774,12 @@ function uiScaleCtx(fn) {
   fn();
   ctx.restore();
 }
-function loop(ts) {
-  const dt = Math.min((ts - lastTs) / 1000, 0.05);
-  lastTs = ts;
+function loop() {
+  // 微信小游戏的 RAF 时间戳在不同基础库/重进前后台场景下可能与 performance.now() 不同基准，
+  // 两者混算会让倒计时帧差变成负数或异常值（数字会一直停在「3」并反复闪动）。统一用同一时钟。
+  const now = performance.now();
+  const dt = Math.max(0, Math.min((now - lastTs) / 1000, 0.05));
+  lastTs = now;
   const S = G.session;
   const t = S.time;
 
@@ -748,7 +794,10 @@ function loop(ts) {
     if (G.nextScreen === "playing") return; // Prevent logic during transition to playing
     countT -= dt;
     const ci = Math.ceil(countT);
-    if (ci !== lastInt && ci > 0) { lastInt = ci; G.playTick(); }
+    if (ci !== lastInt && ci > 0) {
+      lastInt = ci;
+      if (!(G.quietMouseRoom && G.quietMouseRoom())) G.playTick();   // 室内捕鼠局：倒计时也不出声
+    }
     if (countT <= 0) beginPlay();
   } else if (G.screen === "playing" && S.running && !S.paused) {
     S.time += dt;
@@ -756,6 +805,10 @@ function loop(ts) {
     while (S.secAcc >= 1) { S.secAcc -= 1; tickSecond(); }
     G.preys.forEach(p => p.update(dt, S.time));
   }
+  // 老鼠出洞循环声：有 peek/dart 的鼠就唧唧叫，全部回洞就停；暂停/切后台也会停
+  if (G.updateMouseSqueak) G.updateMouseSqueak();
+  // 荷塘荷叶的缓慢漂移 / 沉浮（结算页背景也继续漂，不是静止贴图）
+  if (G.updateLadybugLoop) G.updateLadybugLoop();
   // 荷塘荷叶的缓慢漂移 / 沉浮（结算页背景也继续漂，不是静止贴图）
   if (G.scene && G.scene.type === "frog" && G.padsUpdate) G.padsUpdate(dt, t);
   G.fx.update(dt, t);
@@ -768,6 +821,7 @@ function loop(ts) {
     if (PH.progress >= 1) {
       PH.active = false; PH.progress = 0;
       S.paused = true;
+      if (G.stopMouseSqueak) G.stopMouseSqueak();
       G.switchScreen("paused");
       G.platform.vibrate();
       G.playTick();
@@ -805,6 +859,7 @@ function loop(ts) {
   else if (G.screen === "records") uiScaleCtx(() => G.ui.drawRecords());
   else if (G.screen === "leaderboard") uiScaleCtx(() => G.ui.drawLeaderboard());
   else if (G.screen === "summon") uiScaleCtx(() => G.ui.drawSummon());
+  else if (G.screen === "sound") uiScaleCtx(() => G.ui.drawSound());
   else if (G.screen === "feeder") {
     // 猫粮机自带整屏绘制与粮粒物理：先推进状态（定时器 / 落粒），再画
     G.feeder.update(dt);
@@ -871,6 +926,9 @@ G.platform.hideCb.push(() => {
     G.session.paused = true;
     G.screen = "paused";
   }
+  if (G.stopMouseSqueak) G.stopMouseSqueak();
+  // 切后台把声音页的试听停掉：回来不自动续播，避免"看不见来源的声音"
+  if (G.screen === "sound" && G.stopAnimalSound) G.stopAnimalSound();
 });
 
 /* 回前台：微信可能重置 keepScreenOn 状态，游戏中则重设常亮 */
