@@ -69,13 +69,41 @@ module.exports = function (G) {
   }
   ui.gearAt = gearAt;      // 电子猫粮页（feeder.js）用自己的 ctx 调用同一份绘制
 
+  /* 分享图标：开口向上的盒子 + 向上箭头（小尺寸下比三点连线好认，不会看成"下一页"）。
+     c2 需已 translate 到图标中心，三个模块页面共用这一份。 */
+  function shareIconAt(c2, s, color) {
+    const r = s / 2;
+    c2.save();
+    c2.strokeStyle = color; c2.fillStyle = color;
+    c2.lineWidth = Math.max(1.5, s * 0.10);
+    c2.lineCap = "round"; c2.lineJoin = "round";
+    // 盒子：左右两边 + 底边，顶部敞开
+    c2.beginPath();
+    c2.moveTo(-r * 0.66, -r * 0.06);
+    c2.lineTo(-r * 0.66, r * 0.76);
+    c2.lineTo(r * 0.66, r * 0.76);
+    c2.lineTo(r * 0.66, -r * 0.06);
+    c2.stroke();
+    // 从盒口射出的向上箭头
+    c2.beginPath();
+    c2.moveTo(0, -r * 0.82); c2.lineTo(0, r * 0.46);
+    c2.moveTo(-r * 0.34, -r * 0.48);
+    c2.lineTo(0, -r * 0.82);
+    c2.lineTo(r * 0.34, -r * 0.48);
+    c2.stroke();
+    c2.restore();
+  }
+  ui.shareIconAt = shareIconAt;
+
   function drawVecIcon(key, cx, cy, s, color) {
     const r = s / 2;
     ctx.save();
     ctx.translate(cx, cy);
     ctx.strokeStyle = color; ctx.fillStyle = color;
     ctx.lineCap = "round"; ctx.lineJoin = "round";
-    if (key === "gear") {
+    if (key === "share") {
+      shareIconAt(ctx, s, color);        // 已在 (cx,cy) 上做过 translate
+    } else if (key === "gear") {
       gearAt(ctx, s, color);              // 已在 (cx,cy) 上做过 translate
     } else if (key === "chart") {
       const bw = s * 0.2;
@@ -424,7 +452,7 @@ module.exports = function (G) {
       const rowBtns = [
         { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
         { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
-        { label: "声音", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } },
+        { label: "动物情绪", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } },
         { label: "本周记录", icon: "chart", cb: () => { G.openModal("records"); } },
         { label: "好友排行", icon: "trophy", cb: () => {
           G.openModal("lb");
@@ -474,7 +502,7 @@ module.exports = function (G) {
         const nInRow = (r < rows - 1) ? cols : (MODES.length % cols || cols);
         const offX = (cols - nInRow) * (cw + gap) / 2;
         const x = gx + c * (cw + gap) + offX, y = gy + r * (ch + gap);
-        const sel = mItem.key === "night" ? G.config.targetType === "butterfly" && G.config.bg_butterfly === "night" : G.config.targetType === mItem.key && (mItem.key !== "butterfly" || G.config.bg_butterfly !== "night");
+        const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) {
           ctx.save();
@@ -490,14 +518,13 @@ module.exports = function (G) {
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
         const bob = Math.sin(Date.now() / 500 + i) * 2;
-        G.draw.icon(ctx, mItem.key === "night" ? "butterfly" : mItem.key, 0, bob, scl);
+        G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
-          const type = mItem.key === "night" ? "butterfly" : mItem.key;
-          if (G.config.targetType !== type || (mItem.key === "night") !== (G.config.bg_butterfly === "night")) G.track("mode_pick", { mode: mItem.key });
-          G.config.targetType = type; if (type === "butterfly") G.config.bg_butterfly = mItem.key === "night" ? "night" : "garden"; G.saveConfig(); G.playTick();
+          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
         });
       });
     } else {
@@ -520,7 +547,7 @@ module.exports = function (G) {
         const nInRow = (r < rowsP - 1) ? colsP : (MODES.length % colsP || colsP);
         const offX = (colsP - nInRow) * (cw + 14) / 2;
         const x = gx + c * (cw + 14) + offX, y = gy2 + r * (ch + 14);
-        const sel = mItem.key === "night" ? G.config.targetType === "butterfly" && G.config.bg_butterfly === "night" : G.config.targetType === mItem.key && (mItem.key !== "butterfly" || G.config.bg_butterfly !== "night");
+        const sel = G.config.targetType === mItem.key;
         panel(x, y, cw, ch, sel ? "rgba(255,255,255,.98)" : C.card, sel ? C.teal : C.line);
         if (sel) {
           ctx.save();
@@ -535,17 +562,16 @@ module.exports = function (G) {
         ctx.save();
         ctx.translate(x + cw / 2, y + iconZone / 2);
         const bob = Math.sin(Date.now() / 500 + i) * 2;
-        G.draw.icon(ctx, mItem.key === "night" ? "butterfly" : mItem.key, 0, bob, scl);
+        G.draw.icon(ctx, mItem.key, 0, bob, scl);
         ctx.restore();
         text(mItem.name, x + cw / 2, y + ch - 32, "bold 14px sans-serif", sel ? C.tealDeep : C.ink);
         text(mItem.desc, x + cw / 2, y + ch - 15, "11px sans-serif", sel ? C.teal : C.ink3);
         btn(x, y, cw, ch, () => {
-          const type = mItem.key === "night" ? "butterfly" : mItem.key;
-          if (G.config.targetType !== type || (mItem.key === "night") !== (G.config.bg_butterfly === "night")) G.track("mode_pick", { mode: mItem.key });
-          G.config.targetType = type; if (type === "butterfly") G.config.bg_butterfly = mItem.key === "night" ? "night" : "garden"; G.saveConfig(); G.playTick();
+          if (G.config.targetType !== mItem.key) G.track("mode_pick", { mode: mItem.key });
+          G.config.targetType = mItem.key; G.saveConfig(); G.playTick();
         });
       });
-      // 召唤猫咪 / 电子猫粮 / 声音 三个入口等宽并排（半宽改三列，给下方圆形开始按钮留高度）
+      // 召唤猫咪 / 电子猫粮 / 动物情绪 三个入口等宽并排（半宽改三列，给下方圆形开始按钮留高度）
       const cardBottom = cardY + cardH;
       let afterCard = cardBottom + 12;
       if (SHOW_SUMMON) {
@@ -554,7 +580,7 @@ module.exports = function (G) {
         const entries = [
           { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
           { label: "电子猫粮", icon: "bowl", cb: () => { G.feederEnter(); } },
-          { label: "声音", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } }
+          { label: "动物情绪", icon: "sound", key: "home-sound", cb: () => { G.openSound(); } }
         ];
         entries.forEach((e, i) => drawBtn(edgeL + i * (halfW + rowGap), afterCard, halfW, 44, e.label, { icon: e.icon, cb: e.cb, key: e.key }));
         afterCard += 44 + 12;
@@ -1127,11 +1153,11 @@ module.exports = function (G) {
         G.saveConfig(); G.playTick();
       });
     }
-    // 一排三个：联系客服 / 分享给好友 / 防误触
+    // 一排三个：意见反馈 / 分享给好友 / 防误触
     const by = fy + 40;
     const bGap = 8, bw3 = (innerW - bGap * 2) / 3;
     const footBtns = [
-      { label: "联系客服", color: C.ink, cb: () => G.platform.openSupport() },
+      { label: "意见反馈", color: C.ink, cb: () => G.platform.openSupport() },
       { label: "分享给好友", color: C.teal, cb: () => { try { G.shareInvite("settings"); } catch (err) {} } },
       { label: "防误触", color: C.teal, cb: () => { try { G.platform.antiGuide(() => {}); } catch (err) {} } }
     ];
@@ -1337,7 +1363,7 @@ module.exports = function (G) {
         G.rr(ctx, x, y, cellW, rowH, 12); ctx.stroke();
         const cy = y + rowH / 2;
         text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "玩具", frog: "青蛙" }[L.type] || "";
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙" }[L.type] || "";
         // 玩法标签：浅色药丸，比纯文字更好扫读
         const tagW = 38, tagX = x + 56;
         ctx.fillStyle = "rgba(21,154,140,.10)";
@@ -2372,7 +2398,16 @@ module.exports = function (G) {
     ctx.stroke();
     btnKey(bX, bY, bs, bs, "sound-back", () => { G.closeSound(); });
 
-    text("声音", W / 2, safe.top + 28, "bold 21px sans-serif", C.ink);
+    // 分享键：紧跟返回键放第二颗（右上角是微信胶囊的固定地盘，不能占）
+    const shX = bX + bs + 8;
+    ctx.fillStyle = "rgba(255,255,255,.94)"; ctx.strokeStyle = C.line; ctx.lineWidth = 1.1;
+    G.rr(ctx, shX, bY, bs, bs, 12); ctx.fill(); ctx.stroke();
+    ctx.save(); ctx.translate(shX + bs / 2, bY + bs / 2);
+    shareIconAt(ctx, 20, C.ink2);
+    ctx.restore();
+    btnKey(shX, bY, bs, bs, "sound-share", () => { G.playTick(); G.shareModule("sound"); });
+
+    text("动物情绪", W / 2, safe.top + 28, "bold 21px sans-serif", C.ink);
 
     // 猫 / 狗 分段 tab
     const tabW = Math.min(240, Math.max(184, W * 0.30));
@@ -2725,6 +2760,17 @@ module.exports = function (G) {
       if (G.summonPlaying) G.stopSummonMusic(); else G.startSummonKind(sel);
     });
 
+    // 分享键：与「开始召唤」等高等底，放在它右侧（顶部已有返回 / 自定义两颗，不再挤）
+    const shS = bH_fixed, shX2 = bX2_fixed + bW_fixed + 10;
+    if (shX2 + shS <= W - safe.right - 8) {
+      ctx.fillStyle = "rgba(255,255,255,.96)"; ctx.strokeStyle = C.teal; ctx.lineWidth = 1.4;
+      G.rr(ctx, shX2, bY2_fixed, shS, shS, 14); ctx.fill(); ctx.stroke();
+      ctx.save(); ctx.translate(shX2 + shS / 2, bY2_fixed + shS / 2);
+      shareIconAt(ctx, 22, C.tealDeep);
+      ctx.restore();
+      btnKey(shX2, bY2_fixed, shS, shS, "summon-share", () => { G.playTick(); G.shareModule("summon"); });
+    }
+
     ctx.restore();
 
     // 自定义录入弹窗画在卡牌之上（命中区也后 push，优先于背面卡牌）
@@ -2890,7 +2936,7 @@ module.exports = function (G) {
     const R = G.result || {};
     // 模式名：结算页标题要标出这一局选的是哪种玩法（鱼玩法再带海域主题名）
     const seaName = G.config.targetType === "fish" && G.session.sea ? " · " + G.session.sea.name : "";
-    const modeName = (((G.config.targetType === "butterfly" && G.currentBg() === "night") ? MODES.find(md => md.key === "night") : MODES.find(md => md.key === G.config.targetType)) || {}).name + seaName;
+    const modeName = ((MODES.find(md => md.key === G.config.targetType)) || {}).name + seaName;
     // 背景半透明：下层是当前玩法的场景（由 game.js 在结算时绘制），透出来才能看出是哪个模式。
     // 蒙版从 .76 降到 .50 一档——之前场景几乎被洗白，截图存图后看不出玩法差异。
     // 文字可读性不再靠压低透明度，改由「标题区柔光 + 文字白描边」解决，见下。

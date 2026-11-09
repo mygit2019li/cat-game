@@ -8,7 +8,6 @@ module.exports = function (G) {
   G.buildScene = (type) => {
     const W = G.platform.W, H = G.platform.H;
     const S = { type, W, H, floorY: type === "mouse" ? H * 0.2 : H * 0.68, holes: [], holeOwners: [], holeHeat: [], dark: type === "laser" };
-    S.night = type === "butterfly" && G.currentBg() === "night";
     G.scene = S;
     G.gardenFlowers = [];
     // 捕鼠可选背景：room（室内房间，默认）/ plaid（深色格纹地毯）
@@ -679,7 +678,6 @@ module.exports = function (G) {
     const S = G.scene;
     if (!S || !S.type) return;
     if (S.type === "fish") drawSea(ctx, t);
-    else if (S.type === "butterfly" && S.night) drawNight(ctx, t);
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
     else if (S.type === "frog") drawPond(ctx, t);
@@ -687,14 +685,6 @@ module.exports = function (G) {
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
   };
-  function drawNight(ctx, t) {
-    const S=G.scene,W=S.W,H=S.H,phase=((G.session&&G.session.nightPhase)||0)%4;
-    const skies=["#07172b","#10122f","#071c32","#15152a"], aura=["rgba(255,74,85,.14)","rgba(189,121,255,.14)","rgba(72,223,255,.14)","rgba(255,230,107,.14)"];
-    ctx.fillStyle=skies[phase];ctx.fillRect(0,0,W,H);
-    const rg=ctx.createRadialGradient(W*.5,H*.46,0,W*.5,H*.46,Math.max(W,H)*.72);rg.addColorStop(0,aura[phase]);rg.addColorStop(1,"rgba(0,0,0,0)");ctx.fillStyle=rg;ctx.fillRect(0,0,W,H);
-    for(let i=0;i<52;i++){const x=(i*137.5+31)%W,y=(i*83.7+17)%H;ctx.fillStyle="rgba(194,229,255,"+(0.18+0.25*(.5+.5*Math.sin(t*1.7+i)))+")";ctx.beginPath();ctx.arc(x,y,1+(i%3)*.45,0,Math.PI*2);ctx.fill();}
-    ctx.fillStyle="rgba(4,11,23,.55)";ctx.fillRect(0,H*.82,W,H*.18);
-  }
   /* 老鼠洞（后排先画，前排盖上面；两个背景共用） */
   function drawHoles(ctx) {
     const S = G.scene;
@@ -1571,7 +1561,6 @@ module.exports = function (G) {
   G.bubbleBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.bubbles, { x: x + rand(-14, 14), y: y + rand(-10, 10), r: rand(3, 8), vy: rand(-70, -30), vx: rand(-20, 20), life: rand(0.5, 1) }, 60); };
   G.dustBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.dust, { x, y, vx: rand(-55, 55), vy: rand(-60, -8), r: rand(3, 7), life: rand(0.4, 0.8) }, 60); };
   G.pollenBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.pollen, { x: x + rand(-12, 12), y: y + rand(-12, 12), vx: rand(-24, 24), vy: rand(-34, -6), r: rand(1.5, 3.4), life: rand(0.7, 1.4) }, 80); };
-  G.nightBurst = (x,y,color) => { for(let i=0;i<30;i++){const a=rand(0,Math.PI*2),sp=rand(110,360);PUSH(fx.pollen,{x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,r:rand(5,11),life:rand(.75,1.45),glow:color},100);} PUSH(fx.shockwaves,{x,y,r:12,life:.7,speed:260,w:4,color:color},20); };
   G.scalesBurst = (x, y, n) => { for (let i = 0; i < n; i++) PUSH(fx.scales, { x, y, vx: rand(-20, 20), vy: rand(4, 26), r: rand(1, 2.4), life: rand(0.6, 1.3) }, 60); };
   /* 兔子被拍中：视频里是一簇橙/蓝/黄/红的实心五角星先聚团、再散成小星点飘走。
      只有命中瞬间出现，不做周边常驻星装饰。 */

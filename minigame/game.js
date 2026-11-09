@@ -145,7 +145,7 @@ initDebug();
    配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
    量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
 const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只" };
-const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "小兔子" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫" };
 /* 兔子场所命中碎屑主色（黄色本体） */
 const POOL_SPARK = { firefly: "#ffe479" };
 G.shareResult = () => {
@@ -201,8 +201,27 @@ G.shareInvite = (from) => {
   const src = from === "settings" ? "settings" : "lb";
   G.platform.shareApp({ title, imageUrl: imageUrl || undefined, query: "from=" + src });
 };
+/* ===== 三个功能模块的分享：召唤猫咪 / 电子猫粮 / 动物情绪（原名「声音」）=====
+   每个模块用自己的转发文案和「页面卡」，不套用本局成绩卡；query 按模块区分落地来源。 */
+const MODULE_SHARE = {
+  summon: "我用猫咪召唤音把我家猫叫过来了，你也来试试",
+  feeder: "给猫主子配了台自动出粮机，一出粮就冲过来",
+  sound: "猫和狗的情绪音都在这儿，看看你家猫什么反应"
+};
+G.shareModule = (src) => {
+  const key = MODULE_SHARE[src] ? src : "sound";
+  let imageUrl = "";
+  try { imageUrl = G.buildShareCard(key); } catch (e) {}
+  G.track("share_tap", { src: key, has_img: imageUrl ? 1 : 0 });
+  G.platform.shareApp({
+    title: MODULE_SHARE[key],
+    imageUrl: imageUrl || undefined,
+    query: "from=" + key
+  });
+};
+
 G.platform.initShare(() => ({
-  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、发光小玩具轮着来，看它能抓到几个",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、萤光虫轮着来，看它能抓到几个",
   query: "from=menu"
 }));
 
@@ -225,7 +244,6 @@ G.startGame = () => {
   S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
-  S.nightPhase = 0;   // 暗夜荧光仅在动物到达屏幕边缘时推进周期
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
   // 鱼玩法：海域由背景选择层决定（水草森林 / 泳池追鱼，左右滑动切换、跨局记忆）
   S.sea = G.config.targetType === "fish" ? (G.SEA_THEMES.find(t => t.key === G.currentBg()) || G.SEA_THEMES[0]) : null;
@@ -269,7 +287,6 @@ function beginPlay() {
    卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
 G.requestStart = () => {
   const arr = G.bgsFor(G.config.targetType);
-  if (G.config.targetType === "butterfly" && G.currentBg() === "night") { G.startGame(); return; }
   if (arr.length > 1) { G.openBgPick(); return; }
   G.startGame();
 };

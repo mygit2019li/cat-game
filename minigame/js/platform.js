@@ -302,7 +302,7 @@ module.exports = function (G) {
         try {
           if (typeof wx.showModal === "function") {
             wx.showModal({
-              title: "联系客服",
+              title: "意见反馈",
               content: "当前微信版本较低，暂无法打开客服会话。可点击右上角「···」→「反馈」提交问题，感谢理解。",
               showCancel: false
             });

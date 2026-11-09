@@ -19,7 +19,7 @@ module.exports = function (G) {
     fish: "深海捕鱼", butterfly: "蝴蝶花园", mouse: "捕鼠行动", laser: "激光暗室", pool: "暗夜萤光", frog: "青蛙跳"
   };
   // 「最常玩」格里的短名要能独立看懂：写「花园」「萤光」读者不知道指的是什么玩法
-  const TYPE_SHORT = { fish: "捕鱼", butterfly: "蝴蝶", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙跳" };
+  const TYPE_SHORT = { fish: "捕鱼", butterfly: "蝴蝶", mouse: "捕鼠", laser: "激光", pool: "萤光虫", frog: "青蛙跳" };
 
   /* ---------- 绘制小工具（不依赖 G.rr，避免和主 UI 坐标耦合） ---------- */
   function rr(ctx, x, y, w, h, r) {
@@ -104,7 +104,7 @@ module.exports = function (G) {
     ctx.textAlign = "left";
     ctx.font = "20px sans-serif";
     ctx.fillStyle = W3;
-    ctx.fillText("猫咪反应测评", PAD, 56);
+    ctx.fillText(d.kind === "page" ? "猫咪玩具箱" : "猫咪反应测评", PAD, 56);
     ctx.textAlign = "right";
     ctx.fillText(d.dateText || "", W - PAD, 56);
 
@@ -173,7 +173,7 @@ module.exports = function (G) {
     // 底部：搜索引导（抖音/小红书引流的落点，名字必须可搜）
     ctx.font = "19px sans-serif";
     ctx.fillStyle = W3;
-    ctx.fillText("微信搜「" + (d.appName || "") + "」，测测你家猫", PAD, 520);
+    ctx.fillText("微信搜「" + (d.appName || "") + "」" + (d.kind === "page" ? "，逗逗你家猫" : "，测测你家猫"), PAD, 520);
   }
 
   /* ---------- 组装数据 ----------
@@ -190,6 +190,36 @@ module.exports = function (G) {
     };
     const d = new Date();
     const dateText = d.getFullYear() + "." + pad2(d.getMonth() + 1) + "." + pad2(d.getDate());
+
+    /* 模块「页面卡」：从召唤猫咪 / 电子猫粮 / 动物情绪分享时，
+       四格写模块自己的信息，不套用本局成绩或累计档案。 */
+    const PAGE_CARDS = {
+      summon: {
+        title: "召唤猫咪", typeName: "召唤猫咪",
+        desc: "几种猫咪叫声轮着放，还能录自家猫的声音，看它会不会应你",
+        cells: [["喵", "召唤音", 30], ["多", "种猫叫", 28], ["录", "自定义", 28], ["1", "键播放", 30]],
+        rankText: "点一下就召唤，猫主子听见会不会跑过来？"
+      },
+      feeder: {
+        title: "电子猫粮机", typeName: "电子猫粮",
+        desc: "定时定量自动出粮，步进电机一响，它比谁跑得都快",
+        cells: [["定时", "出粮", 26], ["定量", "份量", 26], ["自动", "投喂", 26], ["手动", "加餐", 26]],
+        rankText: "到点就开饭，出粮声一响它自己就来了"
+      },
+      sound: {
+        title: "动物情绪", typeName: "动物情绪",
+        desc: "猫和狗的情绪音各一组，挨个放给家里那位听听",
+        cells: [["猫", "喵声", 30], ["狗", "汪声", 30], ["情绪", "音板", 26], ["试听", "一键", 26]],
+        rankText: "同一声喵，它每次的反应还都不一样"
+      }
+    };
+    const pg = PAGE_CARDS[mode];
+    if (pg) {
+      return {
+        kind: "page", title: pg.title, desc: pg.desc, cells: pg.cells,
+        rankText: pg.rankText, typeName: pg.typeName, appName: APP_NAME, dateText
+      };
+    }
 
     if (mode === "archive" || !R) {
       let desc;

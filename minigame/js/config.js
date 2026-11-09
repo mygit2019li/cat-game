@@ -151,10 +151,6 @@ module.exports = function (G) {
     /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
     frog: [
       { key: "pond", name: "夏夜荷塘", desc: "荷叶 · 睡莲 · 萤火" }
-    ],
-    butterfly: [
-      { key: "garden", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
-      { key: "night", name: "暗夜荧光", desc: "四种发光昆虫轮番登场" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
@@ -359,7 +355,7 @@ module.exports = function (G) {
     mouse: { 1: "阶段① 慢速探头", 2: "阶段② 快速轮换", 3: "阶段③ 闪电地鼠" },
     butterfly: { 1: "阶段① 轻舞飞扬", 2: "阶段② 花间穿梭", 3: "阶段③ 疾风蝶影" },
     laser: { 1: "阶段① 缓缓游走", 2: "阶段② 快速闪现", 3: "阶段③ 疯狂光点" },
-    pool:  { 1: "阶段① 慢慢转", 2: "阶段② 转得更快", 3: "阶段③ 疯狂旋转" },
+    pool:  { 1: "阶段① 萤火初现", 2: "阶段② 暗夜疾行", 3: "阶段③ 疯狂萤光" },
     frog:  { 1: "阶段① 荷叶慢跳", 2: "阶段② 跨叶远跳", 3: "阶段③ 连跳追击",
              4: "阶段④ 荷叶变阵" }
   };
@@ -402,7 +398,9 @@ module.exports = function (G) {
      行为引擎是 updateFirefly（慢爬/急爬两档步态 + 罕见自发暗场换位），节奏见 G.FIREFLY；
      G.RABBIT 表已不再使用。 */
   G.FF_TOYS = [
-    { key: "firefly", name: "萤光小虫", w: 1, spd: 1, fastP: 0, gait: 1, flare: 1, size: 0.85 }
+    { key: "dog",     name: "萤光小狗", w: 1, spd: 0.94, fastP: -0.06, gait: 1.15, flare: 1.25, size: 1.06 },
+    { key: "mouse",   name: "萤光老鼠", w: 1, spd: 1.12, fastP: 0.10,  gait: 0.92, flare: 0.95, size: 0.98 },
+    { key: "ladybug", name: "萤光瓢虫", w: 1, spd: 0.86, fastP: -0.02, gait: 0.80, flare: 0.70, size: 0.92 }
   ];
   G.POOL_PARAMS = {
     1: { hold: [0.55, 0.9], dart: [0.65, 1.1],  tele: 0.05 },

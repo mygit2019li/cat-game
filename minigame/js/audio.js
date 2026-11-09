@@ -194,12 +194,12 @@ module.exports = function (G) {
        张翅摩擦与出现 ticks 三种共用。 */
   const FF_HIT = "assets/sfx/firefly-hit.wav";
   const FF_HIT_V = {
-    firefly: "assets/sfx/firefly-hit.wav",
-    rabbit: "assets/sfx/firefly-hit.wav",
+    dog: "assets/sfx/firefly-hit-dog.wav",
+    mouse: "assets/sfx/firefly-hit-mouse.wav",
     ladybug: "assets/sfx/firefly-hit-ladybug.wav"
   };
   /* 没有音频能力时的合成回退：同样按物种换中心频率与低频垫底 */
-  const FF_HIT_TONE = { firefly: [1040, 780, 0], rabbit: [1080, 760, 0], ladybug: [1720, 1240, 0] };
+  const FF_HIT_TONE = { dog: [780, 520, 1], mouse: [1300, 980, 0], ladybug: [1720, 1240, 0] };
   const FF_FLARE = "assets/sfx/firefly-flare.wav";
   /* 兔子音效：参考视频里精确截取的“跳一下”轻响（tools/extract_rabbit_sfx.py）
      只在每次起跳时播放一次，不再按移动计时循环，也不在蹲下时叠音。 */

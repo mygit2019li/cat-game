@@ -950,8 +950,8 @@ module.exports = function (G) {
     ctx.stroke();
     ctx.restore();
     G.ui.buttons.push({ x: p.x, y: p.y, w: p.s, h: p.s, cb: () => G.switchScreen("home"), key: "back" });
-    // 标题排在两颗圆键之后
-    const g = headPos(L, 1);
+    // 标题排在三颗圆键之后（返回 / 设置 / 分享）
+    const g = headPos(L, 2);
     return { x: g.x + g.s + 14, y: cy };
   }
 
@@ -966,6 +966,20 @@ module.exports = function (G) {
     G.ui.buttons.push({
       x: p.x, y: p.y, w: p.s, h: p.s, key: "settings",
       cb: () => { F.mode = "modal"; G.playTick(); }
+    });
+  }
+
+  /* 分享键：顶部第三颗圆键，与返回 / 设置同尺寸同高，图标与另外两个模块共用 G.ui.shareIconAt */
+  function drawShareBtn(L) {
+    const p = headPos(L, 2);
+    roundBtn(p.x, p.y, p.s);
+    ctx.save();
+    ctx.translate(p.x + p.s / 2, p.y + p.s / 2);
+    if (G.ui.shareIconAt) G.ui.shareIconAt(ctx, HEAD.icon + 3, C.tealDeep);
+    ctx.restore();
+    G.ui.buttons.push({
+      x: p.x, y: p.y, w: p.s, h: p.s, key: "feeder-share",
+      cb: () => { G.playTick(); G.shareModule("feeder"); }
     });
   }
 
@@ -1013,6 +1027,7 @@ module.exports = function (G) {
     const back = drawBack(L);
     text("电子猫粮机", back.x, back.y - 1, "bold 19px sans-serif", C.ink, "left");
     drawGearBtn(L);
+    drawShareBtn(L);
     // 食盆命中区：点粮堆 = 吃掉一份（只在常态收，演出中不抢触摸）
     // 底部那行「储粮/盆内/份」状态文字已整条移除：机器和猫盆改用腾出来的那 22px，盆更大
     if (F.mode === "home") {
