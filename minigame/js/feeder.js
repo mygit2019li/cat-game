@@ -231,7 +231,7 @@ module.exports = function (G) {
       g.addColorStop(1, pr ? C.startGrad1 : "#0d6b7d");
       ctx.fillStyle = g;
     } else {
-      ctx.fillStyle = opt.fill || C.segBg;
+      ctx.fillStyle = opt.fill || "#eeeada";
     }
     roundPath(x, y, w, h, opt.r != null ? opt.r : 11);
     ctx.fill();
@@ -241,7 +241,7 @@ module.exports = function (G) {
     }
     const fs = opt.font || clamp(Math.round(h * 0.44), 10, 16);
     const col = (pr || on) ? "#fff" : (opt.color || C.ink2);
-    text(label, x + w / 2, y + h / 2 + 0.5, (pr || on ? "bold " : "") + fs + "px sans-serif", col);
+    text(label, x + w / 2, y + h / 2 + 0.5, fs + "px sans-serif", col);
     ctx.restore();
     if (opt.cb && opt.key !== false) G.ui.buttons.push({ x, y, w, h, cb: opt.cb, key: opt.key || "" });
   }
@@ -736,7 +736,7 @@ module.exports = function (G) {
     const c0 = cfg();
     const topTxt = (c0.feedMode === "timer" ? "定时 " : "手动 ") + portion() + "份";
     const botTxt = F.dispensing > 0 ? "出粮中" : (c0.feedMode === "timer" ? countdownText() : "待机");
-    text(topTxt, lx + lw / 2, ly + 8, "bold 6.5px sans-serif", "#8ef0d6");
+    text(topTxt, lx + lw / 2, ly + 8, "6.5px sans-serif", "#8ef0d6");
     text(botTxt, lx + lw / 2, ly + 17, "6.5px sans-serif", F.dispensing > 0 ? "#6fe0c6" : "#57a99b");
     ctx.fillStyle = "rgba(255,255,255,.07)";
     roundPath(lx + 2, ly + 2, lw - 4, 6, 2); ctx.fill();
@@ -758,7 +758,7 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(DH.ledX, DH.ledY, DH.ledR, 0, TAU); ctx.fill();
 
     // 铭牌
-    text("FEEDER", bx - 24, by + bh - 8, "bold 5.5px sans-serif", "rgba(20,49,58,.26)");
+    text("FEEDER", bx - 24, by + bh - 8, "5.5px sans-serif", "rgba(20,49,58,.26)");
   }
 
   function drawFeedBtn(interactive) {
@@ -926,33 +926,32 @@ module.exports = function (G) {
   /* 顶部圆键规格与首页设置键完全一致：34px 白圆 / 1px 细边 / 15px 齿轮 / 左上角 (12,10) 起排。
      之前这里的齿轮是自绘的实心 8 齿、还为了躲微信胶囊跑到右上角，用户在两个页面看到两种"设置"。 */
   const HEAD = { size: 34, gap: 8, inset: 12, top: 10, icon: 15 };
+  let backExtra = 0;   // 返回胶囊比原圆键多出的宽度，drawBack 每帧刷新；设置/分享键据此顺移
   function headPos(L, i) {
     const s = HEAD.size;
-    return { x: L.safe.left + HEAD.inset + i * (s + HEAD.gap), y: L.safe.top + HEAD.top, s };
+    const shift = i > 0 ? backExtra : 0;
+    return { x: L.safe.left + HEAD.inset + i * (s + HEAD.gap) + shift, y: L.safe.top + HEAD.top, s };
   }
   /* 白圆底 + 细边（与首页同色，不用 C.line 的浅绿，避免两个页面底色深浅不一） */
   function roundBtn(x, y, s) {
     ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,.92)";
+    ctx.shadowColor = "rgba(70,92,80,.14)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2;
+    ctx.fillStyle = "rgba(255,255,255,.95)";
     ctx.beginPath(); ctx.arc(x + s / 2, y + s / 2, s / 2, 0, TAU); ctx.fill();
-    ctx.strokeStyle = "rgba(20,49,58,.10)"; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
+    ctx.strokeStyle = "rgba(214,218,200,.9)"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x + s / 2, y + s / 2, s / 2, 0, TAU); ctx.stroke();
   }
 
   function drawBack(L) {
     const p = headPos(L, 0);
-    roundBtn(p.x, p.y, p.s);
-    const cx = p.x + p.s / 2, cy = p.y + p.s / 2;
-    ctx.save();
-    ctx.strokeStyle = C.tealDeep; ctx.lineWidth = 2.2; ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.beginPath();
-    ctx.moveTo(cx + 4, cy - 6); ctx.lineTo(cx - 3, cy); ctx.lineTo(cx + 4, cy + 6);
-    ctx.stroke();
-    ctx.restore();
-    G.ui.buttons.push({ x: p.x, y: p.y, w: p.s, h: p.s, cb: () => G.switchScreen("home"), key: "back" });
-    // 标题排在三颗圆键之后（返回 / 设置 / 分享）
+    // 胶囊返回键（与 ui.js 二级页面同款）：h 沿用圆键直径；此页顶部紧，收紧内边距
+    const bw = G.ui.backPill(p.x, p.y, p.s, { fs: 13, pad: 8, gap: 5, cb: () => G.switchScreen("home"), key: "back" });
+    backExtra = bw - p.s;                       // 设置/分享键在 headPos 里自动顺移这段
+    const cy = p.y + p.s / 2;
+    // 标题排在设置 / 分享圆键之后（headPos(2) 已含顺移），间距收紧避免贴到储粮罐
     const g = headPos(L, 2);
-    return { x: g.x + g.s + 14, y: cy };
+    return { x: g.x + g.s + 9, y: cy };
   }
 
   /* 设置键：与首页同一位置（左上角第二颗）、同一尺寸、同一齿轮画法 */
@@ -1025,7 +1024,7 @@ module.exports = function (G) {
 
   function drawHomeUI(L) {
     const back = drawBack(L);
-    text("电子猫粮机", back.x, back.y - 1, "bold 19px sans-serif", C.ink, "left");
+    text("电子猫粮机", back.x, back.y - 1, "19px sans-serif", C.ink, "left");
     drawGearBtn(L);
     drawShareBtn(L);
     // 食盆命中区：点粮堆 = 吃掉一份（只在常态收，演出中不抢触摸）
@@ -1072,7 +1071,7 @@ module.exports = function (G) {
     roundPath(x, y, w, h, 18); ctx.stroke();
 
     const timer = cfg().feedMode === "timer";
-    text("喂食设置", innerX, y + 22, "bold 15px sans-serif", C.ink, "left");
+    text("喂食设置", innerX, y + 22, "15px sans-serif", C.ink, "left");
     // 右侧留出关闭键的位置，别让副标题顶到 × 上
     text(timer ? "按间隔自动出粮" : "按机身按钮出粮", innerX + innerW - 34, y + 22, "11px sans-serif", C.ink3, "right");
     // 关闭
@@ -1113,7 +1112,7 @@ module.exports = function (G) {
       ctx.fillStyle = C.statBg;
       roundPath(rx + bw + 6, cy, dispW, rowH, 9); ctx.fill();
       text(portion() + " 份 · " + portion() * TUNE.gramsPerPortion + "g",
-        rx + bw + 6 + dispW / 2, cy + rowH / 2, "bold 12px sans-serif", C.tealDeep);
+        rx + bw + 6 + dispW / 2, cy + rowH / 2, "12px sans-serif", C.tealDeep);
       pill(rx + bw + 6 + dispW + 6, cy, bw, rowH, "+", {
         key: "portion-plus", font: 14,
         cb: () => { cfg().feedPortion = clamp(portion() + 1, 1, 5); G.saveConfig(); G.playTick(); }
@@ -1150,7 +1149,7 @@ module.exports = function (G) {
       roundPath(innerX, cy, innerW, rowH, 8); ctx.fill();
       text(timer ? "下次出粮" : "当前模式", innerX + 10, cy + rowH / 2, "11px sans-serif", C.ink2, "left");
       text(timer ? countdownText() : "手动控制", innerX + innerW - 10, cy + rowH / 2,
-        "bold 12px sans-serif", timer ? C.tealDeep : C.ink3, "right");
+        "12px sans-serif", timer ? C.tealDeep : C.ink3, "right");
       cy += rowH + 10;
     }
 
@@ -1173,7 +1172,7 @@ module.exports = function (G) {
     ctx.fillRect(0, 0, L.W, L.H);
     // 舞台底
     roundPath(st.x, st.y, st.w, st.h, 16);
-    ctx.fillStyle = "#eaf5f0";
+    ctx.fillStyle = "#f5f3e7";
     ctx.fill();
     // 舞台内底部轻微压暗，机器"站在"地面上
     const gg = ctx.createLinearGradient(0, st.y + st.h * 0.55, 0, st.y + st.h);
@@ -1232,8 +1231,8 @@ module.exports = function (G) {
     const e = F.e;
 
     // 背景（常态）
-    const bg = ctx.createLinearGradient(0, 0, L.W, L.H);
-    bg.addColorStop(0, C.subBg1); bg.addColorStop(0.6, "#f4fbf7"); bg.addColorStop(1, C.subBg2);
+    const bg = ctx.createLinearGradient(0, 0, L.W * 0.86, L.H);
+    bg.addColorStop(0, "#eef2e4"); bg.addColorStop(.46, "#fbfaf2"); bg.addColorStop(1, "#f2eede");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, L.W, L.H);
 
     if (e > 0.01) drawStage(L, st, e);

@@ -51,6 +51,10 @@
       {
         "value": ".DS_Store",
         "type": "file"
+      },
+      {
+        "value": "assets/home-reference.png",
+        "type": "file"
       }
     ],
     "include": []

@@ -1159,10 +1159,64 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(57, 37, 1.2, 0, Math.PI * 2); ctx.fill();
   };
 
+  /* 蝌蚪快跑（方案 v0.2）：头 + 尾节跟随链；尾节横向摆动（摆幅/频率随状态） */
+  D.tadpole = (ctx, p, t) => {
+    const sc = p.sc || 1;
+    const segs = p.segs || [];
+    const fast = p.tState === "flee" || p.tState === "dart";
+    const hz = fast ? 2.4 : 1.2;
+    const amp = (fast ? 10 : 5) * sc;
+    const dusk = G.scene && G.scene.tadBg === "dusk";
+    const bodyC = dusk ? "#d9f59e" : "#9ccf3e";
+    const bellyC = dusk ? "#f6ffe0" : "#eefbd2";
+    const segC1 = dusk ? "rgba(230,255,170,.92)" : "rgba(150,205,95,.9)";
+    const segC2 = dusk ? "rgba(200,240,140,.92)" : "rgba(190,235,120,.9)";
+    // 尾节：从尾尖往头部画，横向摆动叠加在链方向上
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const s0 = segs[i], prev = i === 0 ? { x: p.x, y: p.y } : segs[i - 1];
+      const dx = s0.x - prev.x, dy = s0.y - prev.y;
+      const dl = Math.hypot(dx, dy) || 1;
+      const nx = -dy / dl, ny = dx / dl;
+      const off = Math.sin(t * hz * Math.PI * 2 - i * 0.9) * amp * ((i + 1) / (segs.length || 1));
+      const r = Math.max(2.5, (8.5 - i * 1.15)) * sc;
+      ctx.fillStyle = i % 2 ? segC1 : segC2;
+      ctx.beginPath(); ctx.arc(s0.x + nx * off, s0.y + ny * off, r, 0, Math.PI * 2); ctx.fill();
+    }
+    // 头部光晕（暗背景下更亮，猫更容易锁定）
+    const gr = 46 * sc;
+    ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
+    glow.addColorStop(0, dusk ? "rgba(226,255,190,.34)" : "rgba(226,255,170,.26)");
+    glow.addColorStop(1, "rgba(170,240,110,0)");
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    // 头：椭圆 + 白腹 + 双眼（素材头朝上画，按航向旋转到位）
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate((p.driftAng || 0) + Math.PI / 2);
+    ctx.scale(sc, sc);
+    ctx.fillStyle = bodyC;
+    ctx.beginPath(); ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = bellyC;
+    ctx.beginPath(); ctx.ellipse(0, 5, 13, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#22301a";
+    ctx.beginPath(); ctx.arc(-7, -6, 2.6, 0, Math.PI * 2); ctx.arc(7, -6, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
   D.icon = (ctx, type, x, y, s) => {
     ctx.save();
     ctx.translate(x, y); ctx.scale(s, s);
-    if (type === "fish") {
+    if (type === "tadpole") {
+      // 静态示意：圆头 + 甩出去的尾巴（o------）
+      ctx.strokeStyle = "rgba(150,205,95,.9)"; ctx.lineWidth = 7; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(72, 62); ctx.quadraticCurveTo(94, 56, 106, 72); ctx.stroke();
+      ctx.fillStyle = "#9ccf3e";
+      ctx.beginPath(); ctx.ellipse(58, 60, 22, 16, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#eefbd2";
+      ctx.beginPath(); ctx.ellipse(58, 66, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#22301a";
+      ctx.beginPath(); ctx.arc(51, 54, 2.8, 0, Math.PI * 2); ctx.arc(65, 54, 2.8, 0, Math.PI * 2); ctx.fill();
+    } else if (type === "fish") {
       ctx.translate(-60, -36); ctx.globalAlpha = 1;
       const goldSp = G.FISH_SPECIES.find(s => s.key === "gold") || G.FISH_SPECIES[0];
       const fake = { species: goldSp, wagDur: 0.5, phase: 0, state: "FLAP" };
@@ -1181,34 +1235,51 @@ module.exports = function (G) {
       const fake = { state: "hold", sc: 1 };
       D.laser(ctx, fake, 0.6);
     } else if (type === "pool") {
-      // 首页卡片图标：一小块「夜间石板地」缩略图 + 与游戏内完全相同的那只发光萤火虫
-      // （同比例、同朝向；深色底让半透明膜翅和萤火尾灯看得见）
-      // 图标设计框约 115×115（ui.js 用 scl=(iconZone-6)/115），整体收在 ±47 内，不会溢出卡片
-      const fr = 46, rad = 15;
-      const rrect = (x, y, w, h, r2) => {
-        ctx.beginPath();
-        ctx.moveTo(x + r2, y);
-        ctx.arcTo(x + w, y, x + w, y + h, r2);
-        ctx.arcTo(x + w, y + h, x, y + h, r2);
-        ctx.arcTo(x, y + h, x, y, r2);
-        ctx.arcTo(x, y, x + w, y, r2);
-        ctx.closePath();
-      };
-      ctx.save();
-      rrect(-fr, -fr, fr * 2, fr * 2, rad); ctx.clip();
-      const floor = ctx.createRadialGradient(0, 0, 0, 0, 0, fr * 1.15);
-      floor.addColorStop(0, "#b3a579");        // 虫体周围被照亮的地面
-      floor.addColorStop(0.50, "#8a8063");
-      floor.addColorStop(1, "#514a38");
-      ctx.fillStyle = floor;
-      ctx.fillRect(-fr, -fr, fr * 2, fr * 2);
-      const fake = { state: "crawl", sc: 0.86, crawlAng: -Math.PI / 2, ph: 0.4 };
+      // 首页「萤火虫」卡：浅底 + 与游戏内完全相同的那只发光萤火虫（参考图为黄绿发光小虫）
+      // 图标设计框约 115×115，整体收在 ±47 内
+      const glow = ctx.createRadialGradient(0, 6, 0, 0, 6, 48);
+      glow.addColorStop(0, "rgba(238,246,176,.55)");
+      glow.addColorStop(.6, "rgba(238,246,176,.18)");
+      glow.addColorStop(1, "rgba(238,246,176,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(0, 6, 48, 0, Math.PI * 2); ctx.fill();
+      const fake = { state: "crawl", sc: 0.92, crawlAng: -Math.PI / 2, ph: 0.4 };
       D.poolLight(ctx, fake, 0.6);
+    } else if (type === "ladybug") {
+      // 首页「昆虫乐园」卡：红底黑点小瓢虫（参考图第 6 张卡）
+      ctx.save();
+      ctx.fillStyle = "rgba(60,50,40,.12)";
+      ctx.beginPath(); ctx.ellipse(0, 30, 30, 7, 0, 0, Math.PI * 2); ctx.fill();
+      // 六足 + 触角
+      ctx.strokeStyle = "#3a2a20"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+      for (const s2 of [-1, 1]) {
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath(); ctx.moveTo(s2 * 20, -2 + i * 9);
+          ctx.quadraticCurveTo(s2 * 33, 2 + i * 10, s2 * 36, 12 + i * 9); ctx.stroke();
+        }
+        ctx.beginPath(); ctx.moveTo(s2 * 7, -25); ctx.quadraticCurveTo(s2 * 16, -40, s2 * 22, -41); ctx.stroke();
+        ctx.fillStyle = "#3a2a20"; ctx.beginPath(); ctx.arc(s2 * 22, -41, 2.6, 0, Math.PI * 2); ctx.fill();
+      }
+      // 头
+      ctx.fillStyle = "#2f2520";
+      ctx.beginPath(); ctx.ellipse(0, -23, 16, 11, 0, 0, Math.PI * 2); ctx.fill();
+      // 鞘翅：红色半球 + 中线 + 黑点
+      const bg = ctx.createLinearGradient(-24, -18, 22, 26);
+      bg.addColorStop(0, "#ff6b52"); bg.addColorStop(.55, "#e8392b"); bg.addColorStop(1, "#b81d18");
+      ctx.fillStyle = bg;
+      ctx.beginPath(); ctx.ellipse(0, 3, 27, 26, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#2f2520"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(0, -22); ctx.lineTo(0, 28); ctx.stroke();
+      ctx.fillStyle = "#2f2520";
+      for (const s2 of [-1, 1]) {
+        for (const [px, py, pr] of [[13, -9, 5], [19, 5, 4], [10, 14, 4.5]]) {
+          ctx.beginPath(); ctx.arc(s2 * px, py, pr, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      // 高光
+      ctx.fillStyle = "rgba(255,255,255,.42)";
+      ctx.beginPath(); ctx.ellipse(-11, -12, 7, 4.5, -.5, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      ctx.strokeStyle = "rgba(74,64,46,.5)"; ctx.lineWidth = 1.2;
-      rrect(-fr, -fr, fr * 2, fr * 2, rad); ctx.stroke();
-      ctx.strokeStyle = "rgba(255,255,255,.16)"; ctx.lineWidth = 1;
-      rrect(-fr + 1.2, -fr + 1.2, fr * 2 - 2.4, fr * 2 - 2.4, rad - 1); ctx.stroke();
     } else if (type === "frog") {
       ctx.translate(-48, -39);
       const fake = { fState: "settle", phase: 0 };

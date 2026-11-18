@@ -9,7 +9,9 @@ module.exports = function (G) {
   G.GAME_NAME = "逗猫触屏玩具";
 
   const DEFAULTS = {
-    targetType: "fish", preyCount: 1, difficulty: "normal", duration: 180, infinite: false,
+    /* 冷启动默认（PRD 6.2 / 8.1 V1.2）：单只 + 悠闲 + 1 分钟，三项都取最低门槛，
+       让猫在首局前 30 秒就能抓到第一次；主人第一分钟就能看到完整结果 */
+    targetType: "fish", preyCount: 1, difficulty: "easy", duration: 60, infinite: false,
     keepScreen: true,        // 屏幕常亮（给猫玩时不自动锁屏）
     antiMistouch: true,      // 进入游戏首次弹「系统防误触」引导
     sound: true,             // 音效默认开
@@ -17,6 +19,7 @@ module.exports = function (G) {
     adaptive: true,          // 自适应辅助默认开（猫更容易抓到）
     bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
     bg_fish: "kelp",         // 捕鱼可选海域（水草森林 / 泳池追鱼）
+    bg_tadpole: "lotus",     // 蝌蚪快跑可选背景（晨光浅塘 / 暮色深塘）
     /* 电子猫粮机：feedNextAt 存的是「下次出粮的绝对时刻(ms)」，离开本页也照走真实时间；
        feedBowl = 盆中颗数，feedHopper = 储粮桶余量百分比 */
     feedMode: "manual", feedPortion: 3, feedIntervalMin: 1,
@@ -132,7 +135,7 @@ module.exports = function (G) {
 
   /* 玩法 key / 时长白名单：存储里的字段可能被旧版本写成任意类型（"abc"、null、对象），
      直接透给游戏会让计时变成 NaN、targetType 指向不存在的玩法。这里一次性收敛。 */
-  const TYPES = ["fish", "butterfly", "mouse", "laser", "pool", "frog"];
+  const TYPES = ["fish", "butterfly", "mouse", "laser", "pool", "frog", "tadpole"];
 
   /* ===== 可切换模式表 =====
      某玩法有 ≥2 套模式时，首页点「开始游戏」先弹模式选择层（可左右滑动/点按翻页），
@@ -143,10 +146,16 @@ module.exports = function (G) {
       { key: "room",  name: "室内房间", desc: "木地板 · 窗光 · 地毯" },
       { key: "swarm", name: "群鼠乱窜", desc: "俯视群鼠 · 满屏乱窜" }
     ],
+    /* 三个场景即游戏内真实海域（与 SEA_THEMES 一致）：泳池追鱼 / 水草森林 / 鱼群巡游。
+       顺序让默认的 kelp 居中；key 与跨局记忆都不变。 */
     fish: [
-      { key: "kelp", name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
-      { key: "pool", name: "泳池追鱼", desc: "亮蓝池水 · 焦散光网" },
+      { key: "pool",  name: "泳池追鱼", desc: "亮蓝池水 · 焦散光网" },
+      { key: "kelp",  name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
       { key: "school", name: "鱼群巡游", desc: "深海鱼群 · 结群游动" }
+    ],
+    tadpole: [
+      { key: "lotus", name: "晨光浅塘", desc: "亮青绿水 · 光柱藕叶" },
+      { key: "dusk",  name: "暮色深塘", desc: "深蓝紫水 · 萤光浮尘" }
     ],
     /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
     frog: [
@@ -172,6 +181,16 @@ module.exports = function (G) {
     /* 默认改为「单只」：saveConfig 会把整个 config 写进本地存档，旧存档里往往已有显式 3，
        这里用 pcV1 标记做一次性迁移，把它们也拉回新默认；之后用户在设置里改「多只」会一直保留。 */
     if (!saved.pcV1) { c.preyCount = 1; c.pcV1 = 1; }
+    /* 默认难度/时长改为「悠闲 + 1 分钟」（PRD V1.2）：存档里往往已有旧默认的显式值，
+       用 cfgV2 标记做一次性迁移——只有仍是旧默认（标准 / 3 分钟）的才拉回新默认，
+       用户自己改过的（hard / 5 分钟等）保留，迁移后不再动。 */
+    if (!saved.cfgV2) {
+      if (saved.difficulty == null || saved.difficulty === "normal") c.difficulty = DEFAULTS.difficulty;
+      if (saved.duration == null || Number(saved.duration) === 180) c.duration = DEFAULTS.duration;
+      c.cfgV2 = 1;
+    }
+    /* 脏数据收敛：难度只认三档（此处 G.DIFF 还没建表，用字面量白名单） */
+    if (["easy", "normal", "hard"].indexOf(c.difficulty) < 0) c.difficulty = DEFAULTS.difficulty;
     // 音效/震动/自适应辅助默认开启：旧版本存档里是旧逻辑写入的显式 false，
     // 用 sndV1 标记做一次性迁移（重置为默认开），此后用户在设置里手动关闭的会一直保留
     if (!saved.sndV1) {
@@ -346,7 +365,8 @@ module.exports = function (G) {
     time: 0, secAcc: 0, remaining: 0,
     touches: 0, hits: 0, bonusHits: 0, combo: 0, maxCombo: 0, missStreak: 0,
     adaptiveTier: 0, comboTier: 0, stage: 1,
-    dartStreak: 0, dartHits: 0
+    dartStreak: 0, dartHits: 0,
+    tadCount: 1, tadEval: 0, tadMark: 0, tadDown: 0
   };
 
   /* 阶段名称 */
@@ -374,11 +394,25 @@ module.exports = function (G) {
        （视频里帧速度中位 18%/s、90 分位 53%/s，段落速度方差达 2.1，是典型的"走走停停"）
      - 呼吸脉动 1.9–2.3Hz；每 2.2–3.6s 耳朵/翅膀/鞘壳放大"亮一下"，给猫一个动态提示
      - 自发换位很罕见（视频 24 秒只有 2 次），所以间隔给到 7–10s */
+  /* pause = 走停节拍的停顿基准（秒）：实际停顿 = pause × 敏锐度 poolK，夹在 0.22–0.90s（PRD 4.6 V1.3） */
   G.FIREFLY = {
-    1: { slow: 58,  fast: 150, gait: [0.55, 1.20], fastP: 0.35, pulse: 1.9, flare: [2.6, 3.8], tele: [9, 13] },
-    2: { slow: 70,  fast: 190, gait: [0.45, 1.00], fastP: 0.45, pulse: 2.1, flare: [2.0, 3.0], tele: [7, 10] },
-    3: { slow: 84,  fast: 230, gait: [0.36, 0.85], fastP: 0.55, pulse: 2.3, flare: [1.5, 2.4], tele: [5, 8] }
+    1: { slow: 58,  fast: 150, gait: [0.55, 1.20], fastP: 0.35, pulse: 1.9, flare: [2.6, 3.8], tele: [9, 13], pause: 0.75 },
+    2: { slow: 70,  fast: 190, gait: [0.45, 1.00], fastP: 0.45, pulse: 2.1, flare: [2.0, 3.0], tele: [7, 10], pause: 0.60 },
+    3: { slow: 84,  fast: 230, gait: [0.36, 0.85], fastP: 0.55, pulse: 2.3, flare: [1.5, 2.4], tele: [5, 8], pause: 0.50 }
   };
+  /* 走停节拍的敏锐度口径（PRD 4.6）：本只存活越短说明猫反应越快 → 下次停顿越短 */
+  G.POOL_K = { init: 1, min: 0.4, max: 1.5, quickAlive: 2.5, slowAlive: 6, quick: 0.82, slow: 1.10, streakN: 3, streak: 0.94 };
+  /* ===== 蝌蚪快跑（方案 v0.2）=====
+     速度单位 px/s（×S ×难度倍率）；节体 = 头 1 + 尾 5，沿头部轨迹延迟跟随；
+     四态循环 wander 闲游 / flee 逃窜（方向=远离拍击点）/ dart 疾冲（阶段③）/ turn 换向（唯一静止窗）。
+     数量按击中能力动态调节 1–7：每 countEval 秒评估，命中 ≥countAdd 加 1、≤countDrop 连续两周期减 1。 */
+  G.TADPOLE = {
+    wander: [90, 130], flee: [260, 340], dart: [420, 520],
+    wanderDur: [2.6, 4.2], fleeDur: [1.2, 2.0], dartDur: [0.8, 1.2], turnDur: 0.25,
+    segs: 5, segGap: 10, triggerDist: 160, invuln: 0.6, headPad: 1.15, tailPad: 1.35,
+    countEval: 8, countAdd: 4, countDrop: 1, countMax: 7
+  };
+  G.TADPOLE_K = { init: 1, min: 0.8, max: 1.35, quickAlive: 2.5 };
   /* 兼容旧字段（其他模块可能还引用） */
   G.POOL_DRIFT = G.FIREFLY;
   /* 兔子模式（暗夜萤光按 29.8s 实拍视频重做）30fps 逐帧实测：
@@ -483,9 +517,11 @@ module.exports = function (G) {
       nose: "#d98a7d", haunch: "rgba(140,110,66,.3)", sheen: "rgba(246,230,196,.6)" }
   ];
   /* 激光花色 variants：红色为主（w = 出现权重），翠绿更快更小（约 1/4 概率）；只保留红绿两色 */
+  /* 只保留赤红光点：之前 red(权重 3) / green(权重 1) 加权随机，约 25% 概率抽到翠绿光点，
+     玩家会误以为激光"变色了"。绿色那档的配色与绘制代码仍保留在下方（LASER_COLORS.green /
+     LASER_SKIN.green），需要时把这一行加回即可恢复。 */
   G.LASER_VARIANTS = [
-    { key: "red",   name: "赤红光点", speed: 1,    size: 1,    w: 3 },
-    { key: "green", name: "翠绿光点", speed: 1.5,  size: 0.8,  w: 1 }
+    { key: "red",   name: "赤红光点", speed: 1,    size: 1,    w: 1 }
   ];
   /* 激光配色：小屏与大屏保持一致（经典红/翠绿）。
      key 与 LASER_VARIANTS 对应；spark=命中火花 trail=拖尾 flash=瞬移灼痕亮圈 burn=灼痕底色 */
@@ -514,7 +550,9 @@ module.exports = function (G) {
     /* 暗夜萤光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用萤光黄绿 */
     pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" },
     /* 青蛙跳：体型大、移动靠跳跃（不参与巡游速度），spark 用荷叶青绿 */
-    frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" }
+    frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" },
+    /* 蝌蚪快跑：头小尾长（o------），speed 为闲游基准（逃窜 ×2.6 / 疾冲 ×4 在状态机里算） */
+    tadpole:   { w: 40,  h: 30, speed: 110, wobF: 1.2, wobA: 0.5,  dartMin: 1.0, dartMax: 1.8, yMin: 0.05, yMax: 0.92, face: true,  sparkColor: "#d6ff9e" }
   };
   /* 全局配色：与 H5 原型 CSS 变量 / 场景色严格对齐 */
   G.COLORS = {

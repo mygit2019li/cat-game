@@ -24,11 +24,11 @@ G.nextScreen = null;
 G.transitionT = 0;
 G.shake = 0;
 G.result = null;
-G.pauseHold = { active: false, t0: 0, progress: 0 };   // HUD 暂停按钮长按状态（600ms 触发）
+G.pauseHold = { active: false, t0: 0, progress: 0, id: null };   // HUD 暂停按钮长按状态（600ms 触发，id=按住它的那根手指）
 let countT = 0, lastInt = -1;
 
-/* 设置抽屉：从首页左上角滑出，直接切屏（不走整屏淡入淡出），关闭时同样直接回首页。
-   G.settings.t0 是抽屉的入场时间戳，绘制层据此算滑入进度。 */
+/* 设置抽屉：从首页左上角浮出，直接切屏（不走整屏淡入淡出），关闭时同样直接回首页。
+   入场动画为缩放 + 上浮淡入；G.settings.t0 是抽屉的入场时间戳，绘制层据此算展开进度。 */
 /* back = 关闭抽屉后回到的页面（默认首页）；结算页传 "result"，改完设置还能回到本局结果。 */
 G.openSettings = (back) => {
   // 先解锁音频再记 t0：ensureAudio 首次创建 WebAudio 上下文可能阻塞上百毫秒，
@@ -144,8 +144,8 @@ initDebug();
    传播逻辑：玩的是猫，转发的是铲屎官。所以文案主语必须是「我家猫」，
    配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
    量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
-const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只" };
-const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫" };
+const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只", tadpole: "只" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫", tadpole: "小蝌蚪" };
 /* 兔子场所命中碎屑主色（黄色本体） */
 const POOL_SPARK = { firefly: "#ffe479" };
 G.shareResult = () => {
@@ -244,6 +244,7 @@ G.startGame = () => {
   S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
+  S.tadCount = 1; S.tadEval = 0; S.tadMark = 0; S.tadDown = 0;   // 蝌蚪快跑：数量动态 1–7
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
   // 鱼玩法：海域由背景选择层决定（水草森林 / 泳池追鱼，左右滑动切换、跨局记忆）
   S.sea = G.config.targetType === "fish" ? (G.SEA_THEMES.find(t => t.key === G.currentBg()) || G.SEA_THEMES[0]) : null;
@@ -295,8 +296,11 @@ G.openBgPick = () => {
   const arr = G.bgsFor(G.config.targetType);
   const cur = G.currentBg();
   // t0=弹入动画起点；relOff/relT0=松手后的吸附动画（残余位移按缓动归零）；touchActive=本次按压是否落在卡片区（按钮点按不翻页）
-  G.bgPick = { idx: Math.max(0, arr.findIndex(b => b.key === cur)), off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0,
-    t0: performance.now(), relOff: 0, relT0: 0, touchActive: false };
+  const idx0 = Math.max(0, arr.findIndex(b => b.key === cur));
+  /* visIdx = 绘制用的「连续」索引，可超出 [0,n-1]；idx 是它对列表长度取模后的真实索引。
+     画廊左右都画了邻卡，点击也必须能循环，否则「看得见左卡却点不动」。 */
+  G.bgPick = { idx: idx0, visIdx: idx0, off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0,
+    t0: performance.now(), relOff: 0, relT0: 0, touchActive: false, selT0: 0 };
   G.switchScreen("bgpick");
 };
 
@@ -317,23 +321,46 @@ function bgPickStep() {
   const P = G.bgPick;
   return P && P.cw ? P.cw + P.gap : (G.platform.W || 300) * 0.6;
 }
-/* 箭头按钮切换：与松手吸附共用同一动画（relOff 连续归零），拖动中忽略 */
+/* 点侧卡切换：绘制层是循环画廊，这里也按 visIdx 连续 ±1，第一张点左边照样能翻到上一张。
+   与松手吸附共用同一动画（relOff 连续归零），拖动中忽略。 */
 G.bgPickArrow = (dir) => {
   const P = G.bgPick; if (!P || P.drag) return;
   const arr = G.bgsFor(G.config.targetType);
-  const ni = Math.max(0, Math.min(arr.length - 1, P.idx + dir));
-  if (ni === P.idx) return;
+  if (!arr.length) return;
+  const ni = (P.visIdx == null ? P.idx : P.visIdx) + dir;
   const step = bgPickStep();
-  P.relOff = P.off + (ni - P.idx) * step;
-  P.idx = ni;
+  P.relOff = P.off + (ni - (P.visIdx == null ? P.idx : P.visIdx)) * step;
+  P.visIdx = ni;
+  P.idx = ((ni % arr.length) + arr.length) % arr.length;
   P.relT0 = performance.now();
   P.off = 0;
+  P.selT0 = P.relT0;
+};
+/* 点指示点直接跳到对应卡：走环形最短路径，动画与点侧卡一致 */
+G.bgPickJump = (target) => {
+  const P = G.bgPick; if (!P || P.drag) return;
+  const arr = G.bgsFor(G.config.targetType);
+  const n = arr.length; if (!n) return;
+  const cur = P.visIdx == null ? P.idx : P.visIdx;
+  const curReal = ((cur % n) + n) % n;
+  let delta = target - curReal;
+  if (delta > n / 2) delta -= n;
+  else if (delta < -n / 2) delta += n;
+  if (!delta) return;
+  const ni = cur + delta, step = bgPickStep();
+  P.relOff = P.off + delta * step;
+  P.visIdx = ni;
+  P.idx = ((ni % n) + n) % n;
+  P.relT0 = performance.now();
+  P.off = 0;
+  P.selT0 = P.relT0;
 };
 
 G.bgPickTouchStart = (x) => {
   const P = G.bgPick; if (!P) return;
   P.drag = true; P.x0 = x; P.moved = 0;
   P.touchActive = true;
+  P.visIdx = P.idx;                                // 拖动从真实索引起步，避免从循环索引跳变
   P.relOff = 0;                                    // 按下即终止上一次吸附动画
 };
 G.bgPickTouchMove = (x) => {
@@ -366,11 +393,14 @@ G.bgPickTouchEnd = (x) => {
     else if (x > W / 2 + half) dir = 1;
   }
   const newIdx = Math.max(0, Math.min(arr.length - 1, P.idx + dir));
+  const changed = newIdx !== P.idx;
   // 吸附动画：残余位移从「松手位置 + 已换页步长」连续归零（换页/回弹都平滑）
   P.relOff = P.off + (newIdx - P.idx) * step;
+  P.visIdx = newIdx;
   P.idx = newIdx;
   P.relT0 = performance.now();
   P.off = 0;
+  if (changed) P.selT0 = P.relT0;
 };
 
 /* ================= 召唤猫咪交互 ================= */
@@ -494,6 +524,7 @@ G.endGame = (fromPause) => {
   else                { title = "慵懒观察员"; desc = "今天兴趣不大？换个猎物类型试试。"; }
   const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "彩星爆散" : G.config.targetType === "frog" ? "空中截击" : "奖励命中";
   G.result = {
+    t0: performance.now(),
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
     bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
   };
@@ -541,6 +572,7 @@ function onHit(x, y, prey) {
   const isLaser = G.config.targetType === "laser";
   const isPool = G.config.targetType === "pool";
   const isFrog = G.config.targetType === "frog";
+  const isTad = G.config.targetType === "tadpole";
   const chasing = isMouse && prey.state === "dart";
   const resting = isBfly && prey.state === "RESTING";
   const holding = (isLaser || isPool) && prey.state === "hold";
@@ -607,6 +639,12 @@ function onHit(x, y, prey) {
     G.playFrogHit(aerial);
     if (G.padSway) G.padSway(prey.x, prey.y);
     if (aerial) { S.bonusHits++; G.playMilestone(); }
+  } else if (isTad) {
+    // 蝌蚪：头/尾同分 +1（方案 v0.2 §4.2），水花 + 涟漪 + pop；命中即触发逃窜由 onMiss/near-miss 决定
+    G.sparkBurst(x, y, "#d6ff9e", 8);
+    if (G.ripple) G.ripple(x, y, false);
+    if (G.playSchoolPop) G.playSchoolPop();
+    G.floatText(x, y - 26, "+1", "");
   } else {
     // 捕鱼命中：泳池海域走夸张的金橙水花、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
     const seaKey = G.session.sea && G.session.sea.key;
@@ -649,6 +687,13 @@ function onMiss(x, y) {
   S.missStreak++;
   applyAdaptive();
   applyComboBoost();
+  // 蝌蚪：拍近（未命中）也触发逃跑——追逐反射的可见来源（方案 v0.2 §4.1）
+  if (G.config.targetType === "tadpole") {
+    G.preys.forEach(p => {
+      if (p.type === "tadpole" && (p.invulnT || 0) <= 0 &&
+          Math.hypot(x - p.x, y - p.y) < 160) p.fleeFrom(x, y);
+    });
+  }
   if (G.config.targetType !== "laser" && G.config.targetType !== "pool") G.ripple(x, y, true);
   G.plantsStartle(x, y);
   if (G.config.targetType === "mouse") {
@@ -681,14 +726,90 @@ function onMiss(x, y) {
 
 /* ================= 触摸路由 ================= */
 const HOLD_MS = 600;   // 暂停按钮长按时长
+/* ================= 触摸（多点触控，PRD 5.9） =================
+   猫的两只爪子会同时落在屏幕上，旧实现只取 e.touches[0]，
+   结果「第一只爪子按住时，第二只爪子按下的位置不参与命中判定」。
+   现在按本次事件的触点逐个派发；页面按钮仍只认第一根手指，
+   避免双爪同时踩中按钮触发两次跳转。 */
+const TOUCH_MAX = 5;                        // 单次事件最多处理 5 个触点（异常数据保护）
+const tpOk = (t) => !!t && isFinite(t.clientX) && isFinite(t.clientY);
+const tpId = (t) => (t && (t.identifier != null ? t.identifier : t.id));
+function tpList(e) {
+  const src = (e && e.changedTouches && e.changedTouches.length) ? e.changedTouches
+    : (e && e.touches && e.touches.length ? e.touches : null);
+  const out = [];
+  if (!src) return out;
+  for (let i = 0; i < src.length && out.length < TOUCH_MAX; i++) if (tpOk(src[i])) out.push(src[i]);
+  return out;
+}
+
+/* 双爪乱拍（PRD 5.9）：300ms 内出现 ≥2 个不同触点、间距 ≥40px → 记一次高光。
+   只做计数与反馈，不加分（得分口径见 5.5）。 */
+function noteDualPaw(list) {
+  const S = G.session;
+  if (!S) return;
+  const now = performance.now();
+  const S1 = G.platform.S || 1;
+  S.touchLog = (S.touchLog || []).filter(o => now - o.t <= 300);
+  list.forEach(tp => S.touchLog.push({ t: now, x: tp.clientX / S1, y: tp.clientY / S1, id: tpId(tp) }));
+  if (S.touchLog.length < 2) return;
+  if (G.screen !== "playing" || S.paused || S.counting) return;
+  if (now - (S.lastDualAt || 0) < 300) return;          // 同一 300ms 窗口只记一次
+  let far = 0, mx = 0, my = 0;
+  for (let i = 0; i < S.touchLog.length; i++) {
+    for (let j = i + 1; j < S.touchLog.length; j++) {
+      const a = S.touchLog[i], b = S.touchLog[j];
+      if (a.id != null && a.id === b.id) continue;       // 同一根手指的重复采样
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (d >= 40 && d > far) { far = d; mx = (a.x + b.x) / 2; my = (a.y + b.y) / 2; }
+    }
+  }
+  if (!far) return;
+  S.lastDualAt = now;
+  S.dualPaw = (S.dualPaw || 0) + 1;                      // 埋点用：本局双爪次数
+  if (G.floatText) G.floatText(mx, my - 30, "双爪！", "big");
+  if (G.sparkBurst) G.sparkBurst(mx, my, "#ffe9a8", 8);
+  if (G.playMilestone) G.playMilestone();
+}
+
 G.platform.onTouchStart = (e) => {
-  const tp = e.touches && e.touches[0] || e.changedTouches && e.changedTouches[0];
-  if (!tp) return;
-  const x = tp.clientX, y = tp.clientY;
-  // UI 布局在虚拟手机尺寸空间，按钮命中需换算到同一空间（玩法猎物仍在真实空间）
+  const list = tpList(e);
+  if (!list.length) return;
   const S = G.platform.S || 1;
-  const vx = x / S, vy = y / S;
   G.ensureAudio();
+
+  if (G.screen === "playing") {
+    noteDualPaw(list);
+    const pr = G.ui.pauseRect;
+    for (let k = 0; k < list.length; k++) {
+      const x = list[k].clientX, y = list[k].clientY;
+      // UI 布局在虚拟手机尺寸空间，按钮命中需换算到同一空间（玩法猎物仍在真实空间）
+      const vx = x / S, vy = y / S;
+      // 按钮只认第一根触点：双爪同时踩两个按钮不会触发两次
+      if (k === 0 && pr && vx >= pr.x && vx <= pr.x + pr.w && vy >= pr.y && vy <= pr.y + pr.h) {
+        if (!G.pauseHold.active) {
+          G.pauseHold.active = true;
+          G.pauseHold.id = tpId(list[k]);
+          G.pauseHold.t0 = performance.now();
+          G.pauseHold.progress = 0;
+        }
+        continue;
+      }
+      if (k === 0 && G.hitButton(vx, vy)) continue;
+      // 命中测试（后绘制的优先，对齐 DOM 顶层元素语义）；每根手指各自判定，互不顶替
+      let hit = null;
+      for (let i = G.preys.length - 1; i >= 0; i--) {
+        if (G.preys[i].hittable(x, y)) { hit = G.preys[i]; break; }
+      }
+      if (hit) onHit(x, y, hit);
+      else onMiss(x, y);
+    }
+    return;
+  }
+
+  // 其余界面：按钮与手势只认第一个触点，避免双指同时点触发两次跳转
+  const tp = list[0];
+  const vx = tp.clientX / S, vy = tp.clientY / S;
   if (G.screen === "bgpick") {
     if (G.hitButton(vx, vy)) return;      // 「开始游戏」/「关闭」按钮
     G.bgPickTouchStart(vx);               // 卡片画廊：按下即开始跟手（虚拟空间位移）
@@ -697,26 +818,6 @@ G.platform.onTouchStart = (e) => {
   if (G.screen === "summon") {
     if (G.hitButton(vx, vy)) return;
     G.summonPickTouchStart(vx);
-    return;
-  }
-  if (G.screen === "playing") {
-    // 暂停按钮：长按手势（按下开始计时，松手取消；不判 miss 不影响连击）
-    const pr = G.ui.pauseRect;
-    if (pr && vx >= pr.x && vx <= pr.x + pr.w && vy >= pr.y && vy <= pr.y + pr.h) {
-      G.pauseHold.active = true;
-      G.pauseHold.t0 = performance.now();
-      G.pauseHold.progress = 0;
-      return;
-    }
-    G.pauseHold.active = false;
-    if (G.hitButton(vx, vy)) return;
-    // 命中测试（后绘制的优先，对齐 DOM 顶层元素语义）
-    let hit = null;
-    for (let i = G.preys.length - 1; i >= 0; i--) {
-      if (G.preys[i].hittable(x, y)) { hit = G.preys[i]; break; }
-    }
-    if (hit) onHit(x, y, hit);
-    else onMiss(x, y);
     return;
   }
   if (G.screen === "counting") return;
@@ -742,22 +843,28 @@ G.platform.onTouchMove = (e) => {
   }
 };
 G.platform.onTouchEnd = (e) => {
+  const list = tpList(e);
+  const S = G.platform.S || 1;
   if (G.screen === "bgpick") {
     // 空事件兜底（测试垫片会传 {}）：取不到 x 则跳过点按翻页，仅走拖动收尾
-    const tp = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
-    G.bgPickTouchEnd(tp ? tp.clientX / (G.platform.S || 1) : null);
+    G.bgPickTouchEnd(list.length ? list[0].clientX / S : null);
     return;
   }
   if (G.screen === "summon") {
-    const tp = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
-    G.summonPickTouchEnd(tp ? tp.clientX / (G.platform.S || 1) : null);
+    G.summonPickTouchEnd(list.length ? list[0].clientX / S : null);
     return;
   }
   if (G.screen === "records") {
     if (G.ui.recTouchEnd) G.ui.recTouchEnd();   // 松手：交给惯性滚动
     return;
   }
-  if (G.pauseHold.active) { G.pauseHold.active = false; G.pauseHold.progress = 0; }   // 未满 600ms：取消，无惩罚
+  // 暂停长按：只有「按下长按的那根手指」抬起才取消（另一只爪子抬起不影响）
+  if (G.pauseHold.active) {
+    const lifted = list.length
+      ? list.some(t => tpId(t) == null || G.pauseHold.id == null || tpId(t) === G.pauseHold.id)
+      : true;
+    if (lifted) { G.pauseHold.active = false; G.pauseHold.progress = 0; G.pauseHold.id = null; }
+  }
 };
 
 /* ================= 画面绘制 ================= */
@@ -820,6 +927,8 @@ function loop() {
     S.time += dt;
     S.secAcc += dt;
     while (S.secAcc >= 1) { S.secAcc -= 1; tickSecond(); }
+    // 蝌蚪快跑：数量按击中能力动态调节（每 8s 评估，1–7 只）
+    if (G.tadpoleTick) G.tadpoleTick(dt);
     G.preys.forEach(p => p.update(dt, S.time));
   }
   // 老鼠出洞循环声：有 peek/dart 的鼠就唧唧叫，全部回洞就停；暂停/切后台也会停
@@ -836,7 +945,7 @@ function loop() {
   if (PH.active && G.screen === "playing") {
     PH.progress = Math.min((performance.now() - PH.t0) / HOLD_MS, 1);
     if (PH.progress >= 1) {
-      PH.active = false; PH.progress = 0;
+      PH.active = false; PH.progress = 0; PH.id = null;
       S.paused = true;
       if (G.stopMouseSqueak) G.stopMouseSqueak();
       G.switchScreen("paused");

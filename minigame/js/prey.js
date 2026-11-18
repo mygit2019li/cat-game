@@ -66,6 +66,16 @@ module.exports = function (G) {
         this.vx = 1; this.vy = 0;
         this.trailAcc = 0; this.lastTrailX = 0; this.lastTrailY = 0;
       }
+      if (type === "tadpole") {
+        /* 蝌蚪快跑：头 + 5 节尾；speed 为闲游基准，逃窜/疾冲倍率在状态机里算 */
+        this.speciesSpeed = 1;
+        this.segs = []; this.trail = [];
+        this.tState = "wander"; this.tT = rand(2.0, 3.0);
+        this.spd = 0; this.spdW = 110; this.spdF = 300; this.spdD = 460;
+        this.tadK = (G.TADPOLE_K || {}).init || 1;
+        this.invulnT = 0; this.aliveT = 0; this.rampT = 0;
+        this.turnProg = 0; this.turnDur = 0.25; this.edgeIn = false;
+      }
       if (type === "butterfly") {
         // 加权随机：白/淡黄为主（w 权重），虎斑蝶偶现
         const pool = [];
@@ -203,6 +213,13 @@ module.exports = function (G) {
           this.emberAcc = 0;
           this.crawlAng = this.driftAng;               // 兼容旧字段
           this.state = "crawl"; this.stateT = 0; this.stateDur = 99;
+          /* 走停节拍（PRD 4.6 V1.3）：敏锐度 poolK 与停顿状态机；freshWalk = 刚亮起先走一段 */
+          const K0 = G.POOL_K || {};
+          this.poolK = K0.init || 1;
+          this.pauseT = 0; this.pauseDur = ((G.FIREFLY[this.stage || 1] || G.FIREFLY[1] || {}).pause) || 0.6;
+          this.pauseAng = null; this.pauseTurnTo = null; this.nextAng = null;
+          this.tpDue = false; this.aliveT = 0; this.quickN = 0;
+          this.freshWalk = true; this.pauseGlow = 0; this.edgeIn = false;
           this.fade = 1;
           return;
         }
@@ -243,6 +260,21 @@ module.exports = function (G) {
       }
       if (this.type === "frog") {
         this.spawnOnPad();           // 落到一片空荷叶上开始蓄力
+        return;
+      }
+      if (this.type === "tadpole") {
+        const pad0 = 40 * Math.pow(G.platform.S || 1, 0.4);
+        this.x = rand(b.x + pad0, b.x + b.w - pad0);
+        this.y = rand(b.y + pad0, b.y + b.h - pad0);
+        this.driftAng = rand(0, Math.PI * 2);
+        this.driftTurn = rand(-0.25, 0.25);
+        this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
+        this.tState = "wander"; this.tT = rand(2.0, 3.0); this.spd = 0;
+        this.trail = []; this.segs = [];
+        this.aliveT = 0; this.invulnT = 0; this.rampT = 0; this.edgeIn = false;
+        this.fade = 1; this.vanishT = 0; this.darkT = 0; this.tp = null;
+        this.crawlAng = this.driftAng;
+        this.state = "crawl";
         return;
       }
       this.x = b.x + rand(0.15, 0.85) * b.w;
@@ -798,8 +830,28 @@ module.exports = function (G) {
       if (this.type === "butterfly" && this.state === "STARTLED") return;   // 惊飞中防重入
       // 青蛙：拍中要"干脆消失"，只留 0.16s 残影，观感交给 frogPop 的爆开特效
       if (this.type === "frog") { this.burstT = 0; this.vanishT = 0.16; return; }
+      // 蝌蚪被拍：0.22s 渐隐（不瞬灭）+ 0.6s 无敌（防一次扑击重复计数）
+      if (this.type === "tadpole") { this.burstT = 0; this.vanishT = 0.22; this.invulnT = 0.6; return; }
       // 萤光小虫被拍：0.08s 收光即灭（第一版"一拍就灭"），updateFirefly 内接暗场后在别处亮起
-      if (this.type === "pool") { this.burstT = 0; this.vanishT = 0.08; return; }
+      if (this.type === "pool") {
+        this.burstT = 0; this.vanishT = 0.08;
+        /* 敏锐度（PRD 4.6）：本只存活越短 = 猫反应越快 → 下次停顿越短；打得慢则放宽回去 */
+        const K = G.POOL_K || {};
+        const alive = this.aliveT || 0;
+        let k = this.poolK == null ? (K.init || 1) : this.poolK;
+        if (alive <= (K.quickAlive || 2.5)) {
+          k *= (K.quick || 0.82);
+          this.quickN = (this.quickN || 0) + 1;
+          if (this.quickN >= (K.streakN || 3)) { k *= (K.streak || 0.94); this.quickN = 0; }
+        } else if (alive > (K.slowAlive || 6)) {
+          k *= (K.slow || 1.10);
+          this.quickN = 0;
+        } else {
+          this.quickN = 0;
+        }
+        this.poolK = Math.max(K.min || 0.4, Math.min(K.max || 1.5, k));
+        return;
+      }
       this.vanishT = 0.3;
       this.burstT = 0;
       if (this.type === "butterfly") {
@@ -853,6 +905,12 @@ module.exports = function (G) {
       const b = G.bounds();
       const MS = Math.pow(G.platform.S || 1, 0.5);   // 大屏下按比例略微提速，保持相对运动手感
       this.comboSpeed += ((this.comboSpeedTarget || 1) - this.comboSpeed) * Math.min(1, dt * 6);
+      if (this.despawn != null) {                 // 数量下调：淡出后从场上移除
+        this.despawn -= dt;
+        this.fade = Math.max(0, this.despawn / 0.3);
+        if (this.despawn <= 0) { const di = preys.indexOf(this); if (di >= 0) preys.splice(di, 1); }
+        return;
+      }
       if (this.type === "mouse")   {
         if (G.scene.mouseBg === "swarm") { this.updateSwarmMouse(dt, t); return; }
         this.updateMouse(dt, t); return;
@@ -860,6 +918,7 @@ module.exports = function (G) {
       if (this.type === "butterfly") { this.updateButterfly(dt, t); return; }
       if (this.type === "frog") { this.updateFrog(dt, t); return; }
       if (this.type === "pool") { this.updateFirefly(dt, t); return; }
+      if (this.type === "tadpole") { this.updateTadpole(dt, t); return; }
       if (this.type === "laser") { this.updateLaser(dt, t); return; }
       // ---- 鱼：三阶段 ----
       const d = this.def;
@@ -1416,34 +1475,102 @@ module.exports = function (G) {
       }
       this.fade = 1;
 
-      /* ---------- 两档步态：慢爬 / 急爬，各自持续 0.4–1.2s（每种动物有自己的倍率，见 G.FF_TOYS） ---------- */
-      this.gaitT = (this.gaitT || 0) - dt;
-      if (this.gaitT <= 0) {
-        this.fast = Math.random() < clamp((P.fastP || 0.4) + (toy.fastP || 0), 0.05, 0.85);
-        this.gaitT = (this.fast ? rand(P.gait[0], P.gait[0] * 1.6) : rand(P.gait[1] * 0.8, P.gait[1] * 1.5)) * (toy.gait || 1);
-        this.driftAng += rand(-0.55, 0.55);           // 换挡时略改方向，像虫子临时拐弯
+      /* ---------- 走停节拍（PRD 4.6 V1.3）：走一段 → 停一下 → 再走 ----------
+         停顿只停「前进」：位置不变（漂移 <4px），身体左右调头张望，并在停顿后段
+         定好下一段行进方向；停顿时长 = 阶段基准 × 敏锐度 poolK（本只存活越短 → 越短）。 */
+      this.aliveT = (this.aliveT || 0) + dt;                     // 本只存活时长（敏锐度判定用）
+      const K = G.POOL_K || {};
+      const kRaw = this.poolK == null ? (K.init || 1) : this.poolK;
+      // 自适应辅助生效时（失误 ≥3 层）强制把停顿拉长，帮猫一把
+      const kEff = (G.session && G.session.adaptiveTier > 0) ? Math.max(1.15, kRaw) : kRaw;
+      // 难度倍率：悠闲停顿更长（更好拍）、激烈更短（0.85）
+      const difK = ({ easy: 1.2, normal: 1, hard: 0.85 })[G.config.difficulty] || 1;
+      const WALK_K = 1.5;              // 行走段整体拉长：与停顿配成约 2.4s 一个节拍（60s 局 ≈ 25 次停顿）
+      const pauseWant = Math.max(0.22, Math.min(0.9, (P.pause || 0.6) * kEff * difK));
+
+      if (this.pauseT > 0) {
+        /* ===== 停顿中：不前进，身体左右调头 ===== */
+        this.pauseT -= dt;
+        const D = this.pauseDur || pauseWant;
+        const prog = 1 - Math.max(this.pauseT, 0) / D;          // 0..1
+        const a0 = this.pauseAng == null ? this.driftAng : this.pauseAng;
+        const a1 = this.pauseTurnTo == null ? a0 : this.pauseTurnTo;
+        const a2 = this.nextAng == null ? a1 : this.nextAng;
+        if (prog < 0.45) {                                      // 前 45%：扭头（约 90–140°/s）
+          const u = prog / 0.45, e = u * u * (3 - 2 * u);
+          this.driftAng = a0 + (a1 - a0) * e;
+        } else if (prog < 0.78) {                               // 中段：定住张望
+          this.driftAng = a1;
+        } else {                                                // 后 22%：定好下一段方向
+          const u = (prog - 0.78) / 0.22, e = u * u * (3 - 2 * u);
+          this.driftAng = a1 + (a2 - a1) * e;
+        }
+        this.fast = false;
+        this.pauseGlow = 1;
+        this.crawlAng = this.driftAng;
+        this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
+        if (this.pauseT <= 0) {
+          /* ===== 出停顿：沿新方向起步 ===== */
+          this.driftAng = a2;
+          this.driftTurn = 0;
+          this.pauseAng = null; this.pauseTurnTo = null; this.nextAng = null;
+          this.rampT = rand(0.04, 0.08);                          // 起步加速窗口（40–80ms）
+          this.fast = Math.random() < clamp((P.fastP || 0.4) + (toy.fastP || 0), 0.05, 0.85);
+          this.gaitT = (this.fast ? rand(P.gait[0], P.gait[0] * 1.6) : rand(P.gait[1] * 0.8, P.gait[1] * 1.5)) * (toy.gait || 1) * WALK_K;
+          // 换位只在停顿结束的瞬间发生（不在行走途中消失）
+          if (this.tpDue) { this.tpDue = false; this.tp = { phase: "out", t: 0 }; return; }
+        }
+      } else {
+        /* ===== 行走中：走满一段就进入停顿 ===== */
+        this.pauseGlow = 0;
+        this.gaitT = (this.gaitT || 0) - dt;
+        if (this.gaitT <= 0) {
+          if (this.freshWalk) {
+            /* 刚亮起：第一段先走。从边缘进场要真的爬进画面（×1.15），屏内重生略短（×0.7） */
+            this.freshWalk = false;
+            this.fast = Math.random() < clamp((P.fastP || 0.4) + (toy.fastP || 0), 0.05, 0.85);
+            this.gaitT = (this.fast ? rand(P.gait[0], P.gait[0] * 1.6) : rand(P.gait[1] * 0.8, P.gait[1] * 1.5)) * (toy.gait || 1) * (this.edgeIn ? 1.15 : 0.7) * WALK_K;
+            this.edgeIn = false;
+          } else {
+            this.pauseDur = pauseWant;
+            this.pauseT = pauseWant;
+            this.pauseAng = this.driftAng;
+            const turn = Math.min(0.44, 2.2 * pauseWant * 0.45);   // ±25° 左右，停顿越短幅度越小
+            this.pauseTurnTo = this.driftAng + (Math.random() < 0.5 ? -turn : turn);
+            this.nextAng = this.pauseTurnTo + rand(-0.35, 0.35);   // 下一段行进方向 ±20°
+            this.fast = false;
+            if (G.playFireflyFlare) G.playFireflyFlare();          // 停下那一下：鞘翅亮一下
+          }
+        }
       }
-      const targetSp = (this.fast ? P.fast : P.slow) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1) * (toy.spd || 1);
-      // 速度平滑：不一瞬间变速（否则像瞬移），但 0.15s 就到位，仍有"急爬"的突然感
-      this.spd = this.spd == null ? targetSp : this.spd + (targetSp - this.spd) * Math.min(1, dt * 7);
+      const paused = this.pauseT > 0;
+      let targetSp = (this.fast ? P.fast : P.slow) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1) * (toy.spd || 1);
+      if (paused) targetSp = 0;
+      // 收速度要快（停顿不该有滑行感，全程漂移 <4px）；起步 40–80ms 快速拉满，像虫子突然窜出去
+      this.rampT = Math.max(0, (this.rampT || 0) - dt);
+      const spK = paused ? 60 : (this.rampT > 0 ? 45 : 7);
+      this.spd = this.spd == null ? targetSp : this.spd + (targetSp - this.spd) * Math.min(1, dt * spK);
+      if (paused && this.spd < 18) this.spd = 0;
       const slowRef = Math.max(20, P.slow * MS);
       this.moveK = Math.max(0, Math.min(1.4, this.spd / slowRef - 0.15));
       // 步态相位跟着实际速度走：停在原地时脚也不乱划
       this.stepK = (this.stepK || 0) + dt * (2.6 + this.spd * 0.035) * (0.12 + 0.88 * Math.min(1, this.moveK));
 
-      /* ---------- 缓慢转向 + 边界处理（先软推，贴上再镜像反弹） ---------- */
-      this.driftTurn = (this.driftTurn || 0) + rand(-1, 1) * 0.75 * dt;
-      this.driftTurn = Math.max(-0.5, Math.min(0.5, this.driftTurn));
-      this.driftAng = (this.driftAng || 0) + this.driftTurn * dt;
-      const m = 62 * MS;
-      if (this.x < L + m && Math.cos(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
-      if (this.x > Rt - m && Math.cos(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
-      if (this.y < T + m && Math.sin(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
-      if (this.y > Bm - m && Math.sin(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
-      if (this.x <= L + 2 && Math.cos(this.driftAng) < 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
-      if (this.x >= Rt - 2 && Math.cos(this.driftAng) > 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
-      if (this.y <= T + 2 && Math.sin(this.driftAng) < 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
-      if (this.y >= Bm - 2 && Math.sin(this.driftAng) > 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
+      /* ---------- 缓慢转向 + 边界处理（先软推，贴上再镜像反弹）；停顿中朝向由调头逻辑接管 ---------- */
+      if (!paused) {
+        this.driftTurn = (this.driftTurn || 0) + rand(-1, 1) * 0.75 * dt;
+        this.driftTurn = Math.max(-0.5, Math.min(0.5, this.driftTurn));
+        this.driftAng = (this.driftAng || 0) + this.driftTurn * dt;
+        const m = 62 * MS;
+        if (this.x < L + m && Math.cos(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
+        if (this.x > Rt - m && Math.cos(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
+        if (this.y < T + m && Math.sin(this.driftAng) < -0.2) this.driftTurn += 1.9 * dt;
+        if (this.y > Bm - m && Math.sin(this.driftAng) > 0.2) this.driftTurn -= 1.9 * dt;
+        if (this.x <= L + 2 && Math.cos(this.driftAng) < 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
+        if (this.x >= Rt - 2 && Math.cos(this.driftAng) > 0) { this.driftAng = Math.PI - this.driftAng; this.driftTurn *= 0.4; }
+        if (this.y <= T + 2 && Math.sin(this.driftAng) < 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
+        if (this.y >= Bm - 2 && Math.sin(this.driftAng) > 0) { this.driftAng = -this.driftAng; this.driftTurn *= 0.4; }
+      }
 
       /* ---------- 同伴避让：别叠成一坨（轻柔推离，不改航向感） ---------- */
       preys.forEach(q => {
@@ -1482,6 +1609,7 @@ module.exports = function (G) {
         if (G.playFireflyFlare) G.playFireflyFlare();
       }
       let op = 0.28 + 0.05 * Math.sin(t * 1.6 + (this.ph || 0));
+      if (paused) op = Math.min(0.98, op * 1.3);          // 停顿中尾灯提亮 ~30%，猫看得出"它停下了"
       if (this.flare) {
         this.flare.t += dt;
         const ft = this.flare.t;
@@ -1492,27 +1620,194 @@ module.exports = function (G) {
       }
       this.elytraK = op;
 
-      /* ---------- 下一次自发换位 ---------- */
+      /* ---------- 下一次自发换位：只在停顿结束的瞬间触发（不在行走途中消失，PRD 4.6） ---------- */
       this.tpNext = (this.tpNext == null ? rand(P.tele[0], P.tele[1]) : this.tpNext) - dt;
-      if (this.tpNext <= 0) this.tp = { phase: "out", t: 0 };
+      if (this.tpNext <= 0 && !paused) { this.gaitT = 0; this.tpDue = true; }   // 先走完这段 → 停 → 停完再换位
     }
-    /* 换一个"别处"：pool 从左右边缘重新进场；其他模式仍用随机换位 */
+    /* ============ 蝌蚪快跑（方案 v0.2）：四态循环 + 节体跟随链 ============ */
+    updateTadpole(dt, t) {
+      const T = G.TADPOLE || {};
+      const S = G.session;
+      const b = G.bounds();
+      const MS = Math.pow(G.platform.S || 1, 0.5);
+      this.aliveT = (this.aliveT || 0) + dt;
+      if (this.invulnT > 0) this.invulnT -= dt;
+
+      /* 被拍中：渐隐 → 暗场 → 从边缘爬回来 */
+      if (this.vanishT > 0) {
+        this.vanishT -= dt;
+        this.fade = Math.max(0, Math.min(1, this.vanishT / 0.22));
+        if (this.vanishT <= 0) { this.vanishT = 0; this.fade = 0; this.darkT = rand(0.3, 0.8); }
+        return;
+      }
+      if (this.darkT > 0) {
+        this.darkT -= dt; this.fade = 0;
+        if (this.darkT <= 0) { this.darkT = 0; this.tp = { phase: "in", t: 0 }; this.relocate(true); }
+        return;
+      }
+      if (this.tp) {                       // 边缘亮起淡入
+        this.tp.t += dt;
+        this.fade = Math.min(1, this.tp.t / 0.26);
+        if (this.tp.t >= 0.26) { this.tp = null; this.fade = 1; }
+        return;
+      }
+      this.fade = 1;
+
+      /* 敏锐度：本只存活越短 → 逃窜越快；难度/阶段倍率只作用于速度 */
+      if (this.tadK == null) this.tadK = (G.TADPOLE_K || {}).init || 1;
+      const difK = ({ easy: 0.75, normal: 1, hard: 1.3 })[G.config.difficulty] || 1;
+      const stageK = ({ 1: 1, 2: 1.15, 3: 1.3 })[S.stage] || 1;
+      const fleeK = this.tadK * difK * stageK * ((S.adaptiveTier > 0) ? 0.85 : 1) * (this.comboSpeed || 1);
+
+      /* 状态推进 */
+      this.tT -= dt;
+      if (this.tT <= 0) {
+        if (this.tState === "turn") this.resumeWander();
+        else if (this.tState === "dart") this.enterTurn();
+        else if (S.stage >= 3 && Math.random() < 0.5) this.enterDart();
+        else this.enterTurn();
+      }
+
+      /* 目标速度（状态进入时已抽好基准值） */
+      const base = this.tState === "flee" ? this.spdF : this.tState === "dart" ? this.spdD : this.spdW;
+      let targetSp = (base || 100) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1);
+      if (this.tState === "turn") targetSp = 0;
+      if (this.rampT > 0) this.rampT -= dt;
+      const spK = this.tState === "turn" ? 40 : (this.rampT > 0 ? 45 : 8);
+      this.spd += (targetSp - (this.spd || 0)) * Math.min(1, dt * spK);
+      if (this.tState === "turn" && this.spd < 12) this.spd = 0;
+
+      /* 转向：闲游随机漂移；逃窜/疾冲直线；换向按 C 形弯插值到新方向 */
+      if (this.tState === "turn") {
+        this.turnProg = Math.min(1, this.turnProg + dt / (this.turnDur || 0.25));
+        const u = this.turnProg, e = u * u * (3 - 2 * u);
+        this.driftAng = (this.turnFrom || 0) + ((this.turnTo || 0) - (this.turnFrom || 0)) * e;
+      } else if (this.tState === "wander") {
+        this.driftTurn = (this.driftTurn || 0) + rand(-1, 1) * 0.6 * dt;
+        this.driftTurn = Math.max(-0.45, Math.min(0.45, this.driftTurn));
+        this.driftAng += this.driftTurn * dt;
+      }
+      this.crawlAng = this.driftAng;
+      this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
+
+      /* 位移（换向窗不动）+ 到边就换向 */
+      this.x = Math.min(Math.max(this.x + Math.cos(this.driftAng) * this.spd * dt, b.x + 6), b.x + b.w - 6);
+      this.y = Math.min(Math.max(this.y + Math.sin(this.driftAng) * this.spd * dt, b.y + 6), b.y + b.h - 6);
+      const m = 26 * MS;
+      if (this.tState !== "turn" &&
+          (this.x <= b.x + m || this.x >= b.x + b.w - m || this.y <= b.y + m || this.y >= b.y + b.h - m)) {
+        this.enterTurn();
+      }
+
+      /* 尾节跟随链：头部轨迹按节距采样 */
+      const tr = this.trail || (this.trail = []);
+      const h0 = tr[0];
+      if (!h0 || Math.hypot(this.x - h0.x, this.y - h0.y) >= 2) {
+        tr.unshift({ x: this.x, y: this.y });
+        if (tr.length > 260) tr.length = 260;
+      }
+      const n = T.segs || 5, gap = T.segGap || 10;
+      const segs = this.segs || (this.segs = []);
+      let si = 0, want = gap, ax = this.x, ay = this.y;
+      for (let i = 1; i < tr.length && si < n; i++) {
+        const d = Math.hypot(tr[i].x - ax, tr[i].y - ay);
+        if (d >= want) { si++; segs[si - 1] = { x: tr[i].x, y: tr[i].y }; ax = tr[i].x; ay = tr[i].y; want = gap; }
+        else { want -= d; ax = tr[i].x; ay = tr[i].y; }
+      }
+      while (segs.length < n) segs.push({ x: this.x, y: this.y });
+      if (segs.length > n) segs.length = n;
+    }
+    enterTurn() {
+      const b = G.bounds();
+      this.tState = "turn";
+      this.turnDur = ((G.TADPOLE || {}).turnDur || 0.25) * ((G.session && G.session.adaptiveTier > 0) ? 1.4 : 1);
+      this.tT = this.turnDur; this.turnProg = 0;
+      this.turnFrom = this.driftAng;
+      const toC = Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x);
+      this.turnTo = toC + rand(-0.42, 0.42);
+    }
+    enterDart() {
+      const T = G.TADPOLE || {};
+      this.tState = "dart";
+      this.tT = rand((T.dartDur || [0.8, 1.2])[0], (T.dartDur || [0.8, 1.2])[1]);
+      this.spdD = rand((T.dart || [420, 520])[0], (T.dart || [420, 520])[1]) * (this.tadK || 1);
+      this.rampT = rand(0.05, 0.09);
+    }
+    resumeWander() {
+      const T = G.TADPOLE || {};
+      if (this.turnTo != null) this.driftAng = this.turnTo;
+      this.driftTurn = rand(-0.25, 0.25);
+      this.tState = "wander";
+      this.tT = rand((T.wanderDur || [2.0, 3.5])[0], (T.wanderDur || [2.0, 3.5])[1]) * (this.edgeIn ? 1.15 : 1);
+      this.edgeIn = false;
+      this.spdW = rand((T.wander || [90, 130])[0], (T.wander || [90, 130])[1]);
+      this.rampT = rand(0.04, 0.07);
+    }
+    fleeFrom(px, py) {
+      if (this.vanishT > 0 || this.darkT > 0) return;
+      const T = G.TADPOLE || {};
+      this.tState = (G.session.stage >= 3 && Math.random() < 0.45) ? "dart" : "flee";
+      this.tT = this.tState === "dart"
+        ? rand((T.dartDur || [0.8, 1.2])[0], (T.dartDur || [0.8, 1.2])[1])
+        : rand((T.fleeDur || [1.2, 2.0])[0], (T.fleeDur || [1.2, 2.0])[1]);
+      this.spdF = rand((T.flee || [260, 340])[0], (T.flee || [260, 340])[1]) * (this.tadK || 1);
+      this.spdD = rand((T.dart || [420, 520])[0], (T.dart || [420, 520])[1]) * (this.tadK || 1);
+      const away = Math.atan2(this.y - py, this.x - px);   // 方向因果：逃向远离拍击点的一侧
+      this.driftAng = away + rand(-0.35, 0.35);
+      this.rampT = rand(0.05, 0.09);
+    }
+    /* 换一个"别处"：pool 只能从屏幕边缘爬进来（不允许屏内凭空出现）；其他模式仍用随机换位 */
     relocate(fresh) {
       const b = G.bounds();
       const inset = 40 * Math.pow(G.platform.S || 1, 0.4);
       const far = Math.min(b.w, b.h) * 0.42;
       let nx = this.x, ny = this.y;
-      for (let i = 0; i < 14; i++) {
-        nx = rand(b.x + inset, b.x + b.w - inset);
-        ny = rand(b.y + inset, b.y + b.h - inset);
-        if (Math.hypot(nx - this.x, ny - this.y) > far) break;
+      if (this.type === "pool" || this.type === "tadpole") {
+        /* 萤光/蝌蚪消失后必须从边上爬回来（PRD 4.6）：贴在活动区边缘出生、朝向屏内，
+           左右边为主（横屏地面），上下边少量；离原位太近就重抽，避免"原地消失又原地出现" */
+        const pad = inset * 0.75;
+        let best = null, bestD = -1;
+        for (let i = 0; i < 18; i++) {
+          const r = Math.random();
+          let cx, cy, ang;
+          if (r < 0.36) { cx = b.x + pad; cy = rand(b.y + pad, b.y + b.h - pad); ang = rand(-0.42, 0.42); }
+          else if (r < 0.72) { cx = b.x + b.w - pad; cy = rand(b.y + pad, b.y + b.h - pad); ang = Math.PI + rand(-0.42, 0.42); }
+          else if (r < 0.86) { cx = rand(b.x + pad, b.x + b.w - pad); cy = b.y + pad; ang = Math.PI / 2 + rand(-0.42, 0.42); }
+          else { cx = rand(b.x + pad, b.x + b.w - pad); cy = b.y + b.h - pad; ang = -Math.PI / 2 + rand(-0.42, 0.42); }
+          const d = Math.hypot(cx - this.x, cy - this.y);
+          if (d > bestD) { bestD = d; best = { x: cx, y: cy, ang }; }
+          if (d > far) break;
+        }
+        nx = best.x; ny = best.y;
+        this.driftAng = best.ang;
+        this.driftTurn = 0;
+        this.edgeIn = true;                    // 这一趟是从边缘爬进来的
+      } else {
+        for (let i = 0; i < 14; i++) {
+          nx = rand(b.x + inset, b.x + b.w - inset);
+          ny = rand(b.y + inset, b.y + b.h - inset);
+          if (Math.hypot(nx - this.x, ny - this.y) > far) break;
+        }
+        this.driftAng = rand(0, Math.PI * 2);
+        this.driftTurn = rand(-0.4, 0.4);
       }
       this.x = nx; this.y = ny;
-      this.driftAng = rand(0, Math.PI * 2);
-      this.driftTurn = rand(-0.4, 0.4);
       this.crawlAng = this.driftAng;
+      if (this.type === "tadpole") {
+        /* 从边缘进场的第一段：走久一点（真的爬进画面） */
+        this.tState = "wander";
+        this.tT = rand(2.4, 3.4);
+        this.trail = [];
+        const nseg = (G.TADPOLE || {}).segs || 5;
+        this.segs = this.segs || [];
+        while (this.segs.length < nseg) this.segs.push({ x: this.x, y: this.y });
+        this.aliveT = 0; this.invulnT = 0; this.edgeIn = true;
+      }
       this.emberAcc = 0;
       this.gaitT = 0; this.spd = 0; this.moveK = 0; this.flare = null;
+      /* 走停节拍（PRD 4.6）：换点/重生后先走一段（短 30%），停顿状态整体清空 */
+      this.pauseT = 0; this.pauseAng = null; this.pauseTurnTo = null; this.nextAng = null;
+      this.tpDue = false; this.aliveT = 0; this.freshWalk = true; this.pauseGlow = 0;
       if (fresh) this.applyToy(pickFfToy());      // 被拍重生：换一种动物，画面不单调
       this.flareCd = rand(0.6, 1.8) * ((this.toy && this.toy.flare) || 1);
       if (G.emberTrail && !fresh) G.emberTrail(this.x, this.y);     // 亮起那一下撒几点冷色火星
@@ -1599,6 +1894,19 @@ module.exports = function (G) {
     /* ============ 命中判定（对齐 DOM 包围盒点击语义） ============ */
     hittable(x, y) {
       if (this.vanishT > 0) return false;
+      if (this.type === "tadpole") {
+        /* 蝌蚪：头（×1.15）与尾节（×1.35）都算命中，同分 +1（方案 v0.2 §4.2） */
+        if ((this.invulnT || 0) > 0 || this.fade < 0.4) return false;
+        const T = G.TADPOLE || {};
+        const hw = this.baseW * this.sc / 2 * (T.headPad || 1.15), hh = this.baseH * this.sc / 2 * (T.headPad || 1.15);
+        if (Math.abs(x - this.x) <= hw && Math.abs(y - this.y) <= hh) { this._hitPart = "head"; return true; }
+        const segs = this.segs || [];
+        for (let i = 0; i < segs.length; i++) {
+          const r = Math.max(3, (8.5 - i * 1.15)) * this.sc * (T.tailPad || 1.35);
+          if (Math.hypot(x - segs[i].x, y - segs[i].y) <= r) { this._hitPart = "tail"; return true; }
+        }
+        return false;
+      }
       if (this.type === "frog") {
         // 重生等待期不可拍；正沉入水里的也不可拍（已经掉进荷塘了）；命中盒外扩 15%（落水瞬间放宽到 25%，只要拍在荷叶上都算）
         if (this.rspT > 0 || this.fade < 0.4 || this.fState === "drown") return false;
@@ -1613,7 +1921,9 @@ module.exports = function (G) {
       // 鱼群小鱼太小：外扩 1.5 倍保证猫拍得中
       const bPad = this.type === "butterfly" ? 1.7
         : (this.type === "fish" && inSchoolMode()) ? 1.5
-        : this.type === "laser" ? 1.25 : 1;              // 激光光点小：命中区外扩 25% 好拍
+        : this.type === "laser" ? 1.25
+        : this.type === "pool" ? ((this.pauseT || 0) > 0 ? 1.15 : 1)   // 停顿窗口放宽 15%（PRD 4.6）
+        : 1;              // 激光光点小：命中区外扩 25% 好拍
       const fMin = this.type === "butterfly" ? 0.25 : 0.4;
       if (this.fade < fMin) return false;
       const hw = this.baseW * this.sc * (this.sxMul || 1) / 2 * bPad, hh = this.baseH * this.sc / 2 * bPad;
@@ -1679,21 +1989,36 @@ module.exports = function (G) {
       } else if (this.type === "frog") {
         const drownK0 = this.drownK || 0;
         if (drownK0 > 0) ctx.globalAlpha *= Math.max(0.06, 1 - drownK0 * 0.92);   // 沉入水中：整体淡出
-        // 水面投影：与身体分离来表达"跳起来了"（跳跃中影子留在地面并变小）
+        /* 视觉缩放：命中盒仍按 this.sc（宽容判定不变），只把画出来的青蛙收小。
+           旧系数 0.85 叠加 easy 体型 ×1.3 与大屏 big 系数后，1080 档青蛙宽 126 vs 荷叶 158（80%），
+           矮横屏甚至 106 vs 97（比荷叶还宽，完全盖住叶子）。改成 0.72，并加一道
+           「不超过荷叶宽 80%」的自适应上限，任何屏幕都保证荷叶四周露一圈。 */
+        const dk = this.drownK || 0;
+        let visS = this.sc * vs * 0.72 * (this.shareScale || 1) * (1 - dk * 0.34);
+        const pads = (G.scene && G.scene.pads) || [];
+        if (pads.length) {
+          let rSum = 0, rN = 0;
+          for (let i = 0; i < pads.length; i++) {
+            const rr = pads[i].r;
+            if (rr > 0) { rSum += rr; rN++; }
+          }
+          if (rN) visS = Math.min(visS, (rSum / rN) * 2 * 0.80 / 96);
+        }
         const lift = this.jumpH || 0;
+        // 水面投影：与身体分离来表达「跳起来了」（跳跃中影子留在地面并变小），尺寸随视觉同步
         ctx.save();
         ctx.globalAlpha = clamp(alpha * (0.42 - lift / 900), 0.05, 0.42);
         ctx.fillStyle = "#041e22";
         ctx.beginPath();
-        ctx.ellipse(this.x, this.y + 8 * this.sc, this.baseW * this.sc * (0.30 - lift / 1400),
-          this.baseH * this.sc * (0.12 - lift / 3200), 0, 0, Math.PI * 2);
+        ctx.ellipse(this.x, this.y + 8 * visS, this.baseW * visS * (0.30 - lift / 1400),
+          this.baseH * visS * (0.12 - lift / 3200), 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-        // 发光：深色水面上青蛙要"亮"出来（猫更容易锁定）；腾空时更亮更大，同时也是 +2 窗口的视觉提示
+        // 发光：随视觉尺寸同步收小，避免光晕比青蛙大太多；深色水面上仍负责「亮」出来
         const glowK = this.fState === "leap" ? 1.6 : this.fState === "crouch" ? 1.0 : 0.8;
         const pulse = 0.84 + 0.16 * Math.sin(t * 2.6 + (this.phase || 0));
         const gx = this.x, gy = this.y - lift - 6;
-        const gr = 52 * this.sc * (this.fState === "leap" ? 1.35 : 1);
+        const gr = 52 * visS * (this.fState === "leap" ? 1.35 : 1);
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = clamp(alpha * 0.8 * pulse, 0, 1);
@@ -1707,11 +2032,7 @@ module.exports = function (G) {
         ctx.save();
         ctx.translate(this.x, this.y - lift - 6);
         ctx.rotate(this._visRot || 0);
-        // 视觉尺寸 0.85：让荷叶从身体两侧露出一圈，才像"蹲在叶子上"（命中盒仍按原尺寸，判定不受影响）
-        // 同叶多只时再略缩一点（shareScale）；沉入水中时缩小淡出
-        const dk = this.drownK || 0;
-        const s = this.sc * vs * 0.85 * (this.shareScale || 1) * (1 - dk * 0.34);
-        ctx.scale(s * (this.faceDir || 1), s * (this._squash || 1));
+        ctx.scale(visS * (this.faceDir || 1), visS * (this._squash || 1));
         ctx.translate(-48, -39);
         G.draw.frog(ctx, this, t);
         ctx.restore();
@@ -1719,6 +2040,9 @@ module.exports = function (G) {
         // 第一版萤光：萤火虫自带底光/旋转/淡入淡出（D.poolLight 内部按 p.fade 接管透明度）
         ctx.translate(this.x, this.y - (this.hopOff || 0));
         G.draw.poolLight(ctx, this, t);
+      } else if (this.type === "tadpole") {
+        ctx.translate(this.x, this.y);
+        G.draw.tadpole(ctx, this, t);
       } else {
         // 泳池模式：鱼身柔光（泳池玩具截图里的发光小鱼）；鱼群模式：银白小鱼光
         if (this.type === "fish" && inPoolMode()) {
@@ -1817,6 +2141,8 @@ module.exports = function (G) {
     }
     // 第一版萤光：整局固定一只萤光小虫，与单只/多只设置无关。
     if (G.config.targetType === "pool") return 1;
+    // 蝌蚪快跑：数量按击中能力动态调节（1–7，方案 §5），「单只/多只」设置不生效。
+    if (G.config.targetType === "tadpole") return Math.max(1, Math.min(7, G.session.tadCount || 1));
     if (Number(G.config.preyCount) === 1) return 0;
     const base = ({ 1: 3, 2: 5, 3: 7 })[G.session.stage] || 3;
     if (G.config.targetType === "mouse") {
@@ -1846,5 +2172,29 @@ module.exports = function (G) {
         preys.push(new Prey(G.config.targetType));
       }
     }
+  };
+  /* 蝌蚪数量动态调节（方案 v0.2 §5）：每 8s 评估一次——
+     命中 ≥4 加 1 只（上限 7，新个体从边缘游入）；命中 ≤1 连续两周期减 1 只（下限 1，淡出移除）。
+     自适应辅助生效期间冻结加档（场面先变简单）。 */
+  G.tadpoleTick = (dt) => {
+    const S = G.session, T = G.TADPOLE || {};
+    S.tadEval = (S.tadEval || 0) + dt;
+    if (S.tadEval < (T.countEval || 8)) return;
+    S.tadEval = 0;
+    const hits = S.hits - (S.tadMark || 0);
+    S.tadMark = S.hits;
+    const max = T.countMax || 7;
+    const cur = Math.max(1, Math.min(max, S.tadCount || 1));
+    if (hits >= (T.countAdd || 4) && cur < max) {
+      S.tadDown = 0;
+      if (!(S.adaptiveTier > 0)) { S.tadCount = cur + 1; G.topUpPreys(); }   // 新个体走边缘进场
+    } else if (hits <= (T.countDrop || 1)) {
+      S.tadDown = (S.tadDown || 0) + 1;
+      if (S.tadDown >= 2 && cur > 1) {
+        S.tadDown = 0; S.tadCount = cur - 1;
+        const cands = G.preys.filter(p => p.type === "tadpole" && p.despawn == null);
+        if (cands.length > S.tadCount) cands[0].despawn = 0.3;
+      }
+    } else S.tadDown = 0;
   };
 };

@@ -209,6 +209,27 @@ module.exports = function (G) {
         x: rand(0, W), y: rand(0, H), w: rand(18, 64), a: rand(0.03, 0.08), sp: rand(3, 9), ph: rand(0, 6.28)
       });
     }
+    if (type === "tadpole") {
+      /* 藕塘水底（方案 v0.2 §3）：俯视水面，两套配色（晨光浅塘 / 暮色深塘），
+         藕叶/浮尘纯背景装饰（不与蝌蚪交互，不产生遮挡消失） */
+      S.tadBg = G.currentBg();
+      S.glints = [];
+      for (let i = 0; i < 16; i++) S.glints.push({
+        x: rand(0, W), y: rand(0, H), w: rand(20, 70), a: rand(0.04, 0.1), sp: rand(4, 10), ph: rand(0, 6.28)
+      });
+      S.pads = [];
+      const np = Math.floor(rand(5, 8.99));
+      for (let i = 0; i < np; i++) S.pads.push({
+        x: rand(0.05, 0.95) * W, y: rand(0.12, 0.88) * H,
+        r: rand(34, 64), a: rand(0.10, 0.2), ph: rand(0, 6.28), rot: rand(-0.3, 0.3)
+      });
+      S.dust = [];
+      const nd = Math.floor(rand(10, 16.99));
+      for (let i = 0; i < nd; i++) S.dust.push({
+        x: rand(0, W), y: rand(0, H), r: rand(1.5, 3.2),
+        ph: rand(0, Math.PI * 2), sp: rand(4, 12), amp: rand(6, 16)
+      });
+    }
   };
 
   G.plantsStartle = (x, y) => {
@@ -681,6 +702,7 @@ module.exports = function (G) {
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
     else if (S.type === "frog") drawPond(ctx, t);
+    else if (S.type === "tadpole") drawLotus(ctx, t);
     else if (S.type === "mouse" && S.mouseBg === "swarm") { drawSwarmFloor(ctx, t); }
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
@@ -1167,6 +1189,58 @@ module.exports = function (G) {
       ctx.fillStyle = "rgba(214,255,172," + Math.max(0, a).toFixed(3) + ")";
       ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
     });
+  }
+
+  /* ============ 蝌蚪快跑 · 藕塘水底（两套配色，方案 v0.2 §3） ============ */
+  function drawLotus(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    const dusk = S.tadBg === "dusk";
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    if (dusk) {
+      g.addColorStop(0, "#101b3a"); g.addColorStop(0.5, "#1a2a52"); g.addColorStop(1, "#0a1226");
+    } else {
+      g.addColorStop(0, "#1e7f8f"); g.addColorStop(0.45, "#2aa0a5"); g.addColorStop(1, "#14556b");
+    }
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 水面高光条：横向缓移
+    (S.glints || []).forEach(gl => {
+      const x = ((gl.x + t * gl.sp) % (W + gl.w)) - gl.w / 2;
+      const y = gl.y + Math.sin(t * 0.5 + gl.ph) * 3;
+      ctx.fillStyle = dusk
+        ? "rgba(190,210,255," + (gl.a * 1.2).toFixed(3) + ")"
+        : "rgba(220,250,240," + gl.a.toFixed(3) + ")";
+      ctx.beginPath(); ctx.ellipse(x, y, gl.w / 2, 2.2, 0, 0, Math.PI * 2); ctx.fill();
+    });
+    // 藕叶：圆盘贴水面，轻微起伏
+    (S.pads || []).forEach(p => {
+      const bob = Math.sin(t * 0.8 + p.ph) * 2;
+      ctx.save();
+      ctx.translate(p.x, p.y + bob);
+      ctx.rotate(p.rot || 0);
+      ctx.fillStyle = dusk ? "rgba(70,110,90,.4)" : "rgba(64,142,92,.42)";
+      ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.82, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = dusk ? "rgba(140,180,150,.25)" : "rgba(220,245,210,.3)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      for (let i = 0; i < 6; i++) {
+        const a = i / 6 * Math.PI * 2 + 0.3;
+        ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * p.r * 0.9, Math.sin(a) * p.r * 0.72);
+      }
+      ctx.stroke();
+      ctx.restore();
+    });
+    // 浮尘/萤光浮点：慢漂 + 呼吸
+    (S.dust || []).forEach(d => {
+      const x = d.x + Math.sin(t * 0.4 + d.ph) * d.amp;
+      const y = d.y + Math.cos(t * 0.3 + d.ph) * d.amp * 0.6;
+      const a = dusk ? 0.5 + 0.3 * Math.sin(t * 1.4 + d.ph) : 0.3 + 0.15 * Math.sin(t * 1.2 + d.ph);
+      ctx.fillStyle = dusk ? "rgba(214,255,158," + a.toFixed(3) + ")" : "rgba(255,250,210," + a.toFixed(3) + ")";
+      ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
+    });
+    // 顶部压暗：保证 HUD 可读
+    const vg = ctx.createLinearGradient(0, 0, 0, 60);
+    vg.addColorStop(0, "rgba(0,0,0,.24)"); vg.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, 60);
   }
 
   function drawPond(ctx, t) {
@@ -2093,7 +2167,7 @@ module.exports = function (G) {
       const a = Math.min(p.life * 1.6, 0.62);            // 整体压低不透明度（≤0.62）
       ctx.globalAlpha = a;
       ctx.textAlign = "center";
-      if (p.kind === "big") { ctx.font = "bold 14px sans-serif"; ctx.fillStyle = "rgba(255,222,140,.85)"; ctx.strokeStyle = "rgba(30,24,10,.3)"; ctx.lineWidth = 2; ctx.strokeText(p.text, p.x, p.y); }
+      if (p.kind === "big") { ctx.font = "14px sans-serif"; ctx.fillStyle = "rgba(255,222,140,.85)"; ctx.strokeStyle = "rgba(30,24,10,.3)"; ctx.lineWidth = 2; ctx.strokeText(p.text, p.x, p.y); }
       else if (p.kind === "hint") { ctx.font = "12px sans-serif"; ctx.fillStyle = "rgba(255,255,255,.78)"; ctx.strokeStyle = "rgba(8,30,44,.4)"; ctx.lineWidth = 2.5; ctx.strokeText(p.text, p.x, p.y); }
       else { ctx.font = "11px sans-serif"; ctx.fillStyle = "rgba(255,255,255,.8)"; ctx.strokeStyle = "rgba(20,30,40,.28)"; ctx.lineWidth = 2; ctx.strokeText(p.text, p.x, p.y); }
       ctx.fillText(p.text, p.x, p.y);

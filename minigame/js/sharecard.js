@@ -110,7 +110,7 @@ module.exports = function (G) {
 
     // 评级大字
     ctx.textAlign = "left";
-    ctx.font = "bold 46px sans-serif";
+    ctx.font = "46px sans-serif";
     ctx.fillStyle = AMBER;
     ctx.fillText(d.title || "本局结束", PAD, 132);
 
@@ -135,9 +135,9 @@ module.exports = function (G) {
       // 数值可能是 "12.4"、也可能是两字模式名：按格宽自动缩字号，避免溢出格子
       let fs = c[2] || 34;
       const maxW = cellW - 24;
-      ctx.font = "bold " + fs + "px sans-serif";
+      ctx.font = fs + "px sans-serif";
       while (fs > 16 && ctx.measureText(String(c[0])).width > maxW) {
-        fs -= 2; ctx.font = "bold " + fs + "px sans-serif";
+        fs -= 2; ctx.font = fs + "px sans-serif";
       }
       ctx.fillStyle = W1;
       ctx.fillText(String(c[0]), x + cellW / 2, statTop + 60);
@@ -160,13 +160,13 @@ module.exports = function (G) {
     ctx.stroke();
 
     // 底部：游戏名 + 玩法（+ 单局时长）
-    ctx.font = "bold 23px sans-serif";
+    ctx.font = "23px sans-serif";
     ctx.fillStyle = W1;
     const head = (d.appName || "") + " · " + (d.typeName || "") + (d.durText ? " · " + d.durText : "");
     // 长文案（带海域名时）按可用宽度自动降字号，避免压到右边缘
     let hfs = 23;
     while (hfs > 16 && ctx.measureText(head).width > W - PAD * 2) {
-      hfs -= 1; ctx.font = "bold " + hfs + "px sans-serif";
+      hfs -= 1; ctx.font = hfs + "px sans-serif";
     }
     ctx.fillText(head, PAD, 484);
 

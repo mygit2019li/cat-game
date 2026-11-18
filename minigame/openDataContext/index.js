@@ -109,7 +109,7 @@ function avatar(url, x, y, r, name) {
     }
     if (name) {
       ctx.fillStyle = "#fff";
-      ctx.font = "bold " + Math.round(r) + "px sans-serif";
+      ctx.font = Math.round(r) + "px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(name.slice(0, 1), x, y + 1);
     }
@@ -141,7 +141,7 @@ function render() {
   }
   if (state === "denied") {
     ctx.fillStyle = "#31443f";
-    ctx.font = "bold 16px sans-serif";
+    ctx.font = "16px sans-serif";
     ctx.fillText("没能读取好友成绩", cx, cy - 20);
     ctx.fillStyle = "#7a918b";
     ctx.font = "13px sans-serif";
@@ -154,7 +154,7 @@ function render() {
   if (!list.length) {
     // 没有权限问题、也真的没有任何成绩（含自己）
     ctx.fillStyle = "#31443f";
-    ctx.font = "bold 16px sans-serif";
+    ctx.font = "16px sans-serif";
     ctx.fillText("好友里还没有成绩", cx, cy - 22);
     ctx.fillStyle = "#7a918b";
     ctx.font = "13px sans-serif";
@@ -176,7 +176,7 @@ function render() {
     ctx.beginPath(); ctx.arc(nxc, cy2, 13, 0, Math.PI * 2);
     ctx.fillStyle = medal || "#e8eef0"; ctx.fill();
     ctx.fillStyle = medal ? "#fff" : "#5c7a73";
-    ctx.font = "bold 13px sans-serif";
+    ctx.font = "13px sans-serif";
     ctx.fillText(String(i + 1), nxc, cy2 + 1);
     // 头像 + 昵称
     const avX = nxc + 15 + 14;
@@ -192,7 +192,7 @@ function render() {
     // 分数
     ctx.textAlign = "right";
     ctx.fillStyle = me ? "#0c7d72" : "#e8890c";
-    ctx.font = "bold 14px sans-serif";
+    ctx.font = "14px sans-serif";
     ctx.fillText(bestOf(u) + " 只", x + w - 18, cy2 + 1);
     ctx.textAlign = "center";
   });
