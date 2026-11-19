@@ -1289,8 +1289,10 @@ module.exports = function (G) {
     const land = L.W > L.H;
     const gap = 14;
     if (land) {
-      // 右侧起点同时参考舞台右缘与实测内容边界（≈70% 宽），取更靠右的那个
-      const left = Math.max(st.x + st.w + 20, Math.round(L.W * 0.70));
+      /* 右侧起点取三者最右：舞台右缘 +24、出粮大按钮右缘 +12（按钮比舞台宽约 1.23 倍、居中）、
+         以及实测机器内容边界 ≈0.715W —— 保证不压机器、不压按钮。 */
+      const btnRight = (L.W + st.w * 1.23) * 0.5;
+      const left = Math.max(st.x + st.w + 24, btnRight + 12, Math.round(L.W * 0.715));
       return {
         left: left,
         top: Math.round(L.safe.top + 22),
