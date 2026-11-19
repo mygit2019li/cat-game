@@ -1159,63 +1159,240 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(57, 37, 1.2, 0, Math.PI * 2); ctx.fill();
   };
 
-  /* 蝌蚪快跑（方案 v0.2）：头 + 尾节跟随链；尾节横向摆动（摆幅/频率随状态） */
-  D.tadpole = (ctx, p, t) => {
-    const sc = p.sc || 1;
-    const segs = p.segs || [];
-    const fast = p.tState === "flee" || p.tState === "dart";
-    const hz = fast ? 2.4 : 1.2;
-    const amp = (fast ? 10 : 5) * sc;
-    const dusk = G.scene && G.scene.tadBg === "dusk";
-    const bodyC = dusk ? "#d9f59e" : "#9ccf3e";
-    const bellyC = dusk ? "#f6ffe0" : "#eefbd2";
-    const segC1 = dusk ? "rgba(230,255,170,.92)" : "rgba(150,205,95,.9)";
-    const segC2 = dusk ? "rgba(200,240,140,.92)" : "rgba(190,235,120,.9)";
-    // 尾节：从尾尖往头部画，横向摆动叠加在链方向上
-    for (let i = segs.length - 1; i >= 0; i--) {
-      const s0 = segs[i], prev = i === 0 ? { x: p.x, y: p.y } : segs[i - 1];
-      const dx = s0.x - prev.x, dy = s0.y - prev.y;
+  /* ============ 蝌蚪快跑 · 四种黑白造型 ============
+     几何只算一次（D.tadGeom），四种画法共用同一套头/尾坐标（tailPoints），
+     所以切换造型不会改变命中判定。四种都只用黑/灰，保证纯白底上的对比层级一致：
+       墨影 ink   实心剪影 + 白眼睛（默认，远距离最稳）
+       线条 line  空心勾边 + 黑点眼（简笔画）
+       水墨 brush 不规则墨团 + 飞白尾（手绘）
+       一笔 dash  头尾连成一个逗号（极简） */
+  D.tadGeom = (p, t) => {
+    const T = G.TADPOLE || {};
+    const inK = (p.tadIn || 0) > 0 ? 1 - p.tadIn / (T.entryT || 0.26) : 1;
+    const vanishK = p.vanishT > 0 ? Math.max(0, p.vanishT / 0.26) : 1;
+    return {
+      x: p.x, y: p.y,
+      ang: p.tadAng == null ? (p.driftAng || 0) : p.tadAng,
+      sc: (p.sc || 1) * (0.72 + 0.28 * Math.min(1, inK)) * (0.88 + 0.12 * vanishK),
+      tail: p.tailPoints ? p.tailPoints(t) : [],
+      turnGlow: p.tadTurnGlow || 0,
+      vanishK: vanishK
+    };
+  };
+
+  /* 尾带路径：按节距取上下两沿围成多边形；wFn 返回该节的半宽（局部单位） */
+  function tadBandPath(ctx, g, wFn) {
+    const pts = g.tail;
+    if (!pts.length) return false;
+    const top = [], bot = [];
+    let px = g.x, py = g.y;
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[i];
+      let dx = q.x - px, dy = q.y - py;
       const dl = Math.hypot(dx, dy) || 1;
       const nx = -dy / dl, ny = dx / dl;
-      const off = Math.sin(t * hz * Math.PI * 2 - i * 0.9) * amp * ((i + 1) / (segs.length || 1));
-      const r = Math.max(2.5, (8.5 - i * 1.15)) * sc;
-      ctx.fillStyle = i % 2 ? segC1 : segC2;
-      ctx.beginPath(); ctx.arc(s0.x + nx * off, s0.y + ny * off, r, 0, Math.PI * 2); ctx.fill();
+      const w = Math.max(0.35, wFn(i, pts.length)) * g.sc;
+      top.push({ x: q.x + nx * w, y: q.y + ny * w });
+      bot.push({ x: q.x - nx * w, y: q.y - ny * w });
+      px = q.x; py = q.y;
     }
-    // 头部光晕（暗背景下更亮，猫更容易锁定）
-    const gr = 46 * sc;
-    ctx.save(); ctx.globalCompositeOperation = "lighter";
-    const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, gr);
-    glow.addColorStop(0, dusk ? "rgba(226,255,190,.34)" : "rgba(226,255,170,.26)");
-    glow.addColorStop(1, "rgba(170,240,110,0)");
-    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(p.x, p.y, gr, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    // 头：椭圆 + 白腹 + 双眼（素材头朝上画，按航向旋转到位）
+    ctx.beginPath();
+    ctx.moveTo(top[0].x, top[0].y);
+    for (let i = 1; i < top.length; i++) ctx.lineTo(top[i].x, top[i].y);
+    for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i].x, bot[i].y);
+    ctx.closePath();
+    return true;
+  }
+
+  /* 头部坐标系：平移到头心、旋转到行进方向、缩放到 g.sc；局部 -y 为前进方向 */
+  function tadHead(ctx, g, fn) {
     ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate((p.driftAng || 0) + Math.PI / 2);
-    ctx.scale(sc, sc);
-    ctx.fillStyle = bodyC;
-    ctx.beginPath(); ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = bellyC;
-    ctx.beginPath(); ctx.ellipse(0, 5, 13, 8, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#22301a";
-    ctx.beginPath(); ctx.arc(-7, -6, 2.6, 0, Math.PI * 2); ctx.arc(7, -6, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.translate(g.x, g.y);
+    ctx.rotate(g.ang + Math.PI / 2);
+    ctx.scale(g.sc, g.sc);
+    fn(ctx);
     ctx.restore();
+  }
+
+  /* 残影：只有实心造型才画，线稿叠影子会显脏 */
+  function tadGhost(ctx, g) {
+    if (g.tail.length < 4 || g.vanishK <= 0.25) return;
+    ctx.save();
+    for (let i = 1; i <= 2; i++) {
+      const q = g.tail[Math.min(g.tail.length - 1, i * 2)];
+      ctx.globalAlpha = (0.055 - i * 0.018) * g.vanishK;
+      ctx.fillStyle = "#0b0c0e";
+      ctx.beginPath(); ctx.ellipse(q.x, q.y, 11 * g.sc, 7 * g.sc, g.ang, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function tadFoldHint(ctx, g) {
+    if ((g.turnGlow || 0) <= 0.02) return;
+    ctx.save();
+    ctx.globalAlpha = 0.28 * g.turnGlow;
+    ctx.strokeStyle = "#101216"; ctx.lineWidth = Math.max(1, 1.5 * g.sc);
+    ctx.beginPath(); ctx.arc(g.x, g.y, 22 * g.sc, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.13 * g.turnGlow;
+    ctx.beginPath(); ctx.arc(g.x, g.y, 30 * g.sc, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  /* ---- 墨影：实心剪影 + 白眼睛 ---- */
+  function tadInk(ctx, g) {
+    tadGhost(ctx, g);
+    if (tadBandPath(ctx, g, (i, n) => 5.1 * Math.pow(1 - i / n, 1.05) + 0.55)) {
+      const end = g.tail[g.tail.length - 1] || { x: g.x, y: g.y };
+      const tg = ctx.createLinearGradient(g.x, g.y, end.x, end.y);
+      tg.addColorStop(0, "rgba(11,12,14,.98)");
+      tg.addColorStop(1, "rgba(11,12,14,.78)");
+      ctx.fillStyle = tg; ctx.fill();
+    }
+    tadHead(ctx, g, c => {
+      const bg = c.createRadialGradient(-4, -6, 1.5, 0, 0, 19);
+      bg.addColorStop(0, "#2b2e33");
+      bg.addColorStop(0.55, "#14161a");
+      bg.addColorStop(1, "#08090b");
+      c.fillStyle = bg;
+      c.beginPath(); c.ellipse(0, 0, 15.2, 11.2, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(0, 6.2, 7.2, 4.8, 0, 0, Math.PI * 2); c.fill();
+      const eyes = [[-5.0, -3.8], [5.0, -3.8]];
+      c.fillStyle = "#ffffff";
+      c.beginPath();
+      eyes.forEach(e => { c.moveTo(e[0] + 3.4, e[1]); c.arc(e[0], e[1], 3.4, 0, Math.PI * 2); });
+      c.fill();
+      c.fillStyle = "#0a0b0d";
+      c.beginPath();
+      eyes.forEach(e => { c.moveTo(e[0] + 1.55, e[1] - 0.25); c.arc(e[0], e[1] - 0.25, 1.55, 0, Math.PI * 2); });
+      c.fill();
+      c.fillStyle = "rgba(255,255,255,.95)";
+      c.beginPath();
+      eyes.forEach(e => { c.moveTo(e[0] - 0.25 + 0.55, e[1] - 0.85); c.arc(e[0] - 0.25, e[1] - 0.85, 0.55, 0, Math.PI * 2); });
+      c.fill();
+    });
+  }
+
+  /* ---- 线条：空心勾边 + 黑点眼（简笔画） ---- */
+  function tadLine(ctx, g) {
+    const pts = g.tail;
+    if (pts.length) {
+      ctx.save();
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.strokeStyle = "#111214";
+      let prev = { x: g.x, y: g.y };
+      for (let i = 0; i < pts.length; i++) {
+        const q = pts[i];
+        /* 每段单独设线宽，才能从根部 4.6 收到尾梢 0.6 —— 单一 stroke 做不出笔锋 */
+        ctx.lineWidth = Math.max(1.1, 5.2 * Math.pow(1 - i / pts.length, 1.05) + 0.6) * g.sc;
+        ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+        prev = q;
+      }
+      ctx.restore();
+    }
+    tadHead(ctx, g, c => {
+      c.fillStyle = "#ffffff";
+      c.beginPath(); c.ellipse(0, 0, 15.2, 11.2, 0, 0, Math.PI * 2); c.fill();
+      c.strokeStyle = "#111214"; c.lineWidth = 2.6;
+      c.stroke();
+      c.fillStyle = "#111214";
+      c.beginPath(); c.arc(-4.8, -3.6, 2.05, 0, Math.PI * 2); c.arc(4.8, -3.6, 2.05, 0, Math.PI * 2); c.fill();
+      // 一条很短的嘴弧：线稿没有实心块，这点细节能让"脸"成立
+      c.strokeStyle = "rgba(17,18,20,.55)"; c.lineWidth = 1.2; c.lineCap = "round";
+      c.beginPath(); c.arc(0, 1.6, 3.6, 0.22 * Math.PI, 0.78 * Math.PI); c.stroke();
+    });
+  }
+
+  /* ---- 水墨：不规则墨团 + 飞白尾 ---- */
+  function tadBrush(ctx, g) {
+    tadGhost(ctx, g);
+    // 主笔
+    if (tadBandPath(ctx, g, (i, n) => 5.6 * Math.pow(1 - i / n, 0.95) + 0.6)) {
+      ctx.fillStyle = "rgba(12,13,16,.94)"; ctx.fill();
+    }
+    // 副笔：偏细、偏淡，同一路径再叠一层，边缘就有了浓淡
+    if (tadBandPath(ctx, g, (i, n) => 3.6 * Math.pow(1 - i / n, 1.1) + 0.3)) {
+      ctx.fillStyle = "rgba(12,13,16,.34)"; ctx.fill();
+    }
+    // 尾部干笔：三粒飞白
+    const tip = g.tail[g.tail.length - 1];
+    if (tip) {
+      ctx.save();
+      ctx.fillStyle = "rgba(12,13,16,.55)";
+      for (let i = 0; i < 3; i++) {
+        const a = (g.ang || 0) + Math.PI + (i - 1) * 0.5;
+        const d = (2 + i * 3.2) * g.sc;
+        ctx.beginPath();
+        ctx.arc(tip.x + Math.cos(a) * d, tip.y + Math.sin(a) * d, (0.9 + (i % 2) * 0.5) * g.sc, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+    // 头：六个控制点的不规则墨团（固定形状，不逐帧随机，避免抖动）
+    tadHead(ctx, g, c => {
+      c.beginPath();
+      c.moveTo(0, -11.6);
+      c.bezierCurveTo(9.8, -11.2, 15.6, -6.0, 14.6, 1.0);
+      c.bezierCurveTo(13.8, 7.8, 6.6, 11.6, -0.8, 11.2);
+      c.bezierCurveTo(-8.4, 10.9, -15.0, 6.2, -14.6, -0.8);
+      c.bezierCurveTo(-14.2, -7.4, -8.6, -11.7, 0, -11.6);
+      c.closePath();
+      c.fillStyle = "#0b0c0e"; c.fill();
+      c.fillStyle = "#ffffff";
+      c.beginPath(); c.arc(-4.8, -3.8, 2.7, 0, Math.PI * 2); c.arc(4.8, -3.8, 2.7, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "rgba(10,11,13,.9)";
+      c.beginPath(); c.arc(-4.6, -4.2, 1.2, 0, Math.PI * 2); c.arc(5.0, -4.2, 1.2, 0, Math.PI * 2); c.fill();
+    });
+  }
+
+  /* ---- 一笔：头尾连成一个逗号 ---- */
+  function tadDash(ctx, g) {
+    tadGhost(ctx, g);
+    if (tadBandPath(ctx, g, (i, n) => 10.4 * Math.pow(1 - i / n, 1.35) + 0.5)) {
+      ctx.fillStyle = "rgba(11,12,14,.97)"; ctx.fill();
+    }
+    tadHead(ctx, g, c => {
+      c.fillStyle = "#0b0c0e";
+      c.beginPath(); c.ellipse(0, 0, 12.4, 11.6, 0, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#ffffff";
+      c.beginPath(); c.arc(-4.2, -3.4, 2.5, 0, Math.PI * 2); c.arc(4.2, -3.4, 2.5, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "rgba(10,11,13,.88)";
+      c.beginPath(); c.arc(-4.0, -3.8, 1.05, 0, Math.PI * 2); c.arc(4.4, -3.8, 1.05, 0, Math.PI * 2); c.fill();
+    });
+  }
+
+  D.tadDraw = (ctx, g, style) => {
+    if (style === "line") return tadLine(ctx, g);
+    if (style === "brush") return tadBrush(ctx, g);
+    if (style === "dash") return tadDash(ctx, g);
+    return tadInk(ctx, g);
   };
+
+  D.tadpole = (ctx, p, t) => {
+    const style = (G.config && G.config.tadStyle) || "ink";
+    const g = D.tadGeom(p, t);
+    D.tadDraw(ctx, g, style);
+    tadFoldHint(ctx, g);
+  };
+
+  /* 造型预览：二级卡、首页图标、样式条共用。len = 全身长度（含头），朝右、轻微 S 形尾。 */
+  D.tadpolePreview = (ctx, style, cx, cy, len, t) => {
+    const sc = len / 104;
+    const headX = cx + 31 * sc;
+    const tail = [];
+    for (let i = 0; i < 7; i++) {
+      const d = (i + 1) * 11 * sc;
+      tail.push({ x: headX - d, y: cy + Math.sin(i * 0.5 + (t || 0) * 1.4) * 2.1 * sc, r: 3 * sc });
+    }
+    D.tadDraw(ctx, { x: headX, y: cy, ang: 0, sc: sc, tail: tail, turnGlow: 0, vanishK: 1 }, style || "ink");
+  };
+
   D.icon = (ctx, type, x, y, s) => {
     ctx.save();
     ctx.translate(x, y); ctx.scale(s, s);
     if (type === "tadpole") {
-      // 静态示意：圆头 + 甩出去的尾巴（o------）
-      ctx.strokeStyle = "rgba(150,205,95,.9)"; ctx.lineWidth = 7; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(72, 62); ctx.quadraticCurveTo(94, 56, 106, 72); ctx.stroke();
-      ctx.fillStyle = "#9ccf3e";
-      ctx.beginPath(); ctx.ellipse(58, 60, 22, 16, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#eefbd2";
-      ctx.beginPath(); ctx.ellipse(58, 66, 14, 8, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "#22301a";
-      ctx.beginPath(); ctx.arc(51, 54, 2.8, 0, Math.PI * 2); ctx.arc(65, 54, 2.8, 0, Math.PI * 2); ctx.fill();
+      /* 图标直接复用当前造型的预览：首页卡、场景卡、样式条三处天然一致，
+         换造型时不用再维护第三套比例。 */
+      D.tadpolePreview(ctx, (G.config && G.config.tadStyle) || "ink", 60, 62, 104, 0);
     } else if (type === "fish") {
       ctx.translate(-60, -36); ctx.globalAlpha = 1;
       const goldSp = G.FISH_SPECIES.find(s => s.key === "gold") || G.FISH_SPECIES[0];

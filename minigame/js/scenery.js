@@ -210,25 +210,10 @@ module.exports = function (G) {
       });
     }
     if (type === "tadpole") {
-      /* 藕塘水底（方案 v0.2 §3）：俯视水面，两套配色（晨光浅塘 / 暮色深塘），
-         藕叶/浮尘纯背景装饰（不与蝌蚪交互，不产生遮挡消失） */
-      S.tadBg = G.currentBg();
-      S.glints = [];
-      for (let i = 0; i < 16; i++) S.glints.push({
-        x: rand(0, W), y: rand(0, H), w: rand(20, 70), a: rand(0.04, 0.1), sp: rand(4, 10), ph: rand(0, 6.28)
-      });
-      S.pads = [];
-      const np = Math.floor(rand(5, 8.99));
-      for (let i = 0; i < np; i++) S.pads.push({
-        x: rand(0.05, 0.95) * W, y: rand(0.12, 0.88) * H,
-        r: rand(34, 64), a: rand(0.10, 0.2), ph: rand(0, 6.28), rot: rand(-0.3, 0.3)
-      });
-      S.dust = [];
-      const nd = Math.floor(rand(10, 16.99));
-      for (let i = 0; i < nd; i++) S.dust.push({
-        x: rand(0, W), y: rand(0, H), r: rand(1.5, 3.2),
-        ph: rand(0, Math.PI * 2), sp: rand(4, 12), amp: rand(6, 16)
-      });
+      /* 白纸墨影：没有任何背景装饰。只留一层贴边渐暗 + 一圈极淡的内框，
+         让「屏幕边界」可被看见（折返与漏击都发生在这里），中心保持纯白。 */
+      S.tadBg = "paper";
+      S.pads = []; S.dust = []; S.glints = [];
     }
   };
 
@@ -702,7 +687,7 @@ module.exports = function (G) {
     else if (S.type === "butterfly") drawGarden(ctx, t);
     else if (S.type === "pool") drawPool(ctx, t);
     else if (S.type === "frog") drawPond(ctx, t);
-    else if (S.type === "tadpole") drawLotus(ctx, t);
+    else if (S.type === "tadpole") drawPaper(ctx, t);
     else if (S.type === "mouse" && S.mouseBg === "swarm") { drawSwarmFloor(ctx, t); }
     else if (S.type === "mouse" && S.mouseBg === "plaid") { drawPlaidFloor(ctx, t); drawHoles(ctx); }
     else { drawRoomBody(ctx, t); drawHoles(ctx); }
@@ -1191,56 +1176,37 @@ module.exports = function (G) {
     });
   }
 
-  /* ============ 蝌蚪快跑 · 藕塘水底（两套配色，方案 v0.2 §3） ============ */
-  function drawLotus(ctx, t) {
+  /* ============ 蝌蚪快跑 · 白纸墨影 ============
+     纯白 #ffffff 是唯一底色，黑色剪影直接压在上面（对比度 21:1）。
+     只做两件事：贴边极淡渐暗（约 4.5% 黑）标出可玩边界，一圈 1px 内框标出折返线。
+     不做纸纹/噪点——任何纹理都会让「黑蝌蚪」看起来是脏点。 */
+  function drawPaper(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
-    const dusk = S.tadBg === "dusk";
-    const g = ctx.createLinearGradient(0, 0, 0, H);
-    if (dusk) {
-      g.addColorStop(0, "#101b3a"); g.addColorStop(0.5, "#1a2a52"); g.addColorStop(1, "#0a1226");
-    } else {
-      g.addColorStop(0, "#1e7f8f"); g.addColorStop(0.45, "#2aa0a5"); g.addColorStop(1, "#14556b");
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+    /* 贴边渐暗：只在外沿 4% 内收一点点灰（≤3%），中心 96% 保持纯白 #ffffff。
+       渐变对象按画布尺寸缓存——每帧新建全屏渐变在低端机上会白掉 1–2ms。 */
+    if (!S._paperVg || S._paperVgW !== W || S._paperVgH !== H) {
+      const vg = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.34,
+        W / 2, H / 2, Math.max(W, H) * 0.76);
+      vg.addColorStop(0, "rgba(16,18,22,0)");
+      vg.addColorStop(0.82, "rgba(16,18,22,.008)");
+      vg.addColorStop(1, "rgba(16,18,22,.030)");
+      S._paperVg = vg; S._paperVgW = W; S._paperVgH = H;
     }
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 水面高光条：横向缓移
-    (S.glints || []).forEach(gl => {
-      const x = ((gl.x + t * gl.sp) % (W + gl.w)) - gl.w / 2;
-      const y = gl.y + Math.sin(t * 0.5 + gl.ph) * 3;
-      ctx.fillStyle = dusk
-        ? "rgba(190,210,255," + (gl.a * 1.2).toFixed(3) + ")"
-        : "rgba(220,250,240," + gl.a.toFixed(3) + ")";
-      ctx.beginPath(); ctx.ellipse(x, y, gl.w / 2, 2.2, 0, 0, Math.PI * 2); ctx.fill();
-    });
-    // 藕叶：圆盘贴水面，轻微起伏
-    (S.pads || []).forEach(p => {
-      const bob = Math.sin(t * 0.8 + p.ph) * 2;
-      ctx.save();
-      ctx.translate(p.x, p.y + bob);
-      ctx.rotate(p.rot || 0);
-      ctx.fillStyle = dusk ? "rgba(70,110,90,.4)" : "rgba(64,142,92,.42)";
-      ctx.beginPath(); ctx.ellipse(0, 0, p.r, p.r * 0.82, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = dusk ? "rgba(140,180,150,.25)" : "rgba(220,245,210,.3)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(0, 0);
-      for (let i = 0; i < 6; i++) {
-        const a = i / 6 * Math.PI * 2 + 0.3;
-        ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * p.r * 0.9, Math.sin(a) * p.r * 0.72);
-      }
-      ctx.stroke();
-      ctx.restore();
-    });
-    // 浮尘/萤光浮点：慢漂 + 呼吸
-    (S.dust || []).forEach(d => {
-      const x = d.x + Math.sin(t * 0.4 + d.ph) * d.amp;
-      const y = d.y + Math.cos(t * 0.3 + d.ph) * d.amp * 0.6;
-      const a = dusk ? 0.5 + 0.3 * Math.sin(t * 1.4 + d.ph) : 0.3 + 0.15 * Math.sin(t * 1.2 + d.ph);
-      ctx.fillStyle = dusk ? "rgba(214,255,158," + a.toFixed(3) + ")" : "rgba(255,250,210," + a.toFixed(3) + ")";
-      ctx.beginPath(); ctx.arc(x, y, d.r, 0, Math.PI * 2); ctx.fill();
-    });
-    // 顶部压暗：保证 HUD 可读
-    const vg = ctx.createLinearGradient(0, 0, 0, 60);
-    vg.addColorStop(0, "rgba(0,0,0,.24)"); vg.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, 60);
+    ctx.fillStyle = S._paperVg; ctx.fillRect(0, 0, W, H);
+    // 折返线：可玩区域外沿一圈 1px 内框（很淡，只在看边缘时出现）
+    const b = G.bounds();
+    const x0 = b.x + 0.5, y0 = b.y + 0.5, w0 = b.w - 1, h0 = b.h - 1, rad = 14;
+    ctx.save();
+    ctx.strokeStyle = "rgba(16,18,22,.075)"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x0 + rad, y0);
+    ctx.arcTo(x0 + w0, y0, x0 + w0, y0 + h0, rad);
+    ctx.arcTo(x0 + w0, y0 + h0, x0, y0 + h0, rad);
+    ctx.arcTo(x0, y0 + h0, x0, y0, rad);
+    ctx.arcTo(x0, y0, x0 + w0, y0, rad);
+    ctx.closePath(); ctx.stroke();
+    ctx.restore();
   }
 
   function drawPond(ctx, t) {
@@ -1885,13 +1851,59 @@ module.exports = function (G) {
 
   G.ripple = (x, y, miss) => {
     const typ = G.scene.type;
-    if (typ !== "fish" && typ !== "frog") return;
+    if (typ !== "fish" && typ !== "frog" && typ !== "tadpole") return;
     const th = G.seaThemeNow();
-    const col = typ === "frog"
+    const col = typ === "tadpole"
+      ? (miss ? "rgba(16,18,22,.16)" : "rgba(16,18,22,.42)")
+      : typ === "frog"
       ? (miss ? null : "rgba(190,250,232,.85)")
       : (miss ? null : (th && th.ripple));
-    // 荷塘是俯视水面：波纹压成扁椭圆更贴合透视
-    PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss, color: col, flat: typ === "frog" }, 30);
+    // 荷塘/藕塘是俯视水面：波纹压成扁椭圆更贴合透视
+    PUSH(fx.ripples, { x, y, r: 6, life: 1, miss: !!miss, color: col, flat: typ === "frog" || typ === "tadpole" }, 30);
+  };
+  /* 蝌蚪加速尾迹：白纸上只留一圈很淡的灰环 + 两粒灰色小墨点。 */
+  G.tadpoleWake = (x, y, dart) => {
+    PUSH(fx.ripples, { x, y, r: 3, life: .5, color: "rgba(16,18,22,.13)", flat: true }, 24);
+    for (let i = 0; i < (dart ? 2 : 1); i++) PUSH(fx.droplets, {
+      x: x + rand(-5, 5), y: y + rand(-3, 3),
+      vx: rand(-46, 46), vy: rand(-54, -14), r: rand(1.1, 2.2), life: rand(.22, .4),
+      c0: "rgba(24,26,30,.55)", c1: "rgba(24,26,30,.30)", c2: "rgba(24,26,30,0)"
+    }, 48);
+  };
+  /* 命中墨爆：黑色墨点四散 + 两圈灰色扩散环 + 几粒细雾。
+     白底上这是对比最强的反馈，也比绿色水花更符合「白纸」设定。 */
+  G.inkBurst = (x, y, ang, strong) => {
+    const n = strong ? 22 : 15;
+    // 中心墨团：先铺一块快速扩散并淡出的深灰晕，保证白底上"打中了"一眼可见
+    PUSH(fx.shockwaves, {
+      x, y, r: 9, life: 0.34, speed: 430, w: 0,
+      color: strong ? "rgba(16,18,22,.52)" : "rgba(16,18,22,.40)", glow: true
+    }, 8);
+    for (let i = 0; i < n; i++) {
+      const a = (ang || 0) + Math.PI + rand(-1.35, 1.35);
+      const sp = rand(80, strong ? 380 : 280);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        r: rand(1.8, strong ? 5.8 : 4.4), life: rand(0.34, 0.72),
+        c0: "rgba(10,11,14,.96)", c1: "rgba(10,11,14,.66)", c2: "rgba(10,11,14,0)"
+      }, 90);
+    }
+    // 顺着游动方向甩出两道细墨线，读得出"从哪边被拍停"
+    for (let i = 0; i < 2; i++) {
+      const a = (ang || 0) + (i ? 0.28 : -0.28);
+      PUSH(fx.droplets, {
+        x, y, vx: Math.cos(a) * rand(220, 380), vy: Math.sin(a) * rand(220, 380),
+        r: rand(2.2, 3.4), life: rand(0.22, 0.36),
+        c0: "rgba(10,11,14,.9)", c1: "rgba(10,11,14,.5)", c2: "rgba(10,11,14,0)"
+      }, 90);
+    }
+    PUSH(fx.shockwaves, { x, y, r: 10, life: 0.56, speed: 360, w: strong ? 3.2 : 2.4, color: "rgba(16,18,22,.58)" }, 16);
+    if (strong) PUSH(fx.shockwaves, { x, y, r: 6, life: 0.72, speed: 220, w: 1.4, color: "rgba(16,18,22,.30)" }, 16);
+  };
+  /* 折返预告：贴边折返瞬间在头侧打一圈淡灰环（0.28s），给猫一个可预判的落点。 */
+  G.tadFoldRing = (x, y) => {
+    PUSH(fx.ripples, { x, y, r: 8, life: 0.42, color: "rgba(16,18,22,.30)", flat: false }, 18);
+    PUSH(fx.ripples, { x, y, r: 2, life: 0.30, color: "rgba(16,18,22,.16)", flat: false }, 18);
   };
   G.laserTrail = (x, y, key) => PUSH(fx.trails, { x, y, life: 0.4, key: key || "red" }, 30);
   G.laserFlash = (x, y, key) => PUSH(fx.scorches, { x, y, life: 0.32, flash: true, key: key || "red" }, 20);
@@ -2016,7 +2028,9 @@ module.exports = function (G) {
     ctx.globalAlpha = 1;
     fx.ripples.forEach(p => {
       ctx.globalAlpha = Math.max(p.life * (p.miss ? 0.3 : 0.85), 0);
-      const col = p.miss ? "rgba(255,255,255,.3)" : (p.color || "rgba(255,255,255,.85)");
+      const col = p.miss
+        ? ((G.scene && G.scene.type === "tadpole") ? "rgba(16,18,22,.18)" : "rgba(255,255,255,.3)")
+        : (p.color || "rgba(255,255,255,.85)");
       ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
       ctx.beginPath();
       // flat=贴水面的水波：俯视透视下压成扁椭圆（池塘/泳池用）
@@ -2063,7 +2077,9 @@ module.exports = function (G) {
     ctx.globalAlpha = 1;
     fx.ripples.forEach(p => {
       ctx.globalAlpha = Math.max(p.life * (p.miss ? 0.3 : 0.85), 0);
-      const col = p.miss ? "rgba(255,255,255,.3)" : (p.color || "rgba(255,255,255,.85)");
+      const col = p.miss
+        ? ((G.scene && G.scene.type === "tadpole") ? "rgba(16,18,22,.18)" : "rgba(255,255,255,.3)")
+        : (p.color || "rgba(255,255,255,.85)");
       ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
       ctx.beginPath();
       // flat=贴水面的水波：俯视透视下压成扁椭圆（池塘/泳池用）

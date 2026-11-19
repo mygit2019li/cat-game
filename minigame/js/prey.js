@@ -67,20 +67,29 @@ module.exports = function (G) {
         this.trailAcc = 0; this.lastTrailX = 0; this.lastTrailY = 0;
       }
       if (type === "tadpole") {
-        /* 蝌蚪快跑：头 + 5 节尾；speed 为闲游基准，逃窜/疾冲倍率在状态机里算 */
+        /* 白纸墨影：头 + 5 节尾；航向 tadAng 只在折返时改变，巡航叠一条正弦摆尾 */
         this.speciesSpeed = 1;
         this.segs = []; this.trail = [];
-        this.tState = "wander"; this.tT = rand(2.0, 3.0);
-        this.spd = 0; this.spdW = 110; this.spdF = 300; this.spdD = 460;
-        this.tadK = (G.TADPOLE_K || {}).init || 1;
-        this.invulnT = 0; this.aliveT = 0; this.rampT = 0;
-        this.turnProg = 0; this.turnDur = 0.25; this.edgeIn = false;
+        this.tState = "swim";
+        this.tadAng = 0; this.tadSpd = 262; this.tadPhase = rand(0, Math.PI * 2);
+        this.tadAmp = 8; this.tadWave = 210;
+        this.tadIn = (G.TADPOLE || {}).entryT || 0.26;
+        this.tadFold = 0; this.tadFolds = 0; this.tadFoldFrom = 0; this.tadFoldTo = 0;
+        this.tadMissed = false; this.tadOut = false; this.tadStartle = 0; this.tadNoFoldT = 0;
+        this.tadForceOut = false;
+        this.tadTurnGlow = 0; this.tadSide = -1;
+        this.invulnT = 0; this.aliveT = 0;
+        this.fade = 1; this.vanishT = 0; this.darkT = 0;
       }
       if (type === "butterfly") {
-        // 加权随机：白/淡黄为主（w 权重），虎斑蝶偶现
+        // 二级卡选择花色：素白只抽白粉蝶；花园保持白/淡黄/虎斑混合（w 权重）
+        const whiteOnly = G.config.bflyMode === "bf-white";
         const pool = [];
-        G.BFLY_VARIANTS.forEach(v => { for (let i = 0; i < (v.w || 1); i++) pool.push(v); });
-        this.bflyVar = pool[Math.floor(rand(0, pool.length))];
+        G.BFLY_VARIANTS.forEach(v => {
+          if (whiteOnly && v.key !== "cabbage") return;
+          for (let i = 0; i < (v.w || 1); i++) pool.push(v);
+        });
+        this.bflyVar = pool[Math.floor(rand(0, pool.length))] || G.BFLY_VARIANTS[0];
         this.speciesSpeed = this.bflyVar.speed;
         this.baseW = Math.round(this.baseW * this.bflyVar.size);   // 命中盒随花色体型
         this.baseH = Math.round(this.baseH * this.bflyVar.size);
@@ -262,21 +271,7 @@ module.exports = function (G) {
         this.spawnOnPad();           // 落到一片空荷叶上开始蓄力
         return;
       }
-      if (this.type === "tadpole") {
-        const pad0 = 40 * Math.pow(G.platform.S || 1, 0.4);
-        this.x = rand(b.x + pad0, b.x + b.w - pad0);
-        this.y = rand(b.y + pad0, b.y + b.h - pad0);
-        this.driftAng = rand(0, Math.PI * 2);
-        this.driftTurn = rand(-0.25, 0.25);
-        this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
-        this.tState = "wander"; this.tT = rand(2.0, 3.0); this.spd = 0;
-        this.trail = []; this.segs = [];
-        this.aliveT = 0; this.invulnT = 0; this.rampT = 0; this.edgeIn = false;
-        this.fade = 1; this.vanishT = 0; this.darkT = 0; this.tp = null;
-        this.crawlAng = this.driftAng;
-        this.state = "crawl";
-        return;
-      }
+      if (this.type === "tadpole") { this.tadSpawn(); return; }
       this.x = b.x + rand(0.15, 0.85) * b.w;
       this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
       this.baseY = this.y;
@@ -830,8 +825,13 @@ module.exports = function (G) {
       if (this.type === "butterfly" && this.state === "STARTLED") return;   // 惊飞中防重入
       // 青蛙：拍中要"干脆消失"，只留 0.16s 残影，观感交给 frogPop 的爆开特效
       if (this.type === "frog") { this.burstT = 0; this.vanishT = 0.16; return; }
-      // 蝌蚪被拍：0.22s 渐隐（不瞬灭）+ 0.6s 无敌（防一次扑击重复计数）
-      if (this.type === "tadpole") { this.burstT = 0; this.vanishT = 0.22; this.invulnT = 0.6; return; }
+      /* 蝌蚪被拍：0.26s 剪影收束（墨点/涟漪由命中层负责），随后进入 0.5–0.8s 重生冷却 */
+      if (this.type === "tadpole") {
+        this.burstT = 0; this.vanishT = 0.26;
+        this.invulnT = (G.TADPOLE || {}).invuln || 0.24;
+        this.tadOut = false; this.tadFold = 0; this.tadStartle = 0;
+        return;
+      }
       // 萤光小虫被拍：0.08s 收光即灭（第一版"一拍就灭"），updateFirefly 内接暗场后在别处亮起
       if (this.type === "pool") {
         this.burstT = 0; this.vanishT = 0.08;
@@ -1423,7 +1423,16 @@ module.exports = function (G) {
     updateFirefly(dt, t) {
       const b = G.bounds();
       if (this.stage !== G.session.stage) this.stage = G.session.stage;
-      const P = G.FIREFLY[this.stage] || G.FIREFLY[1];
+      const baseP = G.FIREFLY[this.stage] || G.FIREFLY[1];
+      /* 萤火虫二级卡的节奏差异：急爬追光只改运动参数，不改命中盒/判定。 */
+      const P = G.config.ffMode === "ff-dash"
+        ? Object.assign({}, baseP, {
+            slow: baseP.slow * 1.28, fast: baseP.fast * 1.34,
+            gait: [baseP.gait[0] * .72, baseP.gait[1] * .72],
+            fastP: Math.min(.82, (baseP.fastP || 0) + .18),
+            pause: Math.max(.34, (baseP.pause || .6) * .6)
+          })
+        : baseP;
       const toy = this.toy || { spd: 1, fastP: 0, gait: 1, flare: 1 };
       const S = G.platform.S || 1;
       const MS = Math.pow(S, 0.5);
@@ -1624,89 +1633,140 @@ module.exports = function (G) {
       this.tpNext = (this.tpNext == null ? rand(P.tele[0], P.tele[1]) : this.tpNext) - dt;
       if (this.tpNext <= 0 && !paused) { this.gaitT = 0; this.tpDue = true; }   // 先走完这段 → 停 → 停完再换位
     }
-    /* ============ 蝌蚪快跑（方案 v0.2）：四态循环 + 节体跟随链 ============ */
+    /* ============ 蝌蚪快跑 v1.0：白纸墨影 ============
+       一只蝌蚪的一生只有三件事：从画外冲进来、沿当前航向横穿、触边折返或离场。
+       不再有「闲游 / 逃窜 / 疾冲」的随机状态：猫看到的路线就是它真实的路线，
+       难度只由阶段速度、刷新间隔与折返概率控制，预判成本低、手感更接近追光点。 */
+    tadSpawn() {
+      const T = G.TADPOLE || {}, b = G.bounds();
+      const pad = T.entryPad || 30;
+      const side = this.tadPickSide();
+      let x, y, ang;
+      if (side === 0) { x = b.x - pad; y = rand(b.y + b.h * 0.12, b.y + b.h * 0.88); ang = rand(-0.34, 0.34); }
+      else if (side === 1) { x = b.x + b.w + pad; y = rand(b.y + b.h * 0.12, b.y + b.h * 0.88); ang = Math.PI + rand(-0.34, 0.34); }
+      else if (side === 2) { x = rand(b.x + b.w * 0.12, b.x + b.w * 0.88); y = b.y - pad; ang = Math.PI / 2 + rand(-0.34, 0.34); }
+      else { x = rand(b.x + b.w * 0.12, b.x + b.w * 0.88); y = b.y + b.h + pad; ang = -Math.PI / 2 + rand(-0.34, 0.34); }
+      const stage = Math.min(3, (G.session && G.session.stage) || 1);
+      const st = (G.TAD && G.TAD[stage]) || { spd: [240, 300] };
+      this.tadSide = side;
+      this.tadSpd = rand(st.spd[0], st.spd[1]);
+      this.tadAng = ang; this.tadFoldFrom = ang; this.tadFoldTo = ang;
+      this.tadFold = 0; this.tadFolds = 0; this.tadNoFoldT = 0.18;
+      this.tadMissed = false; this.tadOut = false; this.tadStartle = 0;
+      this.tadForceOut = false;
+      this.tadTurnGlow = 0;
+      this.tadPhase = rand(0, Math.PI * 2);
+      this.tadAmp = rand((T.waveAmp || [5, 12])[0], (T.waveAmp || [5, 12])[1]);
+      this.tadWave = rand((T.waveLen || [170, 260])[0], (T.waveLen || [170, 260])[1]);
+      this.tadIn = T.entryT || 0.26;
+      this.x = x; this.y = y;
+      this.vx = Math.cos(ang); this.vy = Math.sin(ang);
+      this.driftAng = ang; this.crawlAng = ang;
+      this.trail = []; this.segs = [];
+      const nseg = T.segs || 5, gap = T.segGap || 9;
+      for (let i = 0; i < nseg; i++) {
+        this.segs.push({ x: x - Math.cos(ang) * (i + 1) * gap, y: y - Math.sin(ang) * (i + 1) * gap });
+      }
+      this.aliveT = 0; this.invulnT = 0;
+      this.fade = 0.35; this.vanishT = 0; this.darkT = 0;
+      this.tState = "swim";
+    }
+    /* 出生边：左右为主（横穿读感最好），上下少量；避免连续两次同一边 */
+    tadPickSide() {
+      const r = Math.random();
+      let side = r < 0.4 ? 0 : r < 0.8 ? 1 : r < 0.9 ? 2 : 3;
+      if (side === this.tadSide && Math.random() < 0.7) side = (side + 1 + Math.floor(rand(0, 3))) % 4;
+      return side;
+    }
     updateTadpole(dt, t) {
-      const T = G.TADPOLE || {};
-      const S = G.session;
-      const b = G.bounds();
+      const T = G.TADPOLE || {}, S = G.session, b = G.bounds();
       const MS = Math.pow(G.platform.S || 1, 0.5);
-      this.aliveT = (this.aliveT || 0) + dt;
+      const stage0 = Math.min(3, S.stage || 1);
+      const st0 = (G.TAD && G.TAD[stage0]) || (G.TAD && G.TAD[1]) || {};
       if (this.invulnT > 0) this.invulnT -= dt;
+      this.aliveT = (this.aliveT || 0) + dt;
+      /* 存活上限：一直折返也不许无限赖场，超过上限后下一次触边必定离场（形成漏击压力）。 */
+      if (this.aliveT > (st0.alive || 99)) this.tadForceOut = true;
 
-      /* 被拍中：渐隐 → 暗场 → 从边缘爬回来 */
+      /* 被拍 / 漏击：先淡出，再冷却，最后从随机一边重新进场 */
       if (this.vanishT > 0) {
         this.vanishT -= dt;
-        this.fade = Math.max(0, Math.min(1, this.vanishT / 0.22));
-        if (this.vanishT <= 0) { this.vanishT = 0; this.fade = 0; this.darkT = rand(0.3, 0.8); }
+        this.fade = Math.max(0, this.vanishT / 0.26);
+        if (this.vanishT <= 0) {
+          this.vanishT = 0; this.fade = 0;
+          /* 刷新节奏：命中后按阶段 gap 重进（0.95s → 0.66s），漏击后回场更快（0.36–0.56s），
+             避免"打掉一只就空场等半天"或"漏一只就一直少一只"。 */
+          this.darkT = this.tadOut ? rand(0.36, 0.56) : rand((st0.gap || [0.95, 1.3])[0], (st0.gap || [0.95, 1.3])[1]);
+        }
         return;
       }
       if (this.darkT > 0) {
         this.darkT -= dt; this.fade = 0;
-        if (this.darkT <= 0) { this.darkT = 0; this.tp = { phase: "in", t: 0 }; this.relocate(true); }
+        if (this.darkT <= 0) { this.darkT = 0; this.tadSpawn(); }
         return;
       }
-      if (this.tp) {                       // 边缘亮起淡入
-        this.tp.t += dt;
-        this.fade = Math.min(1, this.tp.t / 0.26);
-        if (this.tp.t >= 0.26) { this.tp = null; this.fade = 1; }
-        return;
-      }
-      this.fade = 1;
+      if (this.tadIn > 0) this.tadIn = Math.max(0, this.tadIn - dt);
+      this.fade = this.tadIn > 0 ? Math.max(0.35, 1 - this.tadIn / (T.entryT || 0.26) * 0.6) : 1;
 
-      /* 敏锐度：本只存活越短 → 逃窜越快；难度/阶段倍率只作用于速度 */
-      if (this.tadK == null) this.tadK = (G.TADPOLE_K || {}).init || 1;
-      const difK = ({ easy: 0.75, normal: 1, hard: 1.3 })[G.config.difficulty] || 1;
-      const stageK = ({ 1: 1, 2: 1.15, 3: 1.3 })[S.stage] || 1;
-      const fleeK = this.tadK * difK * stageK * ((S.adaptiveTier > 0) ? 0.85 : 1) * (this.comboSpeed || 1);
+      /* 折返弧：0.22s smoothstep 插值，是全场唯一的速度低谷 */
+      if (this.tadFold > 0) {
+        this.tadFold = Math.max(0, this.tadFold - dt / (T.foldDur || 0.22));
+        const u = 1 - this.tadFold, e = u * u * (3 - 2 * u);
+        this.tadAng = this.tadFoldFrom + (this.tadFoldTo - this.tadFoldFrom) * e;
+        this.tadTurnGlow = this.tadFold;
+      } else if (this.tadTurnGlow > 0) this.tadTurnGlow = Math.max(0, this.tadTurnGlow - dt * 3.4);
+      if (this.tadNoFoldT > 0) this.tadNoFoldT = Math.max(0, this.tadNoFoldT - dt);
+      if (this.tadStartle > 0) this.tadStartle = Math.max(0, this.tadStartle - dt);
 
-      /* 状态推进 */
-      this.tT -= dt;
-      if (this.tT <= 0) {
-        if (this.tState === "turn") this.resumeWander();
-        else if (this.tState === "dart") this.enterTurn();
-        else if (S.stage >= 3 && Math.random() < 0.5) this.enterDart();
-        else this.enterTurn();
-      }
+      const stage = stage0;
+      const st = st0;
+      /* 入场速度曲线：1.16× → 1.00× 线性回落（"冲进来"然后进入巡航），不是硬切。 */
+      const entryK = this.tadIn > 0
+        ? 1 + ((T.entryBoost || 1.16) - 1) * (this.tadIn / (T.entryT || 0.26))
+        : 1;
+      /* 连击提速只走全局 comboSpeed（COMBO_TIERS 最高 1.45×），这里不再叠第二层，
+         否则 15 连击时实测会到 1.7×，超出可读上限。 */
+      const slowK = T.foldSlow || 0.62;
+      const foldK = this.tadFold > 0 ? slowK + (1 - this.tadFold) * (1 - slowK) : 1;
+      const spd = (this.tadSpd || 260) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1)
+        * (this.comboSpeed || 1) * foldK
+        * entryK
+        * (this.tadStartle > 0 ? (T.startleK || 1.24) : 1);
 
-      /* 目标速度（状态进入时已抽好基准值） */
-      const base = this.tState === "flee" ? this.spdF : this.tState === "dart" ? this.spdD : this.spdW;
-      let targetSp = (base || 100) * MS * (this.speedMul || 1) * (this.adaptiveSlow || 1);
-      if (this.tState === "turn") targetSp = 0;
-      if (this.rampT > 0) this.rampT -= dt;
-      const spK = this.tState === "turn" ? 40 : (this.rampT > 0 ? 45 : 8);
-      this.spd += (targetSp - (this.spd || 0)) * Math.min(1, dt * spK);
-      if (this.tState === "turn" && this.spd < 12) this.spd = 0;
+      /* 位移 = 航向速度 + 垂直方向的正弦摆尾（横向 ±5–12px，波长 170–260px） */
+      const ca = Math.cos(this.tadAng), sa = Math.sin(this.tadAng);
+      this.tadPhase += dt * (spd / (this.tadWave || 210)) * Math.PI * 2;
+      const waveV = Math.cos(this.tadPhase) * (this.tadAmp || 8) * (Math.PI * 2 / (this.tadWave || 210)) * spd;
+      this.x += (ca * spd - sa * waveV) * dt;
+      this.y += (sa * spd + ca * waveV) * dt;
+      this.vx = ca; this.vy = sa;
+      this.driftAng = this.tadAng; this.crawlAng = this.tadAng;
 
-      /* 转向：闲游随机漂移；逃窜/疾冲直线；换向按 C 形弯插值到新方向 */
-      if (this.tState === "turn") {
-        this.turnProg = Math.min(1, this.turnProg + dt / (this.turnDur || 0.25));
-        const u = this.turnProg, e = u * u * (3 - 2 * u);
-        this.driftAng = (this.turnFrom || 0) + ((this.turnTo || 0) - (this.turnFrom || 0)) * e;
-      } else if (this.tState === "wander") {
-        this.driftTurn = (this.driftTurn || 0) + rand(-1, 1) * 0.6 * dt;
-        this.driftTurn = Math.max(-0.45, Math.min(0.45, this.driftTurn));
-        this.driftAng += this.driftTurn * dt;
-      }
-      this.crawlAng = this.driftAng;
-      this.vx = Math.cos(this.driftAng); this.vy = Math.sin(this.driftAng);
-
-      /* 位移（换向窗不动）+ 到边就换向 */
-      this.x = Math.min(Math.max(this.x + Math.cos(this.driftAng) * this.spd * dt, b.x + 6), b.x + b.w - 6);
-      this.y = Math.min(Math.max(this.y + Math.sin(this.driftAng) * this.spd * dt, b.y + 6), b.y + b.h - 6);
-      const m = 26 * MS;
-      if (this.tState !== "turn" &&
-          (this.x <= b.x + m || this.x >= b.x + b.w - m || this.y <= b.y + m || this.y >= b.y + b.h - m)) {
-        this.enterTurn();
+      /* 触边：折返或离场。中心点出界 2px 判定，身体可以完整游出画面 */
+      if (this.tadIn <= 0 && this.tadNoFoldT <= 0) {
+        let side = -1;
+        if (this.x < b.x - 2) side = 0;
+        else if (this.x > b.x + b.w + 2) side = 1;
+        else if (this.y < b.y - 2) side = 2;
+        else if (this.y > b.y + b.h + 2) side = 3;
+        if (side >= 0) {
+          if (!this.tadForceOut && (this.tadFolds || 0) < (st.foldMax || 2) && Math.random() < (st.foldP || 0.6)) this.tadFoldNow(side);
+          else this.tadEscape();
+        }
       }
 
-      /* 尾节跟随链：头部轨迹按节距采样 */
+      /* 尾链：头走过的轨迹按节距采样，尾带与命中判定共用这条链。
+         断链保护：头与第一尾节距离过大 = 发生过瞬移/重定位（折返夹回、窗口尺寸变化），
+         此时重建尾链，否则会拉出一条横贯屏幕的黑带。 */
       const tr = this.trail || (this.trail = []);
+      const s00 = this.segs && this.segs[0];
+      if (s00 && Math.hypot(this.x - s00.x, this.y - s00.y) > 120) { tr.length = 0; this.segs.length = 0; }
       const h0 = tr[0];
       if (!h0 || Math.hypot(this.x - h0.x, this.y - h0.y) >= 2) {
         tr.unshift({ x: this.x, y: this.y });
-        if (tr.length > 260) tr.length = 260;
+        if (tr.length > 160) tr.length = 160;
       }
-      const n = T.segs || 5, gap = T.segGap || 10;
+      const n = T.segs || 5, gap = (T.segGap || 9);
       const segs = this.segs || (this.segs = []);
       let si = 0, want = gap, ax = this.x, ay = this.y;
       for (let i = 1; i < tr.length && si < n; i++) {
@@ -1717,47 +1777,53 @@ module.exports = function (G) {
       while (segs.length < n) segs.push({ x: this.x, y: this.y });
       if (segs.length > n) segs.length = n;
     }
-    enterTurn() {
-      const b = G.bounds();
-      this.tState = "turn";
-      this.turnDur = ((G.TADPOLE || {}).turnDur || 0.25) * ((G.session && G.session.adaptiveTier > 0) ? 1.4 : 1);
-      this.tT = this.turnDur; this.turnProg = 0;
-      this.turnFrom = this.driftAng;
-      const toC = Math.atan2(b.y + b.h / 2 - this.y, b.x + b.w / 2 - this.x);
-      this.turnTo = toC + rand(-0.42, 0.42);
+    /* 触边折返：主航向按边反射 + ±0.34 随机，并保证新方向真的朝屏内 */
+    tadFoldNow(side) {
+      const b = G.bounds(), pad = 7;
+      this.tadFolds = (this.tadFolds || 0) + 1;
+      this.x = Math.max(b.x + pad, Math.min(b.x + b.w - pad, this.x));
+      this.y = Math.max(b.y + pad, Math.min(b.y + b.h - pad, this.y));
+      let ang = side <= 1 ? Math.PI - this.tadAng : -this.tadAng;
+      ang += rand(-0.34, 0.34);
+      const inX = side === 0 ? 1 : side === 1 ? -1 : 0;
+      const inY = side === 2 ? 1 : side === 3 ? -1 : 0;
+      if (Math.cos(ang) * inX + Math.sin(ang) * inY < 0.2) {
+        ang = Math.atan2(inY, inX) + rand(-0.62, 0.62);
+      }
+      let d = ang - this.tadAng;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.tadFoldFrom = this.tadAng;
+      this.tadFoldTo = this.tadAng + d;
+      this.tadFold = 1;
+      this.tadTurnGlow = 1;
+      this.tadNoFoldT = 0.2;
+      if (G.tadFoldRing) G.tadFoldRing(this.x, this.y);
     }
-    enterDart() {
-      const T = G.TADPOLE || {};
-      this.tState = "dart";
-      this.tT = rand((T.dartDur || [0.8, 1.2])[0], (T.dartDur || [0.8, 1.2])[1]);
-      this.spdD = rand((T.dart || [420, 520])[0], (T.dart || [420, 520])[1]) * (this.tadK || 1);
-      this.rampT = rand(0.05, 0.09);
+    /* 漏击：完整穿出画面。只记一次，交给 game.js 处理连击扣减与提示 */
+    tadEscape() {
+      if (this.tadMissed) return;
+      this.tadMissed = true; this.tadOut = true;
+      if (G.tadpoleEscape) G.tadpoleEscape(this);
+      this.vanishT = 0.18; this.tadFold = 0;
     }
-    resumeWander() {
-      const T = G.TADPOLE || {};
-      if (this.turnTo != null) this.driftAng = this.turnTo;
-      this.driftTurn = rand(-0.25, 0.25);
-      this.tState = "wander";
-      this.tT = rand((T.wanderDur || [2.0, 3.5])[0], (T.wanderDur || [2.0, 3.5])[1]) * (this.edgeIn ? 1.15 : 1);
-      this.edgeIn = false;
-      this.spdW = rand((T.wander || [90, 130])[0], (T.wander || [90, 130])[1]);
-      this.rampT = rand(0.04, 0.07);
-    }
+    /* 拍空贴近：短促受惊加速 + 最多 0.5rad 偏转，不整只掉头（保留玩家已读到的路线） */
     fleeFrom(px, py) {
       if (this.vanishT > 0 || this.darkT > 0) return;
+      if (Math.hypot(this.x - px, this.y - py) > 120) return;
       const T = G.TADPOLE || {};
-      this.tState = (G.session.stage >= 3 && Math.random() < 0.45) ? "dart" : "flee";
-      this.tT = this.tState === "dart"
-        ? rand((T.dartDur || [0.8, 1.2])[0], (T.dartDur || [0.8, 1.2])[1])
-        : rand((T.fleeDur || [1.2, 2.0])[0], (T.fleeDur || [1.2, 2.0])[1]);
-      this.spdF = rand((T.flee || [260, 340])[0], (T.flee || [260, 340])[1]) * (this.tadK || 1);
-      this.spdD = rand((T.dart || [420, 520])[0], (T.dart || [420, 520])[1]) * (this.tadK || 1);
-      const away = Math.atan2(this.y - py, this.x - px);   // 方向因果：逃向远离拍击点的一侧
-      this.driftAng = away + rand(-0.35, 0.35);
-      this.rampT = rand(0.05, 0.09);
+      this.tadStartle = T.startle || 0.55;
+      const away = Math.atan2(this.y - py, this.x - px);
+      let d = away - this.tadAng;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      this.tadAng += Math.max(-0.5, Math.min(0.5, d)) * 0.55;
+      if (G.tadpoleWake) G.tadpoleWake(this.x, this.y, true);
     }
     /* 换一个"别处"：pool 只能从屏幕边缘爬进来（不允许屏内凭空出现）；其他模式仍用随机换位 */
     relocate(fresh) {
+      /* 蝌蚪有独立的边缘进场规则：不沿用「离原位最远」的通用换位。 */
+      if (this.type === "tadpole") { this.tadSpawn(); return; }
       const b = G.bounds();
       const inset = 40 * Math.pow(G.platform.S || 1, 0.4);
       const far = Math.min(b.w, b.h) * 0.42;
@@ -1774,7 +1840,9 @@ module.exports = function (G) {
           else if (r < 0.72) { cx = b.x + b.w - pad; cy = rand(b.y + pad, b.y + b.h - pad); ang = Math.PI + rand(-0.42, 0.42); }
           else if (r < 0.86) { cx = rand(b.x + pad, b.x + b.w - pad); cy = b.y + pad; ang = Math.PI / 2 + rand(-0.42, 0.42); }
           else { cx = rand(b.x + pad, b.x + b.w - pad); cy = b.y + b.h - pad; ang = -Math.PI / 2 + rand(-0.42, 0.42); }
-          const d = Math.hypot(cx - this.x, cy - this.y);
+          const px = this.x == null ? b.x + b.w / 2 : this.x;
+          const py = this.y == null ? b.y + b.h / 2 : this.y;
+          const d = Math.hypot(cx - px, cy - py);
           if (d > bestD) { bestD = d; best = { x: cx, y: cy, ang }; }
           if (d > far) break;
         }
@@ -1808,7 +1876,7 @@ module.exports = function (G) {
       /* 走停节拍（PRD 4.6）：换点/重生后先走一段（短 30%），停顿状态整体清空 */
       this.pauseT = 0; this.pauseAng = null; this.pauseTurnTo = null; this.nextAng = null;
       this.tpDue = false; this.aliveT = 0; this.freshWalk = true; this.pauseGlow = 0;
-      if (fresh) this.applyToy(pickFfToy());      // 被拍重生：换一种动物，画面不单调
+      if (fresh && this.type === "pool") this.applyToy(pickFfToy());   // 萤光重生才换玩具；蝌蚪保持本体
       this.flareCd = rand(0.6, 1.8) * ((this.toy && this.toy.flare) || 1);
       if (G.emberTrail && !fresh) G.emberTrail(this.x, this.y);     // 亮起那一下撒几点冷色火星
     }
@@ -1827,7 +1895,16 @@ module.exports = function (G) {
     updateLaser(dt, t) {
       const d = this.def, b = G.bounds();
       if (this.stage !== G.session.stage) this.stage = G.session.stage;
-      const P = G.LASER_PARAMS[this.stage] || G.LASER_PARAMS[1];
+      const baseP = G.LASER_PARAMS[this.stage] || G.LASER_PARAMS[1];
+      /* 激光二级卡：疾速红点只调节奏，不恢复绿色变体（猫会误以为激光变色）。 */
+      const P = G.config.laserMode === "lz-swift"
+        ? Object.assign({}, baseP, {
+            hold: [baseP.hold[0] * .68, baseP.hold[1] * .68],
+            dart: [baseP.dart[0] * .78, baseP.dart[1] * .78],
+            tele: baseP.tele ? Math.min(.32, baseP.tele * 1.25) : 0,
+            trail: true
+          })
+        : baseP;
       if (this.vanishT > 0) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
@@ -1849,7 +1926,8 @@ module.exports = function (G) {
       const inset = 10;
       const L = b.x + inset, Rt = b.x + b.w - inset, T = b.y + inset, B = b.y + b.h - inset;
       if (this.state === "dart") {
-        const sp = d.speed * this.speedMul * this.comboSpeed * (this.adaptiveSlow || 1) * (this.speciesSpeed || 1);
+        const sp = d.speed * this.speedMul * this.comboSpeed * (this.adaptiveSlow || 1) * (this.speciesSpeed || 1)
+          * (G.config.laserMode === "lz-swift" ? 1.16 : 1);
         const MS = Math.pow(G.platform.S || 1, 0.5);
         this.x += this.vx * sp * dt * MS;
         this.y += this.vy * sp * dt * MS;
@@ -1891,18 +1969,46 @@ module.exports = function (G) {
       this.fade = 1;
     }
 
+    /* 可见尾巴的唯一坐标源：绘制与命中判定共用，不能再各摆各的。 */
+    tailPoints(t) {
+      const T = G.TADPOLE || {}, sc = this.sc || 1;
+      const n = T.segs || 7;
+      const phase = this.tadPhase || 0;
+      /* 细长尾的摆幅按"整条尾"控制：梢部约 5–7px，越靠近头越小；
+         相位沿节距缓慢后移（0.62rad/节），读起来是水波，而不是鞭子。 */
+      const amp = (1.0 + Math.min(1.8, (this.tadSpd || 260) / 170)) * sc;
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const base = (this.segs && this.segs[i]) || { x: this.x, y: this.y };
+        const prev = i === 0 ? { x: this.x, y: this.y } : ((this.segs && this.segs[i - 1]) || { x: this.x, y: this.y });
+        let dx = base.x - prev.x, dy = base.y - prev.y;
+        let dl = Math.hypot(dx, dy);
+        if (dl < 0.5) { dx = -Math.cos(this.tadAng || 0); dy = -Math.sin(this.tadAng || 0); dl = 1; }
+        const off = Math.sin(phase - i * 0.62) * amp * Math.pow((i + 1) / n, 1.25);
+        pts.push({
+          x: base.x - dy / dl * off, y: base.y + dx / dl * off,
+          /* 半径与可见尾带同宽：细尾不再用粗判定圈，命中宽容度交给 +8px 手指余量。 */
+          r: Math.max(1.4, 5.0 - i * 0.58) * sc
+        });
+      }
+      return pts;
+    }
+
     /* ============ 命中判定（对齐 DOM 包围盒点击语义） ============ */
     hittable(x, y) {
-      if (this.vanishT > 0) return false;
+      if (this.vanishT > 0 || this.despawn != null) return false;
       if (this.type === "tadpole") {
-        /* 蝌蚪：头（×1.15）与尾节（×1.35）都算命中，同分 +1（方案 v0.2 §4.2） */
-        if ((this.invulnT || 0) > 0 || this.fade < 0.4) return false;
+        /* 头部 ≈ 62×46 设计像素（×1.55），尾节再 +8px 手指余量；
+           折返弧中额外放宽 15%——这是唯一的速度低谷，也是 +2 窗口。 */
+        if ((this.invulnT || 0) > 0 || this.vanishT > 0 || (this.fade || 1) < 0.4) return false;
         const T = G.TADPOLE || {};
-        const hw = this.baseW * this.sc / 2 * (T.headPad || 1.15), hh = this.baseH * this.sc / 2 * (T.headPad || 1.15);
+        const foldK = (this.tadFold || 0) > 0 ? (T.foldPad || 1.15) : 1;
+        const pad = (T.headPad || 1.55) * foldK;
+        const hw = this.baseW * this.sc * 0.5 * pad, hh = this.baseH * this.sc * 0.5 * pad;
         if (Math.abs(x - this.x) <= hw && Math.abs(y - this.y) <= hh) { this._hitPart = "head"; return true; }
-        const segs = this.segs || [];
+        const segs = this.tailPoints();
         for (let i = 0; i < segs.length; i++) {
-          const r = Math.max(3, (8.5 - i * 1.15)) * this.sc * (T.tailPad || 1.35);
+          const r = segs[i].r * (T.tailPad || 1.3) + 8;
           if (Math.hypot(x - segs[i].x, y - segs[i].y) <= r) { this._hitPart = "tail"; return true; }
         }
         return false;
@@ -2041,7 +2147,7 @@ module.exports = function (G) {
         ctx.translate(this.x, this.y - (this.hopOff || 0));
         G.draw.poolLight(ctx, this, t);
       } else if (this.type === "tadpole") {
-        ctx.translate(this.x, this.y);
+        /* D.tadpole 用绝对坐标画尾链；这里不能再 translate，否则会被平移两次画到屏外。 */
         G.draw.tadpole(ctx, this, t);
       } else {
         // 泳池模式：鱼身柔光（泳池玩具截图里的发光小鱼）；鱼群模式：银白小鱼光
@@ -2107,8 +2213,9 @@ module.exports = function (G) {
     preys.length = 0;
     if (G.scene.holeOwners) G.scene.holeOwners = G.scene.holeOwners.map(() => null);
     if (G.scene.holeHeat) G.scene.holeHeat = G.scene.holeHeat.map(() => []);
-    // 第一版萤光：开局固定 1 只萤光小虫（多只设置也不加量）
-    const n = G.config.targetType === "pool" ? 1
+    // 萤火虫：数量由二级页面增减（默认 1，最多 7）；其余玩法仍按单只/多只两档。
+    const n = G.config.targetType === "pool"
+      ? Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)))
       : (Number(G.config.preyCount) === 1 ? 1 : 3);
     if (G.config.targetType === "fish" && n > 1) {
       // 开局鱼种去重：洗牌后按序取，保证同时在场鱼互不相同（泳池走限定鱼种表）
@@ -2139,10 +2246,13 @@ module.exports = function (G) {
         ? ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3
         : ({ 1: 6, 2: 9, 3: 12 })[G.session.stage] || 6;
     }
-    // 第一版萤光：整局固定一只萤光小虫，与单只/多只设置无关。
-    if (G.config.targetType === "pool") return 1;
-    // 蝌蚪快跑：数量按击中能力动态调节（1–7，方案 §5），「单只/多只」设置不生效。
-    if (G.config.targetType === "tadpole") return Math.max(1, Math.min(7, G.session.tadCount || 1));
+    // 萤火虫：整局保持二级页面设定的数量（默认 1，最多 7）。
+    if (G.config.targetType === "pool") return Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)));
+    // 蝌蚪快跑：同屏 1→2→3，阶段决定基线，命中表现好可在上限内多加 1 只。
+    if (G.config.targetType === "tadpole") {
+      const base = Math.min(3, Math.max(1, G.session.stage || 1));
+      return Math.max(base, Math.min(3, G.session.tadCount || 1));
+    }
     if (Number(G.config.preyCount) === 1) return 0;
     const base = ({ 1: 3, 2: 5, 3: 7 })[G.session.stage] || 3;
     if (G.config.targetType === "mouse") {
@@ -2178,19 +2288,20 @@ module.exports = function (G) {
      自适应辅助生效期间冻结加档（场面先变简单）。 */
   G.tadpoleTick = (dt) => {
     const S = G.session, T = G.TADPOLE || {};
+    const base = Math.min(3, Math.max(1, S.stage || 1));       // 阶段基线：1→2→3
+    const max = Math.min(3, T.countMax || 3);
     S.tadEval = (S.tadEval || 0) + dt;
     if (S.tadEval < (T.countEval || 8)) return;
     S.tadEval = 0;
     const hits = S.hits - (S.tadMark || 0);
     S.tadMark = S.hits;
-    const max = T.countMax || 7;
-    const cur = Math.max(1, Math.min(max, S.tadCount || 1));
+    const cur = Math.max(base, Math.min(max, S.tadCount || base));
     if (hits >= (T.countAdd || 4) && cur < max) {
       S.tadDown = 0;
       if (!(S.adaptiveTier > 0)) { S.tadCount = cur + 1; G.topUpPreys(); }   // 新个体走边缘进场
-    } else if (hits <= (T.countDrop || 1)) {
+    } else if (hits <= (T.countDrop || 2) && cur > base) {
       S.tadDown = (S.tadDown || 0) + 1;
-      if (S.tadDown >= 2 && cur > 1) {
+      if (S.tadDown >= 2) {
         S.tadDown = 0; S.tadCount = cur - 1;
         const cands = G.preys.filter(p => p.type === "tadpole" && p.despawn == null);
         if (cands.length > S.tadCount) cands[0].despawn = 0.3;

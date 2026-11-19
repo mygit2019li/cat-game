@@ -19,7 +19,13 @@ module.exports = function (G) {
     adaptive: true,          // 自适应辅助默认开（猫更容易抓到）
     bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
     bg_fish: "kelp",         // 捕鱼可选海域（水草森林 / 泳池追鱼）
-    bg_tadpole: "lotus",     // 蝌蚪快跑可选背景（晨光浅塘 / 暮色深塘）
+    bg_tadpole: "paper",     // 蝌蚪快跑：纯白纸面（唯一场景，不再做场景选择）
+    tadStyle: "ink",         // 蝌蚪造型：ink 墨影 / line 线条 / brush 水墨 / dash 一笔
+    frogMode: "frog",        // 青蛙卡内的玩法切换：frog=青蛙跳跳 / tadpole=蝌蚪快跑
+    ffMode: "ff-walk",       // 萤火虫卡内节奏：ff-walk=萤光漫步 / ff-dash=急爬追光
+    ffCount: 1,              // 萤火虫数量：二级页面可增减（1–7 只，默认 1）
+    bflyMode: "bf-garden",   // 蝴蝶卡内花色：bf-garden=花园彩蝶 / bf-white=素白蝴蝶
+    laserMode: "lz-classic", // 激光卡内节奏：lz-classic=经典红点 / lz-swift=疾速红点
     /* 电子猫粮机：feedNextAt 存的是「下次出粮的绝对时刻(ms)」，离开本页也照走真实时间；
        feedBowl = 盆中颗数，feedHopper = 储粮桶余量百分比 */
     feedMode: "manual", feedPortion: 3, feedIntervalMin: 1,
@@ -153,9 +159,10 @@ module.exports = function (G) {
       { key: "kelp",  name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
       { key: "school", name: "鱼群巡游", desc: "深海鱼群 · 结群游动" }
     ],
+    /* 白纸黑蝌蚪：只有一套布景，选完玩法直接开局（不再弹场景卡）。
+       保留列表结构是为了复用 currentBg / bgsFor 等既有读取路径。 */
     tadpole: [
-      { key: "lotus", name: "晨光浅塘", desc: "亮青绿水 · 光柱藕叶" },
-      { key: "dusk",  name: "暮色深塘", desc: "深蓝紫水 · 萤光浮尘" }
+      { key: "paper", name: "白纸墨影", desc: "纯白纸面 · 黑色剪影" }
     ],
     /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
     frog: [
@@ -163,6 +170,53 @@ module.exports = function (G) {
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
+  /* 青蛙卡内的玩法切换卡：首页仍只保留六张玩法卡，青蛙卡点进去再选「青蛙跳 / 蝌蚪快跑」。 */
+  G.FROG_MODES = [
+    { key: "frog",    name: "青蛙跳跳", desc: "荷叶之间来回跳" },
+    { key: "tadpole", name: "蝌蚪快跑", desc: "白纸黑蝌蚪 · 触边折返" }
+  ];
+  /* 蝌蚪造型（白纸上的黑白表达）。四种都只用黑/灰，切换只改画法，不改命中判定。
+     key 存 config.tadStyle，跨局记忆；二级卡页的「蝌蚪造型」一排可点选。 */
+  G.TAD_STYLES = [
+    { key: "ink",   name: "墨影", desc: "实心剪影 · 最远可读" },
+    { key: "line",  name: "线条", desc: "简笔线稿 · 空心勾边" },
+    { key: "brush", name: "水墨", desc: "笔锋飞白 · 手绘感" },
+    { key: "dash",  name: "一笔", desc: "极简逗号 · 一个笔触" }
+  ];
+  /* 首页六张卡不变；青蛙/萤火虫/蝴蝶/激光各有自己的二级玩法卡。
+     卡片不只换文字，分别落到 configKey 指定的真实玩法参数。 */
+  G.MODE_GROUPS = {
+    frog: {
+      title: "青蛙玩法", sub: "先选猎物，再开始", step: "01 选玩法  /  02 开始",
+      configKey: "frogMode", count: "auto", cards: G.FROG_MODES,
+      targetByKey: { frog: "frog", tadpole: "tadpole" }
+    },
+    pool: {
+      title: "萤火虫玩法", sub: "夜里的石板地，萤光小虫慢慢爬", step: "01 看玩法  /  02 开始",
+      configKey: "ffMode", countKey: "ffCount",
+      cards: [
+        { key: "ff-walk", name: "暗夜萤光", desc: "石板地 · 萤光小虫" }
+      ]
+    },
+    butterfly: {
+      title: "蝴蝶花园", sub: "花间飞行，停在花瓣上等你", step: "01 看玩法  /  02 开始",
+      configKey: "bflyMode",
+      cards: [
+        { key: "bf-garden", name: "蝴蝶花园", desc: "花间穿梭 · 停留花瓣" }
+      ]
+    },
+    laser: {
+      title: "激光乐园", sub: "一只红点，掠过、停住、再出发", step: "01 看玩法  /  02 开始",
+      configKey: "laserMode",
+      cards: [
+        { key: "lz-classic", name: "激光暗室", desc: "红点掠过 · 原地停留" }
+      ]
+    }
+  };
+  /* 玩法组解析：蝌蚪是青蛙卡里的第二张卡，targetType 停在 "tadpole" 时
+     仍要能回到青蛙玩法组（否则重开一局会绕过卡片页、首页也没有选中卡）。 */
+  G.groupKeyForType = (type) => (G.MODE_GROUPS[type] ? type : (type === "tadpole" ? "frog" : null));
+  G.groupForType = (type) => { const k = G.groupKeyForType(type); return k ? G.MODE_GROUPS[k] : null; };
   /* 当前玩法生效的背景 key（存储脏值/不存在时回落到第一套） */
   G.currentBg = () => {
     const type = G.config.targetType;
@@ -181,6 +235,7 @@ module.exports = function (G) {
     /* 默认改为「单只」：saveConfig 会把整个 config 写进本地存档，旧存档里往往已有显式 3，
        这里用 pcV1 标记做一次性迁移，把它们也拉回新默认；之后用户在设置里改「多只」会一直保留。 */
     if (!saved.pcV1) { c.preyCount = 1; c.pcV1 = 1; }
+    c.ffCount = clamp(Math.round(Number(c.ffCount) || 1), 1, 7);   // 萤火虫数量：1–7 只（默认 1）
     /* 默认难度/时长改为「悠闲 + 1 分钟」（PRD V1.2）：存档里往往已有旧默认的显式值，
        用 cfgV2 标记做一次性迁移——只有仍是旧默认（标准 / 3 分钟）的才拉回新默认，
        用户自己改过的（hard / 5 分钟等）保留，迁移后不再动。 */
@@ -191,6 +246,16 @@ module.exports = function (G) {
     }
     /* 脏数据收敛：难度只认三档（此处 G.DIFF 还没建表，用字面量白名单） */
     if (["easy", "normal", "hard"].indexOf(c.difficulty) < 0) c.difficulty = DEFAULTS.difficulty;
+    /* 蝌蚪造型白名单：旧存档/脏数据回落到墨影，避免画成空气。 */
+    if (!G.TAD_STYLES.some(st => st.key === c.tadStyle)) c.tadStyle = DEFAULTS.tadStyle;
+    /* 二级玩法卡选择的脏数据收敛：旧存档/脏值一律回到各卡第一项。 */
+    const MODE_GROUP_KEYS = { frog: "frogMode", pool: "ffMode", butterfly: "bflyMode", laser: "laserMode" };
+    Object.keys(MODE_GROUP_KEYS).forEach(k => {
+      const g = G.MODE_GROUPS[k], field = MODE_GROUP_KEYS[k];
+      if (!g) return;
+      const valid = g.cards.map(card => card.key);
+      if (valid.indexOf(c[field]) < 0) c[field] = g.cards[0].key;
+    });
     // 音效/震动/自适应辅助默认开启：旧版本存档里是旧逻辑写入的显式 false，
     // 用 sndV1 标记做一次性迁移（重置为默认开），此后用户在设置里手动关闭的会一直保留
     if (!saved.sndV1) {
@@ -402,17 +467,28 @@ module.exports = function (G) {
   };
   /* 走停节拍的敏锐度口径（PRD 4.6）：本只存活越短说明猫反应越快 → 下次停顿越短 */
   G.POOL_K = { init: 1, min: 0.4, max: 1.5, quickAlive: 2.5, slowAlive: 6, quick: 0.82, slow: 1.10, streakN: 3, streak: 0.94 };
-  /* ===== 蝌蚪快跑（方案 v0.2）=====
-     速度单位 px/s（×S ×难度倍率）；节体 = 头 1 + 尾 5，沿头部轨迹延迟跟随；
-     四态循环 wander 闲游 / flee 逃窜（方向=远离拍击点）/ dart 疾冲（阶段③）/ turn 换向（唯一静止窗）。
-     数量按击中能力动态调节 1–7：每 countEval 秒评估，命中 ≥countAdd 加 1、≤countDrop 连续两周期减 1。 */
-  G.TADPOLE = {
-    wander: [90, 130], flee: [260, 340], dart: [420, 520],
-    wanderDur: [2.6, 4.2], fleeDur: [1.2, 2.0], dartDur: [0.8, 1.2], turnDur: 0.25,
-    segs: 5, segGap: 10, triggerDist: 160, invuln: 0.6, headPad: 1.15, tailPad: 1.35,
-    countEval: 8, countAdd: 4, countDrop: 1, countMax: 7
+  /* ===== 蝌蚪快跑 v1.0：白纸墨影 =====
+     纯白纸上只有黑色剪影。每只从随机一边画外冲入，近似直线横穿（叠一条轻微正弦摆尾），
+     触边时按 foldP 折返，形成 2–3 段折线；折返是唯一的「慢速窗口」，也是 +2 的奖励窗。
+     数值单位 px/s（设计坐标，实际再乘 √S）；阶段表随局内时间推进。 */
+  G.TAD = {
+    /* spd 巡航速度 / foldP 触边折返概率 / foldMax 单只折返上限 / alive 最长存活 / gap 刷新间隔 */
+    1: { spd: [228, 286], foldP: 0.72, foldMax: 2, alive: 7.4, gap: [0.95, 1.3] },
+    2: { spd: [272, 336], foldP: 0.62, foldMax: 2, alive: 6.6, gap: [0.8, 1.05] },
+    3: { spd: [318, 392], foldP: 0.52, foldMax: 3, alive: 5.8, gap: [0.66, 0.9] }
   };
-  G.TADPOLE_K = { init: 1, min: 0.8, max: 1.35, quickAlive: 2.5 };
+  G.TADPOLE = {
+    segs: 7, segGap: 11,        // 尾链 7 节 × 11px ≈ 77px：细长尾，摆幅小也能看出游动
+    entryPad: 30,            // 出生点在边界外 30px：身体从画外游入，不是凭空出现
+    entryT: 0.26,            // 入场淡入 + 1.16× 冲入提速
+    entryBoost: 1.16,
+    waveAmp: [2.5, 5.5], waveLen: [180, 280], // 身体正弦摆幅 ±2.5–5.5px（细长尾只需轻微摆动）
+    foldDur: 0.22, foldSlow: 0.62,           // 折返弧：0.22s，速度降到 62%
+    headPad: 1.5, tailPad: 1.3, foldPad: 1.15,   // 触控命中区（≈ 60×45 设计像素）
+    invuln: 0.24,          // 重生间隔不用单独配：命中后走阶段 gap，漏击后 0.36–0.56s
+    startle: 0.55, startleK: 1.24,           // 拍空贴近：短促加速（不整只掉头）
+    countEval: 8, countAdd: 4, countDrop: 2, countMax: 3
+  };
   /* 兼容旧字段（其他模块可能还引用） */
   G.POOL_DRIFT = G.FIREFLY;
   /* 兔子模式（暗夜萤光按 29.8s 实拍视频重做）30fps 逐帧实测：
@@ -541,6 +617,9 @@ module.exports = function (G) {
      无需此配置）。仅当用户微信版本过低、不支持标准接口时，才降级为企业微信「微信客服」——
      那时需要在这里填入企业 ID corpId（url 为客服链接，可选）。 */
   G.SUPPORT = { corpId: "", url: "" };
+  /* 微信原生模板广告位 ID（流量主后台 → 广告位管理 → 新建「原生模板广告」）。
+     只用于「电子猫粮机」这一非游戏页面；留空时广告层自动跳过、不报错。 */
+  G.AD_UNIT_ID = "";
   /* 猎物基础定义 */
   G.PREY_DEF = {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
@@ -552,7 +631,7 @@ module.exports = function (G) {
     /* 青蛙跳：体型大、移动靠跳跃（不参与巡游速度），spark 用荷叶青绿 */
     frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" },
     /* 蝌蚪快跑：头小尾长（o------），speed 为闲游基准（逃窜 ×2.6 / 疾冲 ×4 在状态机里算） */
-    tadpole:   { w: 40,  h: 30, speed: 110, wobF: 1.2, wobA: 0.5,  dartMin: 1.0, dartMax: 1.8, yMin: 0.05, yMax: 0.92, face: true,  sparkColor: "#d6ff9e" }
+    tadpole:   { w: 40,  h: 30, speed: 110, wobF: 1.2, wobA: 0.5,  dartMin: 1.0, dartMax: 1.8, yMin: 0.05, yMax: 0.92, face: true,  sparkColor: "#14161a" }
   };
   /* 全局配色：与 H5 原型 CSS 变量 / 场景色严格对齐 */
   G.COLORS = {

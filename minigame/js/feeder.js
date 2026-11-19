@@ -1276,6 +1276,34 @@ module.exports = function (G) {
     }
 
     drawHint(L);
+
+    /* 广告层只在猫粮机页出现：每帧渲染完打个点，供它判定"主内容已完成布局"后再 show */
+    if (G.ad && G.ad.pageFrame) G.ad.pageFrame("feeder");
+  };
+
+  /* 原生模板广告位（由 ad.js 读取）：只落在页面自己的空白带上，绝不压机器与按钮。
+     横屏 → 舞台右侧竖条；竖屏 → 底栏按钮下方的横条（宽度按可用高度收敛，避免广告比留白还高）。 */
+  G.feederAdRect = () => {
+    const L = layout();
+    const st = stageRect(L);
+    const land = L.W > L.H;
+    const gap = 14;
+    if (land) {
+      // 右侧起点同时参考舞台右缘与实测内容边界（≈70% 宽），取更靠右的那个
+      const left = Math.max(st.x + st.w + 20, Math.round(L.W * 0.70));
+      return {
+        left: left,
+        top: Math.round(L.safe.top + 22),
+        width: Math.floor(Math.min(300, L.W - left - 16))
+      };
+    }
+    const top = st.y + st.h + gap;
+    const bandH = Math.max(0, L.H - L.safe.bottom - top - 8);
+    return {
+      left: 20,
+      top: Math.round(top),
+      width: Math.floor(Math.min(L.W - 40, bandH * 0.95, 340))
+    };
   };
 
   /* ================= 每帧更新 ================= */
@@ -1404,5 +1432,8 @@ module.exports = function (G) {
     try { G.track("feeder_open", { mode: c.feedMode, bowl: c.feedBowl, hop: Math.round(c.feedHopper) }); } catch (e) {}
     G.switchScreen("feeder");
     G.saveConfig();
+    /* 原生模板广告：进页即建实例（页面生命周期早期，早于首帧），
+       show 交给首帧回调，离开页面由 game.js 的 switchScreen 统一销毁。 */
+    if (G.ad && G.ad.enter) G.ad.enter("feeder", G.feederAdRect());
   };
 };

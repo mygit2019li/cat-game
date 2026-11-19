@@ -63,6 +63,29 @@
       o && o.complete && o.complete({ authSetting: st });
     },
     createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
+    /* ===== 原生模板广告（wx.createCustomAd）垫片 =====
+       每次调用都记一条到 window.__adLog（含 style），并把 onLoad/onError/onClose 回调
+       存到 window.__adHandlers，测试里可以用 window.__adEmit("error", {...}) 触发分支。
+       统计命中：shown / hidden / destroyed 由测试断言，用来验证「不重复建实例、离开即销毁」。 */
+    createCustomAd: (opt) => {
+      const rec = { opt: JSON.parse(JSON.stringify(opt || {})), shown: 0, hidden: 0, destroyed: 0, alive: true };
+      const h = {};
+      rec.handlers = h;
+      (window.__adLog = window.__adLog || []).push(rec);
+      (window.__adHandlers = window.__adHandlers || []).push(h);
+      const inst = {
+        onLoad: (cb) => { h.load = cb; },
+        offLoad: () => { h.load = null; },
+        onError: (cb) => { h.error = cb; },
+        offError: () => { h.error = null; },
+        onClose: (cb) => { h.close = cb; },
+        offClose: () => { h.close = null; },
+        show: () => { rec.shown++; rec.alive = true; return Promise.resolve(); },
+        hide: () => { rec.hidden++; rec.alive = false; },
+        destroy: () => { rec.destroyed++; rec.alive = false; }
+      };
+      return inst;
+    },
     /* ===== 自定义召唤卡用到的 API 垫片 =====
        测试里不弹系统面板：渠道返回值由 window.__pickStub 注入，给字符串就是所有渠道同一个
        值（老测试不用改），也可以给分渠道对象 image:{album,chat,camera} /

@@ -1,8 +1,12 @@
-/* probe_tadpole.js — 蝌蚪快跑逻辑仿真（方案 v0.2 验收）
-   验：状态循环 / 换向静止窗 / 方向因果 / 头尾判定 / 数量动态 1–7 / 边缘进场
+/* probe_tadpole.js — 蝌蚪快跑 v1.0「白纸墨影」逻辑仿真
+   验：边缘进场 / 横穿与触边折返 / 折返减速窗 / 头尾判定 / 漏击只记一次 /
+       阶段数量 1→2→3 / 重生从边缘 / 单帧开销
    用法：node test/probe_tadpole.js */
 const path = require("path");
 const ROOT = path.join(__dirname, "..");
+/* 固定随机种子：出生边、折返概率都走 Math.random，探针必须可复现。 */
+let __seed = 20261119;
+Math.random = () => { __seed = (__seed * 1664525 + 1013904223) >>> 0; return __seed / 4294967296; };
 const G = {};
 G.platform = {
   S: 1.5, W: 1200, H: 800,
@@ -14,94 +18,122 @@ require(path.join(ROOT, "js/config.js"))(G);
 require(path.join(ROOT, "js/prey.js"))(G);
 
 G.config = { targetType: "tadpole", preyCount: 1, difficulty: "normal", duration: 60, infinite: false, adaptive: true };
-G.session = { time: 0, stage: 1, adaptiveTier: 0, hits: 0,
-  tadCount: 1, tadEval: 0, tadMark: 0, tadDown: 0, combo: 0, missStreak: 0 };
+G.session = { time: 0, stage: 1, adaptiveTier: 0, hits: 0, running: true,
+  tadCount: 1, tadEval: 0, tadMark: 0, tadDown: 0, combo: 0, missStreak: 0, escapes: 0 };
 G.draw = new Proxy({}, { get: () => () => {} });
-G.scene = { tadBg: "lotus", holeOwners: [], mouseBg: "room" };
+G.scene = { type: "tadpole", tadBg: "paper", holeOwners: [], mouseBg: "room" };
+
+let escapeN = 0;
+G.tadpoleEscape = () => { escapeN++; };
 
 G.buildPreys();
 const p = G.preys[0];
 if (!p || p.type !== "tadpole") { console.error("没有生成 tadpole 猎物"); process.exit(1); }
 
 const dt = 1 / 60;
-let t = 0;
+const B = G.bounds();
 const A = [], ok = (c, m, e) => A.push((c ? "✅ " : "❌ ") + m + (e != null ? "  → " + e : ""));
 
-/* ---- 60 秒状态分布 ---- */
-const stat = { wander: 0, flee: 0, dart: 0, turn: 0 };
-const turns = []; let curTurn = null, maxTurnDrift = 0;
+/* ---------- 1. 出生：画外 + 朝屏内 ---------- */
+const outside = p.x < B.x || p.x > B.x + B.w || p.y < B.y || p.y > B.y + B.h;
+const inward = Math.cos(p.tadAng) * (p.x < B.x ? 1 : p.x > B.x + B.w ? -1 : 0) +
+               Math.sin(p.tadAng) * (p.y < B.y ? 1 : p.y > B.y + B.h ? -1 : 0);
+ok(outside, "出生点在可玩边界之外（从画外游入）", `x=${p.x.toFixed(0)}, y=${p.y.toFixed(0)}`);
+ok(inward > 0.6, "出生航向指向屏内", inward.toFixed(2));
+ok(Math.abs(Math.hypot(p.x - (B.x + B.w / 2), p.y - (B.y + B.h / 2))) > 300, "不是屏内凭空出现");
+
+/* ---------- 2. 60 秒轨迹：横穿、折返、离场 ---------- */
+let t = 0, foldN = 0, edgeN = 0, escapeStart = escapeN, inside = 0, samples = 0;
+let maxFold = 0, outAfterFold = 0, speeds = [], foldSpeeds = [];
+let lastFolds = 0, wasFold = 0;
 for (let i = 0; i < 60 * 60; i++) {
   G.session.stage = t < 18 ? 1 : t < 48 ? 2 : 3;
-  const was = p.tState;
+  const x0 = p.x, y0 = p.y;
   p.update(dt, t);
   t += dt;
-  stat[p.tState] = (stat[p.tState] || 0) + dt;
-  // 模拟主人陪玩：每 2.5s 在蝌蚪附近拍一下（160px 内未命中 → 触发逃窜）
-  if (i % 150 === 0 && p.tState !== "turn") p.fleeFrom(p.x + Math.cos(t) * 120, p.y + Math.sin(t) * 120);
-  if (was === "turn" && p.tState === "turn") {
-    if (!curTurn) curTurn = { d: 0, x: p.x, y: p.y, ang: p.driftAng };
-    curTurn.d += dt;
-    maxTurnDrift = Math.max(maxTurnDrift, Math.hypot(p.x - curTurn.x, p.y - curTurn.y));
-  } else if (curTurn) { turns.push(curTurn); curTurn = null; }
+  const d = Math.hypot(p.x - x0, p.y - y0);
+  if (p.tadFold > 0) foldSpeeds.push(d / dt);
+  else if ((p.vanishT || 0) <= 0 && (p.darkT || 0) <= 0) speeds.push(d / dt);
+  if (wasFold === 0 && p.tadFold > 0) { foldN++; edgeN++; }   // 折返次数在每次重生会归零，按"进入折返弧"计数
+  if (wasFold > 0 && p.tadFold === 0) {
+    maxFold = Math.max(maxFold, p.tadFolds);
+    if (p.x < B.x - 1 || p.x > B.x + B.w + 1 || p.y < B.y - 1 || p.y > B.y + B.h + 1) outAfterFold++;
+  }
+  wasFold = p.tadFold;
+  if (p.x >= B.x && p.x <= B.x + B.w && p.y >= B.y && p.y <= B.y + B.h) inside++;
+  samples++;
 }
-const turnAvg = turns.reduce((s, o) => s + o.d, 0) / (turns.length || 1);
+const escapes = escapeN - escapeStart;
+const avg = (a) => a.reduce((s, v) => s + v, 0) / (a.length || 1);
 
-ok(Object.keys(stat).every(k => stat[k] > 0), "四态都出现过", JSON.stringify(Object.fromEntries(Object.entries(stat).map(([k, v]) => [k, v.toFixed(1) + "s"]))));
-ok(turns.length >= 6 && turns.length <= 16, "换向窗次数 60s 内 6–16 次（每 4–7s 一个）", String(turns.length));
-ok(Math.abs(turnAvg - 0.25) < 0.03, "换向时长 ≈0.25s", turnAvg.toFixed(3));
-ok(maxTurnDrift < 4, "换向期间位移 <4px", maxTurnDrift.toFixed(2));
+const foldRate = foldN / Math.max(1, foldN + escapes);
+ok(foldN >= 5, "60s 内多次触边折返（≥5 次）", String(foldN));
+ok(foldRate > 0.3 && foldRate < 0.95, "折返/离场比例落在设计区间（30%–95%）", (foldRate * 100).toFixed(0) + "%");
+ok(escapes >= 3, "未击中的个体会完整离场（漏击事件 ≥3）", String(escapes));
+ok(maxFold > 0 && maxFold <= 3, "单只折返次数不超过阶段上限", String(maxFold));
+ok(outAfterFold === 0, "折返结束后身体回到边界内", String(outAfterFold));
+ok(inside / samples > 0.75, "大部分时间在可玩区内（>75%）", (inside / samples * 100).toFixed(1) + "%");
+ok(avg(foldSpeeds) < avg(speeds) * 0.85, "折返弧速度明显低于巡航（<85%）",
+  (avg(foldSpeeds) / avg(speeds)).toFixed(2) + "×");
+ok(avg(speeds) > 140, "巡航速度落在可读范围（>140px/s @S=1.5）", avg(speeds).toFixed(0));
 
-/* ---- 方向因果 ---- */
-let causalityOk = 0;
-for (let i = 0; i < 30; i++) {
-  p.vanishT = 0; p.darkT = 0; p.tp = null;
-  const tapAng = i / 30 * Math.PI * 2;
-  const px = p.x + Math.cos(tapAng) * 100, py = p.y + Math.sin(tapAng) * 100;
-  p.fleeFrom(px, py);
-  const dot = Math.cos(p.driftAng - tapAng);        // 逃跑方向与拍击方向应相反 → cos ≈ -1
-  if (dot < -0.3) causalityOk++;
-}
-ok(causalityOk >= 27, "逃窜方向与拍击点相反（夹角 >90°）", causalityOk + "/30");
-
-/* ---- 头/尾判定 ---- */
-p.vanishT = 0; p.darkT = 0; p.tp = null; p.invulnT = 0; p.fade = 1;
-p.x = 600; p.y = 400; p.trail = []; p.segs = [];
-for (let i = 0; i < 5; i++) p.segs.push({ x: 600 - (i + 1) * 10, y: 400 });
-p.driftAng = 0;
-ok(p.hittable(600, 400) === true && p._hitPart === "head", "头部判定 → head", p._hitPart);
-ok(p.hittable(600 - 50, 400) === true && p._hitPart === "tail", "尾节判定 → tail", p._hitPart);
-p.invulnT = 0.6;
-ok(p.hittable(600, 400) === false, "无敌期内不可重复命中");
+/* ---------- 3. 折返奖励窗：命中盒放宽 ---------- */
+p.vanishT = 0; p.darkT = 0; p.invulnT = 0; p.fade = 1; p.tadIn = 0;
+p.x = 600; p.y = 400; p.tadAng = 0; p.trail = []; p.segs = [];
+for (let i = 0; i < 5; i++) p.segs.push({ x: 600 - (i + 1) * 9, y: 400 });
+p.tadFold = 0;
+const edgeX = p.baseW * p.sc * 0.5 * G.TADPOLE.headPad + 2;
+const hitNormal = p.hittable(600 + edgeX, 400);
+p.tadFold = 0.6;
+const hitFold = p.hittable(600 + edgeX, 400);
+p.tadFold = 0;
+ok(p.hittable(600, 400) === true && p._hitPart === "head", "头部命中 → head", p._hitPart);
+ok(p.hittable(600 - 45, 400) === true && p._hitPart === "tail", "尾节命中 → tail", p._hitPart);
+ok(p.hittable(600, 400 + 80) === false, "离身体过远不误判");
+ok(!hitNormal && hitFold, "折返时命中盒额外放宽约 15%", `normal=${hitNormal}, fold=${hitFold}`);
+p.invulnT = 0.24;
+ok(p.hittable(600, 400) === false, "入场/受击保护期内不可重复命中");
 p.invulnT = 0;
 
-/* ---- 数量动态 1–7 ---- */
-G.session.tadCount = 1; G.session.hits = 0; G.session.tadMark = 0;
-const preysNow = () => G.preys.filter(q => q.type === "tadpole" && q.despawn == null).length;
-let reached7 = false, back1 = false;
-for (let i = 0; i < 7 * 8 * 60; i++) {
-  G.session.hits++;                      // 高命中：每 8s 加 1
-  G.tadpoleTick(dt);
-  if (G.session.tadCount >= 7) { reached7 = true; break; }
+/* ---------- 4. 漏击只记一次 + 重生回到边缘 ---------- */
+escapeN = 0;
+p.vanishT = 0; p.darkT = 0; p.fade = 1;
+p.tadIn = 0; p.invulnT = 0; p.tadFold = 0; p.tadNoFoldT = 0; p.tadStartle = 0;
+p.tadFolds = 99;                    // 折返次数用尽 → 下一次触边必定离场
+p.tadAng = 0;                       // 朝右（+x）
+p.x = B.x + B.w - 1; p.y = B.y + B.h * 0.5; p.vx = 1; p.vy = 0;
+for (let i = 0; i < 40 && escapeN === 0; i++) p.update(dt, i * dt);
+const escapedOnce = escapeN;
+for (let i = 0; i < 40; i++) p.update(dt, 1 + i * dt);
+ok(escapedOnce === 1 && escapeN === 1, "一次离场只记一次漏击", `escape=${escapeN}`);
+// 冷却结束后从边缘重进
+let respawned = false, spawnX = 0, spawnY = 0;
+for (let i = 0; i < 200; i++) {
+  const beforeDark = p.darkT;
+  p.update(dt, 2 + i * dt);
+  if (beforeDark > 0 && p.darkT <= 0) { respawned = true; spawnX = p.x; spawnY = p.y; break; }
 }
-ok(reached7 && preysNow() === 7, "连续高命中 → 加到 7 只且实际生成 7 只", "count=" + G.session.tadCount + " alive=" + preysNow());
-let evalN = 0;
-while (G.session.tadCount > 1 && evalN < 30) {
-  G.session.hits = G.session.tadMark;    // 零命中
-  G.tadpoleTick(8);
-  evalN++;
-  if (G.session.tadCount <= 1) back1 = true;
-}
-ok(back1, "连续低命中 → 回落到 1 只", "count=" + G.session.tadCount);
-ok(preysNow() === 1, "场上实际只剩 1 只", String(preysNow()));
+const backOut = spawnX < B.x || spawnX > B.x + B.w || spawnY < B.y || spawnY > B.y + B.h;
+ok(respawned && backOut, "冷却后从画外边缘重新进场", `x=${spawnX.toFixed(0)}, y=${spawnY.toFixed(0)}`);
 
-/* ---- 边缘进场 ---- */
-const b = G.bounds();
-let edgeOk = 0;
-for (let i = 0; i < 12; i++) { p.relocate(true); p.update(dt, t); p.update(dt, t); p.update(dt, t);
-  const gaps = [p.x - b.x, (b.x + b.w) - p.x, p.y - b.y, (b.y + b.h) - p.y];
-  if (Math.min(...gaps) < 90) edgeOk++;
-}
-ok(edgeOk >= 11, "重生全部从边缘进场", edgeOk + "/12");
+/* ---------- 5. 阶段数量：1 → 2 → 3，上限 3 ---------- */
+G.session.tadCount = 1;
+G.session.stage = 1; const c1 = G.stageTargetCount();
+G.session.stage = 2; const c2 = G.stageTargetCount();
+G.session.stage = 3; const c3 = G.stageTargetCount();
+ok(c1 === 1 && c2 === 2 && c3 === 3, "同屏基线随阶段 1→2→3", `${c1}/${c2}/${c3}`);
+G.session.tadCount = 3; G.session.stage = 3; G.session.hits = 20; G.session.tadMark = 0; G.session.tadEval = 99;
+G.tadpoleTick(0.016);
+ok((G.session.tadCount || 0) <= 3, "上限封顶 3 只", String(G.session.tadCount));
+
+/* ---------- 6. 单帧开销 ---------- */
+p.tadSpawn();
+const t0 = process.hrtime.bigint();
+for (let i = 0; i < 20000; i++) p.update(dt, i * dt);
+const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+ok(ms / 20000 < 0.05, "单只单帧更新开销 <0.05ms", (ms / 20000).toFixed(4) + "ms");
 
 console.log(A.join("\n"));
-console.log("运行时状态分布:", JSON.stringify(Object.fromEntries(Object.entries(stat).map(([k, v]) => [k, +(v / 60 * 100).toFixed(0) + "%"]))));
+const bad = A.filter(l => l.startsWith("❌")).length;
+console.log(`\n${A.length - bad}/${A.length} 通过`);
+process.exit(bad ? 1 : 0);

@@ -424,6 +424,19 @@ module.exports = function (G) {
     if (hold) tone("sine", 1046, 0, 0.14, 0.14, 0.05);
   };
   /* 鱼群命中：清脆 pop + 上行三连 sparkle（配彩虹纸屑特效） */
+  /* 蝌蚪快跑（白纸墨影）：
+     命中 = 一声干脆的纸面「哒」+ 一点水泡上浮；折返截击再加一枚高音确认。
+     漏击 = 很轻的低频「噗」，只提示、不打断。 */
+  G.playTadpoleHit = (fold) => {
+    if (!G.config.sound) return;
+    tone("sine", fold ? 1080 : 860, fold ? 620 : 480, 0.06, fold ? 0.26 : 0.20);
+    tone("triangle", 210, 120, 0.075, 0.16);
+    if (fold) tone("sine", 1560, 1320, 0.09, 0.14, 0.04);
+  };
+  G.playTadpoleMiss = () => {
+    if (!G.config.sound) return;
+    tone("sine", 240, 150, 0.12, 0.10);
+  };
   G.playSchoolPop = () => {
     tone("sine", 760, 300, 0.1, 0.3);
     tone("triangle", 1560, 2100, 0.09, 0.14, 0.03);

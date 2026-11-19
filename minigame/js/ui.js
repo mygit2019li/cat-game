@@ -358,14 +358,14 @@ module.exports = function (G) {
   /* ================= 首页图片素材 =================
      3D 猫咪插画与 6 个猎物图标都从设计稿（assets/home-reference.png）裁切而来。
      加载失败时首页自动回退到矢量绘制，不影响可玩性。 */
-  const HOME_IMG = { tried: false, cat: null, icons: {} };
+  const HOME_IMG = { tried: false, cat: null, scene: null, icons: {} };
   const HOME_ICON_SRC = {
     fish: "assets/home/icon-fish.jpg", frog: "assets/home/icon-frog.jpg",
     mouse: "assets/home/icon-mouse.jpg", firefly: "assets/home/icon-firefly.jpg",
     butterfly: "assets/home/icon-butterfly.jpg", ladybug: "assets/home/icon-ladybug.jpg"
   };
-  /* 首页卡片 key → 素材 key（暗夜萤光用「萤火虫」，激光暗室用「瓢虫/昆虫乐园」） */
-  const HOME_ICON_KEY = { pool: "firefly", laser: "ladybug" };
+  /* 首页卡片 key → 素材 key（暗夜萤光用「萤火虫」；激光乐园不贴图，改走矢量红色激光点） */
+  const HOME_ICON_KEY = { pool: "firefly" };
   ui.initHomeImages = () => {
     if (HOME_IMG.tried) return;
     HOME_IMG.tried = true;
@@ -380,16 +380,55 @@ module.exports = function (G) {
       } catch (e) {}
     };
     load("assets/home/cat-hero.png", img => { HOME_IMG.cat = img; });
+    /* 首页「小猫看蝴蝶」场景的新背景图（自带猫与蝴蝶的整幅场景）。
+       加载失败时 HOME_IMG.scene 保持 null，绘制层会自动退回旧猫图 / 矢量猫，不影响可玩性。 */
+    load("assets/home/hero-scene.jpg", img => { HOME_IMG.scene = img; });
     Object.keys(HOME_ICON_SRC).forEach(k => load(HOME_ICON_SRC[k], img => { HOME_IMG.icons[k] = img; }));
   };
-  const homeImg = (key) => (key === "cat" ? HOME_IMG.cat : HOME_IMG.icons[key]) || null;
-  /* 猫图羽化：素材是不透明照片（自带薄荷白底），直贴暖米色页面会露出一圈矩形硬边。
-     首次用到时在离屏画布上把四条边的 alpha 渐隐并缓存，之后每帧直接贴这张图。
-     羽化宽度按素材像素给，左右不对称——右边留得窄一些，避免吃掉素材自带的蝴蝶。 */
-  const HERO_FEATHER = { left: 14, right: 30, top: 22, bottom: 30 };
-  let heroFaded = null, heroFadedSrc = null;
-  function featheredHero(img) {
-    if (heroFadedSrc === img && heroFaded) return heroFaded;
+  const homeImg = (key) => (key === "cat" ? HOME_IMG.cat
+    : key === "scene" ? HOME_IMG.scene : HOME_IMG.icons[key]) || null;
+  /* 首页「激光乐园」卡图标：一颗红色激光点。
+     三层结构（外柔光 / 橙红主体 / 白热核心）+ 轻微呼吸，浅底卡片上也看得出「在发光」。
+     外晕收在 1.6R：横屏卡高只有 70px，光晕再大就会溢到卡外/压到卡名。
+     上下浮动由调用方按 t 给 y 偏移，本函数只管画点。 */
+  function drawLaserDotIcon(c, x, y, r, t) {
+    const pulse = 1 + Math.sin(t * 3.4) * .08;      // 呼吸：命中光点的"灼热感"
+    const R = r * pulse;
+    let g = c.createRadialGradient(x, y, 0, x, y, R * 1.6);
+    g.addColorStop(0, "rgba(255,104,96,.44)");
+    g.addColorStop(.45, "rgba(233,48,42,.16)");
+    g.addColorStop(1, "rgba(214,26,26,0)");
+    c.fillStyle = g;
+    c.beginPath(); c.arc(x, y, R * 1.6, 0, Math.PI * 2); c.fill();
+
+    g = c.createRadialGradient(x - R * .2, y - R * .24, R * .05, x, y, R);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(.26, "#ffd9cd");
+    g.addColorStop(.56, "#ff5f4c");
+    g.addColorStop(.85, "#e62520");
+    g.addColorStop(1, "rgba(196,18,18,.94)");
+    c.fillStyle = g;
+    c.beginPath(); c.arc(x, y, R, 0, Math.PI * 2); c.fill();
+
+    c.fillStyle = "rgba(255,255,255,.88)";
+    c.beginPath(); c.ellipse(x - R * .30, y - R * .34, R * .20, R * .13, -.6, 0, Math.PI * 2); c.fill();
+  }
+
+  /* 猫图（assets/home/cat-hero.png，540×253）与其主体占位。
+     素材四周本来就是 alpha 渐隐的透明留白（左缘 14→210、上缘 37→190 渐变），
+     所以不需要再在离屏画布上二次羽化——再擦一遍只会把右上角的蝴蝶擦薄、并让照片发白发灰。
+     下面这组数字是从素材里量出来的「主体框」与「蝴蝶框」（像素）：
+     缩放只保证主体完整可见，四周留白允许溢出屏外，既不裁内容也不拉伸。 */
+  const HERO_BOX = { x: 61, y: 17, w: 418, h: 173 };
+  /* 首页「小猫看蝴蝶」场景图（assets/home/hero-scene.jpg，1400×787）。
+     蝴蝶在图里的归一化位置（连通域量出来的中心），cover 裁剪时以它为锚，保证不被裁到。 */
+  const HERO_SCENE = { fx: .693, fy: .197, feather: .07 };
+  /* 场景图柔边：整幅照片铺进 hero 容器后，四条边做 7% 的 alpha 渐隐，
+     照片才能和页面的暖砂底融在一起，而不是一块硬边贴图。
+     只在首次用到时算一遍离屏画布，之后每帧直接贴缓存。 */
+  let sceneSoft = null, sceneSoftSrc = null;
+  function featheredScene(img, edge) {
+    if (sceneSoftSrc === img && sceneSoft) return sceneSoft;
     try {
       const mk = () => {
         const cv = (typeof wx !== "undefined" && wx.createCanvas) ? wx.createCanvas() : document.createElement("canvas");
@@ -399,8 +438,7 @@ module.exports = function (G) {
       const photo = mk(), mask = mk();
       const pc = photo.getContext("2d"), mc = mask.getContext("2d");
       pc.drawImage(img, 0, 0);
-      /* 遮罩单独一张画布：先铺满不透明黑，再按四条边用 destination-out 擦出渐变。
-         不能直接在照片上用 destination-in 分四次画——该模式会把绘制区以外的像素也清空。 */
+      /* 遮罩单独一张画布：铺满不透明黑，再按四条边用 destination-out 擦出渐变 */
       mc.fillStyle = "#000"; mc.fillRect(0, 0, img.width, img.height);
       mc.globalCompositeOperation = "destination-out";
       const cut = (x, y, w, h, x0, y0, x1, y1) => {
@@ -408,17 +446,20 @@ module.exports = function (G) {
         g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
         mc.fillStyle = g; mc.fillRect(x, y, w, h);
       };
-      const W = img.width, H = img.height, FE = HERO_FEATHER;
-      cut(0, 0, FE.left, H, 0, 0, FE.left, 0);                 // 左：外缘全擦、内缘保留
-      cut(W - FE.right, 0, FE.right, H, W, 0, W - FE.right, 0); // 右
-      cut(0, 0, W, FE.top, 0, 0, 0, FE.top);                    // 上
-      cut(0, H - FE.bottom, W, FE.bottom, 0, H, 0, H - FE.bottom); // 下
+      const IW = img.width, IH = img.height;
+      const ex = Math.max(2, Math.round(IW * edge)), ey = Math.max(2, Math.round(IH * edge));
+      cut(0, 0, ex, IH, 0, 0, ex, 0);
+      cut(IW - ex, 0, ex, IH, IW, 0, IW - ex, 0);
+      cut(0, 0, IW, ey, 0, 0, 0, ey);
+      cut(0, IH - ey, IW, ey, 0, IH, 0, IH - ey);
       pc.globalCompositeOperation = "destination-in";
       pc.drawImage(mask, 0, 0);
-      heroFaded = photo; heroFadedSrc = img;
+      sceneSoft = photo; sceneSoftSrc = img;
       return photo;
     } catch (e) { return img; }
   }
+  const HERO_BFLY = { x0: 395, y0: 60, x1: 478, y1: 140 };
+
   /* 只画不填的圆角矩形路径（G.rr 内部会 fill，描边/裁剪要用这个） */
   function rrPath(x, y, w, h, r) {
     ctx.beginPath();
@@ -576,7 +617,7 @@ module.exports = function (G) {
     { key: "mouse",     name: "小鼠躲躲", desc: "打地鼠式两排洞口" },
     { key: "pool",      name: "萤火虫",   desc: "萤光小虫爬过石板地" },
     { key: "butterfly", name: "蝴蝶飞飞", desc: "花间穿梭，还会停花" },
-    { key: "laser",     name: "昆虫乐园", desc: "甩动与停留的红点" }
+    { key: "laser",     name: "激光乐园", desc: "红点甩动与停留" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
      中心小鱼往返游动(swimDrift 3.4s) + 摆尾 + 上升气泡 + 整体呼吸(breath 2.8s) */
@@ -730,6 +771,87 @@ module.exports = function (G) {
     btn(cx - R, cy - R, D, D, cb);
   };
 
+  /* 设计稿同款「开始玩耍」胶囊按钮（首页-green.png）：
+     青绿竖向渐变体 + 顶部内高光 + 柔和投影 + 左侧白色播放三角 + 右端淡爪印水印 + 慢速掠过的高光。
+     文字用常规字重，靠字号和留白撑层级（不加粗）。命中区仍是调用方给的矩形。 */
+  ui.drawStartPill = (x, y, w, h, label, cb) => {
+    const t = Date.now() / 1000;
+    const r = h / 2;
+    const cy = y + h / 2;
+
+    // 投影：向下偏移 + 大模糊，落在暖底上像"立"起来
+    ctx.save();
+    ctx.shadowColor = "rgba(26,74,58,.28)";
+    ctx.shadowBlur = Math.max(8, h * .38);
+    ctx.shadowOffsetY = Math.max(3, h * .17);
+    const body = ctx.createLinearGradient(0, y, 0, y + h);
+    body.addColorStop(0, "#7cc2a2"); body.addColorStop(.46, "#3d9479"); body.addColorStop(1, "#2a6d5b");
+    ctx.fillStyle = body;
+    rrPath(x, y, w, h, r); ctx.fill();
+    ctx.restore();
+
+    // 体面细节都裁进胶囊内
+    ctx.save();
+    rrPath(x + 1.5, y + 1.5, w - 3, h - 3, r - 1.5); ctx.clip();
+    // 顶部内高光
+    const hl = ctx.createLinearGradient(0, y, 0, y + h * .66);
+    hl.addColorStop(0, "rgba(255,255,255,.34)"); hl.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = hl; ctx.fillRect(x, y, w, h * .66);
+    // 慢速掠过的高光（4.4s 一次，避免整块按钮死板）
+    const sweep = ((t % 4.4) / 4.4) * 1.6 - .3;
+    if (sweep > -.2 && sweep < 1.2) {
+      const sx = x + w * sweep;
+      const sg = ctx.createLinearGradient(sx - h * .8, y, sx + h * .8, y + h);
+      sg.addColorStop(0, "rgba(255,255,255,0)");
+      sg.addColorStop(.5, "rgba(255,255,255,.13)");
+      sg.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = sg;
+      ctx.beginPath();
+      ctx.moveTo(sx - h * .5, y); ctx.lineTo(sx + h * .22, y);
+      ctx.lineTo(sx + h * .92, y + h); ctx.lineTo(sx + h * .2, y + h);
+      ctx.closePath(); ctx.fill();
+    }
+    // 右端淡爪印水印（两颗，一高一低，像是按钮上的压印）
+    const pawAt = (px, py, s, a) => {
+      ctx.save(); ctx.translate(px, py); ctx.scale(s, s);
+      ctx.globalAlpha = a; ctx.fillStyle = "#ffffff";
+      ctx.beginPath(); ctx.ellipse(0, 1.6, 3.4, 2.9, 0, 0, Math.PI * 2); ctx.fill();
+      for (const [ox, oy, rr] of [[-3.3, -2.6, 1.3], [0, -3.9, 1.35], [3.3, -2.6, 1.3]]) {
+        ctx.beginPath(); ctx.arc(ox, oy, rr, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.restore();
+    };
+    const pawS = h / 26;
+    pawAt(x + w - h * .62, y + h * .40, pawS, .22);
+    pawAt(x + w - h * .40, y + h * .62, pawS * .82, .16);
+    ctx.restore();
+
+    // 细描边：右上亮、左下暗，做出玻璃感
+    ctx.strokeStyle = "rgba(255,255,255,.40)"; ctx.lineWidth = 1.4;
+    rrPath(x + 1.4, y + 1.4, w - 2.8, h - 2.8, r - 1.4); ctx.stroke();
+
+    // 左侧播放三角
+    const tri = h * .40;
+    const triX = x + h * .70;
+    ctx.save();
+    ctx.shadowColor = "rgba(12,60,46,.28)"; ctx.shadowBlur = Math.max(2, h * .10); ctx.shadowOffsetY = 1;
+    ctx.fillStyle = "rgba(255,255,255,.97)";
+    ctx.beginPath();
+    ctx.moveTo(triX - tri * .34, cy - tri * .56);
+    ctx.lineTo(triX + tri * .62, cy);
+    ctx.lineTo(triX - tri * .34, cy + tri * .56);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // 文字：三角右侧的剩余空间居中，字号受按钮高度约束
+    const textX0 = triX + tri * .74;
+    const textW = Math.max(24, x + w - h * .46 - textX0);
+    const fs = fitFont(label, Math.min(h * .44, 21), textW, "normal");
+    text(label, textX0 + textW / 2, cy - .5, fs + "px sans-serif", "#ffffff");
+
+    btn(x, y, w, h, cb);
+  };
+
   ui.drawHome = () => {
     ui.initHomeImages();
     const { W, H, land, m, gap, safe, menu, S } = layout();
@@ -753,24 +875,35 @@ module.exports = function (G) {
     const k = land ? Math.max(.78, Math.min(1.12, Math.min(H / 431, W / 765))) : 1;
     const F = (n) => Math.max(9, Math.round(n * k));
 
-    // 日光房：柔和窗光、虚焦绿植与浅色地毯。
-    /* 首页猫图自带薄荷白底，贴图时已做四边羽化（featheredHero）；
-       整页底色仍走暖米色，别为了迁就素材把页面改成薄荷绿——纯薄荷绿底会把照片衬成米黄色块。 */
-    const bg = ctx.createLinearGradient(0, 0, W * 0.86, H);
-    bg.addColorStop(0, "#f5f0e6"); bg.addColorStop(.42, "#fff9f0"); bg.addColorStop(1, "#f3eee3");
+    /* 首页背景：暖阳房景（对齐设计稿「首页-green.png」的照片感柔焦底）。
+       分层顺序——暖砂渐变 → 左上窗光 → 右上冷反光 → 景深光斑 → 四角虚焦绿植 → 奶白软垫 → 边缘暗角。
+       全部矢量绘制、不新增图片素材；颜色按设计稿取样（顶 #f4e6dc / 底 #decdc1 / 右 #e4d6be / 左下绿植 #b6ad87）。 */
+    const bg = ctx.createLinearGradient(0, 0, W * .72, H);
+    bg.addColorStop(0, "#f8f4ed"); bg.addColorStop(.34, "#f0e4d4");
+    bg.addColorStop(.70, "#e6d5c0"); bg.addColorStop(1, "#dbc7b4");
     ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    // 柔和窗光：透明度压低，避免出现生硬的矩形色块
-    ctx.save(); ctx.globalAlpha = .18;
-    ctx.fillStyle = "#ffffff"; G.rr(ctx, W * .26, -H * .16, W * .46, H * .82, 40); ctx.fill();
-    ctx.fillStyle = "#e8dcc8"; G.rr(ctx, W * .33, -H * .10, W * .010, H * .72, 8); ctx.fill();
-    G.rr(ctx, W * .56, -H * .10, W * .010, H * .72, 8); ctx.fill();
-    ctx.restore();
+    /* 柔光圆盘：大半径 + 多段透明，边缘永远看不到硬圈（窗光、反光、光斑共用） */
+    const softDisc = (cx, cy, r, c0, c1) => {
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, c0); g.addColorStop(.58, c1); g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    };
+    softDisc(W * .30, -H * .18, Math.max(W, H) * .78, "rgba(255,253,247,.72)", "rgba(255,250,240,.16)");
+    softDisc(W * .93, -H * .22, Math.max(W, H) * .52, "rgba(224,237,242,.44)", "rgba(224,237,242,.10)");
+    // 景深光斑：照片感的关键，暖白小光点散在焦外
+    [[.12,.24,62,.09],[.21,.70,44,.07],[.40,.11,74,.06],[.55,.32,38,.05],
+     [.76,.72,66,.08],[.89,.26,50,.07],[.33,.87,82,.06],[.66,.56,36,.05],
+     [.05,.52,48,.06],[.47,.78,30,.04]].forEach(bk => {
+      const r = Math.min(W, H) * bk[2] / 100;
+      softDisc(W * bk[0], H * bk[1], r,
+        "rgba(255,249,236," + bk[3] + ")", "rgba(255,246,232," + (bk[3] * .34).toFixed(3) + ")");
+    });
     // 四角虚焦绿植（更大、更淡，模拟阳光房的景深）
     const foliage = (x, y, s, flip, rot0) => {
       ctx.save(); ctx.translate(x, y); ctx.scale(flip || 1, 1); ctx.rotate(rot0 || -.55);
-      ctx.shadowColor = "rgba(80,120,60,.10)"; ctx.shadowBlur = s * .18;
+      ctx.shadowColor = "rgba(94,116,58,.16)"; ctx.shadowBlur = s * .34;
       for (let layer = 0; layer < 2; layer++) {
-        ctx.fillStyle = layer ? "rgba(128,178,104,.10)" : "rgba(96,150,86,.14)";
+        ctx.fillStyle = layer ? "rgba(152,170,112,.10)" : "rgba(120,140,78,.16)";
         for (let i = 0; i < 7; i++) {
           ctx.save(); ctx.rotate((i - 3) * .26 + layer * .12);
           ctx.beginPath();
@@ -783,16 +916,24 @@ module.exports = function (G) {
     const fs = Math.min(W, H) * .42;
     foliage(6, H * .18, fs, 1, -.52); foliage(W - 6, H * .16, fs * .94, -1, .52);
     foliage(W * .02, H * 1.02, fs * .92, 1, -.9); foliage(W * .98, H * 1.04, fs, -1, .9);
-    // 奶白色软垫（参考图猫趴着的 cushion）
-    const rug = ctx.createLinearGradient(0, H * .70, 0, H);
-    rug.addColorStop(0, "rgba(255,252,246,.42)"); rug.addColorStop(1, "rgba(242,234,220,.90)");
-    ctx.fillStyle = rug; ctx.beginPath(); ctx.ellipse(W * .43, H * 1.03, W * .70, H * .32, 0, 0, Math.PI * 2); ctx.fill();
+    // 奶白色软垫（参考图猫趴着的 cushion）：上缘留一道受光的高光
+    const rug = ctx.createLinearGradient(0, H * .66, 0, H);
+    rug.addColorStop(0, "rgba(255,251,243,.58)"); rug.addColorStop(.55, "rgba(246,236,222,.86)");
+    rug.addColorStop(1, "rgba(236,222,205,.94)");
+    ctx.fillStyle = rug; ctx.beginPath(); ctx.ellipse(W * .43, H * 1.04, W * .74, H * .34, 0, 0, Math.PI * 2); ctx.fill();
+    // 边缘暗角：压住四周，让中间的光和白卡更"立"
+    const vg = ctx.createRadialGradient(W * .42, H * .46, Math.min(W, H) * .30, W * .42, H * .46, Math.max(W, H) * .82);
+    vg.addColorStop(0, "rgba(118,94,62,0)"); vg.addColorStop(1, "rgba(118,94,62,.16)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    // 顶部提亮：设计稿上缘是被窗光打亮的一面墙，品牌字压在上面也更清楚
+    const topScrim = ctx.createLinearGradient(0, 0, 0, H * .36);
+    topScrim.addColorStop(0, "rgba(255,252,246,.46)"); topScrim.addColorStop(1, "rgba(255,252,246,0)");
+    ctx.fillStyle = topScrim; ctx.fillRect(0, 0, W, H * .36);
 
-    // 固定在右上角的设置入口，离右边缘留一点呼吸空间。
+    // 设置入口固定在左上角；平板居中内容列时贴着内容列左侧，避免跑到屏幕最外缘。
     const gs = 36;
-    const gearRight = land ? 10 : 6;
-    const gx = (land && menu ? Math.min(edgeR - gs, menu.left - gs - 10) : edgeR - gs) - gearRight;
-    const gy = land && menu ? Math.max(safe.top + 8, menu.top + (menu.height - gs) / 2) : safe.top + 8;
+    const gx = Math.max(safe.left + 10, edgeL - gs - 12);
+    const gy = safe.top + 8;
     const bottomH = land ? 50 : 50, bottomY = H - safe.bottom - bottomH - 12;
     const modesTop = land ? safe.top + Math.max(50, availH * .22) : safe.top + 72;
     const modesBottom = land ? bottomY - Math.max(14, availH * .085) : Math.min(bottomY - 16, modesTop + availH * .49);
@@ -809,7 +950,8 @@ module.exports = function (G) {
 
     // Left brand and hero, all drawn natively so each part stays responsive and interactive.
     const heroCenterX = land ? (tablet ? (Math.max(-8, safe.left) + panelX - 16) * .5 : edgeL + availW * .245) : W / 2;
-    const brandX = land ? edgeL + 68 : W / 2;
+    /* 设置键移到左边后，品牌整体右移，给左上角留出 36px 键位与呼吸间距。 */
+    const brandX = land ? edgeL + 74 : edgeL + 78;
     // 设计稿基准字号：品牌 34 / 副标 15（竖屏 28 / 13），全部乘 k
     const brandFs = Math.min(F(land ? 34 : 28), availH * .13);
     const subFs   = Math.min(F(land ? 15 : 13), availH * .06);
@@ -837,17 +979,54 @@ module.exports = function (G) {
        按钮缩小后猫图不用再被无谓压短。 */
     const heroBottom = land ? Math.min(catY + 100 * catScale, bottomY - startH - 24)
       : Math.min(bottomY - startH - 12, modesBottom + 190) - 8;
-    if (catPic) {
-      // 横屏：左边贴屏；手机允许压到面板下面，平板收在面板左侧（否则蝴蝶会被面板切掉半只）
-      const boxL = land ? Math.max(-8, safe.left) : 8;
-      const boxR = land ? (tablet ? panelX - 16 : panelX + 26) : W - 8;
-      const boxW = Math.max(140, boxR - boxL);
-      const boxT = land ? brandY + brandFs * 1.75 : modesBottom + 6;
-      const boxH = Math.max(60, heroBottom - boxT);
-      const picK = Math.min(boxW / catPic.width, boxH / catPic.height);
+    const scenePic = homeImg("scene");
+    if (scenePic) {
+      /* 「小猫看蝴蝶」场景：新背景图按 cover 等比铺满 hero 容器（不拉伸、不留边），
+         蝴蝶在图中偏右上，裁剪锚点用它的归一化位置，任何容器比例下都完整留在画面内。
+         猫与蝴蝶都在图里，绘制顺序仍在品牌/面板/按钮/底栏之前 → 前景层级不变。
+         图片加载失败时 scenePic 为 null，自动落到下面的旧猫图 / 矢量猫兜底。 */
+      const sBoxL = land ? Math.max(-6, safe.left) : 6;
+      const sBoxR = land ? panelX - 12 : W - 6;
+      const sBoxW = Math.max(160, sBoxR - sBoxL);
+      const sBoxT = land ? brandY + brandFs * 1.45 : modesBottom + 2;
+      const sBoxH = Math.max(90, heroBottom - sBoxT);
+      const iw = scenePic.width, ih = scenePic.height;
+      const sc = Math.max(sBoxW / iw, sBoxH / ih);          // cover：两轴同一缩放比，绝不拉伸
+      const vw = Math.min(iw, sBoxW / sc), vh = Math.min(ih, sBoxH / sc);
+      let sx = HERO_SCENE.fx * iw - vw / 2;
+      let sy = HERO_SCENE.fy * ih - vh * .30;
+      sx = Math.max(0, Math.min(sx, iw - vw));
+      sy = Math.max(0, Math.min(sy, ih - vh));
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(featheredScene(scenePic, HERO_SCENE.feather), sx, sy, vw, vh, sBoxL, sBoxT, sBoxW, sBoxH);
+      ctx.restore();
+      G.__heroScene = { x: sBoxL, y: sBoxT, w: sBoxW, h: sBoxH, scale: sc, sx: sx, sy: sy, vw: vw, vh: vh };
+      G.__heroButterfly = null;
+    } else if (catPic) {
+      /* 兜底①：旧猫图。按「主体框」等比缩放：主体(猫+蝴蝶)完整装进可用区，四周透明留白溢到框外，
+         这样整体比原来大 50%（横屏 picK 0.56→0.85），又不会裁掉任何内容、也不变形。
+         水平以主体中心对齐；右侧永远停在选择面板左边（面板后画，绝不能让白卡压住蝴蝶）。 */
+      const boxL = land ? Math.max(-6, safe.left) : 6;
+      const boxR = land ? panelX - 12 : W - 6;
+      const boxW = Math.max(160, boxR - boxL);
+      const boxT = land ? brandY + brandFs * 1.45 : modesBottom + 2;
+      const boxH = Math.max(90, heroBottom - boxT);
+      const picK = Math.min((boxW - 10) / HERO_BOX.w, boxH / HERO_BOX.h);
       const dw = catPic.width * picK, dh = catPic.height * picK;
-      // 贴羽化后的版本，四周渐变到透明，不再有矩形接缝
-      ctx.drawImage(featheredHero(catPic), boxL, heroBottom - dh - catLift, dw, dh);
+      const dx = boxL + boxW / 2 - (HERO_BOX.x + HERO_BOX.w / 2) * picK;
+      const dy = heroBottom - (HERO_BOX.y + HERO_BOX.h) * picK - catLift;
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;      // 放大后保持清晰，避免逐帧抖动
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(catPic, dx, dy, dw, dh);
+      ctx.restore();
+      // 蝴蝶安全区自检用（自动化截图脚本读它，不参与绘制）
+      G.__heroButterfly = {
+        x0: dx + HERO_BFLY.x0 * picK, y0: dy + HERO_BFLY.y0 * picK,
+        x1: dx + HERO_BFLY.x1 * picK, y1: dy + HERO_BFLY.y1 * picK, k: picK
+      };
     } else {
     ctx.save(); ctx.translate(catX, catY - catLift);
     // soft shadow and body
@@ -946,28 +1125,25 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(gx + gs / 2, gy + gs / 2, gs / 2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     drawVecIcon("gear", gx + gs / 2, gy + gs / 2, 18, C.ink2); btn(gx, gy, gs, gs, () => G.openSettings());
 
-    if (land) {
-      pawMarkAt(edgeL + 38, brandY, F(34), "#2fb398");
-      text("逗猫乐园", brandX, brandY - 3, fitFont("逗猫乐园", brandFs, availW * .34, "normal") + "px sans-serif", C.ink, "left");
-      text("让猫咪，快乐每一天", brandX + 2, subY, fitFont("让猫咪，快乐每一天", subFs, availW * .30, "normal") + "px sans-serif", C.ink2, "left");
-    } else {
-      // 竖屏品牌左对齐，避开右上角设置按钮
-      pawMarkAt(edgeL + 18, brandY, F(26), "#2fb398");
-      text("逗猫乐园", edgeL + 44, brandY - 4, fitFont("逗猫乐园", brandFs, availW - 70, "normal") + "px sans-serif", C.ink, "left");
-      text("让猫咪，快乐每一天", edgeL + 44, subY, fitFont("让猫咪，快乐每一天", subFs, availW - 70, "normal") + "px sans-serif", C.ink2, "left");
-    }
+    // 品牌与左上角设置键同排：爪印在文字左侧，整体按设置键宽度顺移。
+    pawMarkAt(brandX - 30, brandY, F(land ? 34 : 26), "#2fb398");
+    text("逗猫乐园", brandX, brandY - (land ? 3 : 4),
+      fitFont("逗猫乐园", brandFs, land ? availW * .34 : availW - 96, "normal") + "px sans-serif", C.ink, "left");
+    text("让猫咪，快乐每一天", brandX + 2, subY,
+      fitFont("让猫咪，快乐每一天", subFs, land ? availW * .30 : availW - 96, "normal") + "px sans-serif", C.ink2, "left");
 
     // Mode selector panel and six responsive tiles.
     raisedCard(panelX, panelY, panelW, panelH, 24, {
-      top: "#ffffff", bottom: "#f4fbf5", line: "rgba(21,154,140,.22)", lineW: 1.4
+      top: "#ffffff", bottom: "#fdf9f2", line: "rgba(158,136,108,.20)", lineW: 1.4
     });
-    pawMarkAt(panelX + 26, panelY + headH / 2, F(20), "#159a8c");
+    pawMarkAt(panelX + 26, panelY + headH / 2, F(20), "#2fb18c");
     text("选择玩法", panelX + 47, panelY + headH / 2,
       Math.min(F(18), headH * .48) + "px sans-serif", C.ink, "left");
     MODES.forEach((item, i) => {
       const r = Math.floor(i / cols), c = i % cols;
       const x = panelX + pad + c * (cw + gridGap), y = gridY + r * (ch + gridGap);
-      const sel = G.config.targetType === item.key;
+      /* 蝌蚪属于青蛙卡：targetType 停在 tadpole 时，首页仍要高亮"青蛙蹦蹦"这张卡。 */
+      const sel = G.config.targetType === item.key || (item.key === "frog" && G.config.targetType === "tadpole");
       const isPressed = ui.pressedBtn && ui.pressedBtn.x === x && ui.pressedBtn.y === y &&
         ui.pressedBtn.w === cw && ui.pressedBtn.h === ch;
       // 按下反馈：整体微缩 + 略淡，松手后恢复
@@ -980,9 +1156,9 @@ module.exports = function (G) {
       }
       // 轻薄线性玩法卡：细描边 + 极淡渐变；选中态只靠青绿描边、淡青绿底与文字色区分
       raisedCard(x, y, cw, ch, 18, sel ? {
-        top: "#ffffff", bottom: "#f0faf4", line: C.teal, lineW: 2.2
+        top: "#ffffff", bottom: "#f2faf5", line: "#2fb18c", lineW: 2.2
       } : {
-        top: "#ffffff", bottom: "#fbfdf9", line: "rgba(21,154,140,.24)"
+        top: "#ffffff", bottom: "#fdfaf4", line: "rgba(158,136,108,.22)"
       });
       /* 兼容性关键：卡片内按高度分区——上部 60% 给图标，下部留给名称。
          旧版图标固定占 70% 卡高、名称固定 y=ch-12，矮横屏（ch≈65）两者直接叠在一起；
@@ -1008,28 +1184,53 @@ module.exports = function (G) {
         ctx.restore();
       } else {
         ctx.save(); ctx.translate(x + cw / 2, iconCY + (item.key === "butterfly" ? -4 : 0));
-        ctx.shadowColor = "rgba(150,120,70,.16)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
-        G.draw.icon(ctx, item.key === "laser" ? "ladybug" : item.key, 0, bobY, iconS);
+        if (item.key === "laser") {
+          /* 激光乐园：矢量红色激光点。
+             尺寸按「卡高图标带」与「卡宽」双重收敛（比其它图标小一档，红点实心更"重"，同尺寸会显得过大）；
+             浮动直接复用上面的 bobY，与其它卡片同一套幅度(±1.2)与频率(1.4)，整体节奏统一。 */
+          const dotR = Math.max(5, Math.min(iconH * .16, cw * .09));
+          drawLaserDotIcon(ctx, 0, bobY, dotR, t);
+        } else {
+          ctx.shadowColor = "rgba(150,120,70,.16)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+          G.draw.icon(ctx, item.key, 0, bobY, iconS);
+        }
         ctx.restore();
       }
       // 手机只留名称；平板卡片更高，补一行 desc 说明玩法差异
-      text(item.name, x + cw / 2, nameY, nameFs + "px sans-serif", sel ? "#0d8571" : C.ink);
+      text(item.name, x + cw / 2, nameY, nameFs + "px sans-serif", sel ? "#0f8064" : "#243430");
       if (tablet) {
         const descFs = fitFont(item.desc, Math.min(F(11), ch * .12), cw - 14, "normal");
         text(item.desc, x + cw / 2, y + ch * .87, descFs + "px sans-serif",
-          sel ? "rgba(13,133,113,.76)" : "rgba(84,104,99,.66)");
+          sel ? "rgba(15,128,100,.72)" : "rgba(96,104,96,.62)");
+      }
+      // 选中态角标：翠绿圆 + 白色对勾（设计稿里卡右上角的勾），卡片太小时不画，免得挤掉图标
+      if (sel && cw >= 92) {
+        const br = Math.max(7, Math.min(11, cw * .085));
+        const bx = x + cw - br - 5, by = y + br + 5;
+        ctx.save();
+        ctx.fillStyle = "#2fb18c";
+        ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(bx, by, br - .9, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(1.6, br * .30);
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.beginPath();
+        ctx.moveTo(bx - br * .38, by + br * .04);
+        ctx.lineTo(bx - br * .08, by + br * .34);
+        ctx.lineTo(bx + br * .42, by - br * .32);
+        ctx.stroke();
+        ctx.restore();
       }
       if (isPressed) ctx.restore();
       btn(x, y, cw, ch, () => { if (G.config.targetType !== item.key) G.track("mode_pick", { mode: item.key }); G.config.targetType = item.key; G.saveConfig(); G.playTick(); });
     });
 
-    // 开始玩耍：圆形青绿球 + 金橘小鱼左右游动（复用 drawStartOrb：端点翻面/摆尾/吐泡/呼吸）。
-    // 直径按可用空间自适应；圆心沿用原药丸中心并设底部安全帽，保证不压底栏。
+    /* 开始玩耍：设计稿同款「青绿胶囊按钮」——左侧白色播放三角 + 白色文字 + 右端淡爪印水印。
+       仍是胶囊形状的实心按钮（不是圆形球），高度沿用 startH，宽度沿用 startW，命中区不变。 */
     const startY = land ? heroBottom + 14 : Math.min(bottomY - startH - 14, modesBottom + 190);
-    const orbD = land ? Math.min(availH * .22, 92) : Math.min(availW * .32, 122);
-    const orbR = orbD / 2;
-    const orbCY = Math.min(startY + startH / 2, bottomY - orbR - 8);
-    ui.drawStartOrb(heroCenterX, orbCY, orbD, "开始玩耍", () => G.requestStart());
+    const pillCY = Math.min(startY + startH / 2, bottomY - startH / 2 - 8);
+    ui.drawStartPill(heroCenterX - startW / 2, pillCY - startH / 2, startW, startH,
+      "开始玩耍", () => G.requestStart());
 
     // Four familiar quick links in the reference's floating bottom bar.
     const rowBtns = [
@@ -1039,18 +1240,23 @@ module.exports = function (G) {
       { label: "玩耍记录", icon: "chart", cb: () => G.openModal("records") }
     ];
     const rowX = edgeL + (land ? availW * .11 : 0), rowW = land ? availW * .78 : availW;
-    raisedCard(rowX, bottomY, rowW, bottomH, Math.min(22, bottomH * .44), {
-      top: "#ffffff", bottom: "#f4fbf5", line: "rgba(21,154,140,.22)"
-    });
+    /* 底栏：落在照片底上的半透明白胶囊（带柔和投影，不用描边青绿） */
+    ctx.save();
+    ctx.shadowColor = "rgba(92,74,50,.20)"; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4;
+    ctx.fillStyle = "rgba(255,255,255,.93)";
+    G.rr(ctx, rowX, bottomY, rowW, bottomH, Math.min(22, bottomH * .44)); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = "rgba(255,255,255,.78)"; ctx.lineWidth = 1.2;
+    rrPath(rowX + .6, bottomY + .6, rowW - 1.2, bottomH - 1.2, Math.min(22, bottomH * .44)); ctx.stroke();
     const cellW = rowW / rowBtns.length;
-    const homeIconColor = { cat: "#e8944a", bowl: "#4fcba4", heart: "#ff6b6b", chart: "#5b9bd5" };
+    const homeIconColor = { cat: "#2a6f63", bowl: "#2a6f63", heart: "#2a6f63", chart: "#2a6f63" };
     rowBtns.forEach((item, i) => {
       const x = rowX + i * cellW;
-      if (i > 0) { ctx.strokeStyle = "rgba(32,84,70,.20)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, bottomY + 12); ctx.lineTo(x, bottomY + bottomH - 12); ctx.stroke(); }
+      if (i > 0) { ctx.strokeStyle = "rgba(122,108,88,.20)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, bottomY + 12); ctx.lineTo(x, bottomY + bottomH - 12); ctx.stroke(); }
       const compact = cellW < 116;
       drawVecIcon(item.icon, x + cellW * (compact ? .2 : .27), bottomY + bottomH / 2, F(compact ? 20 : 24), homeIconColor[item.icon] || C.ink2);
       const cellFs = fitFont(item.label, Math.min(F(compact ? 12 : 14), bottomH * .34), cellW * .62, "normal");
-      text(item.label, x + cellW * (compact ? .68 : .62), bottomY + bottomH / 2, cellFs + "px sans-serif", C.ink2);
+      text(item.label, x + cellW * (compact ? .68 : .62), bottomY + bottomH / 2, cellFs + "px sans-serif", "#2b3230");
       btn(x, bottomY, cellW, bottomH, item.cb);
     });
   };
@@ -1069,7 +1275,155 @@ module.exports = function (G) {
   function drawBgPreview(c, key, x, y, w, h) {
     c.save();
     G.rr(c, x, y, w, h, 12); c.clip();
-    if (key === "swarm") {
+    if (key === "ff-walk" || key === "ff-dash") {
+      /* 萤火虫二级卡：暗夜石板 + 会呼吸的萤光小虫；急爬卡多两道尾迹。 */
+      const dash = key === "ff-dash";
+      const sg = c.createLinearGradient(0, y, 0, y + h);
+      sg.addColorStop(0, "#3b2a19"); sg.addColorStop(.55, "#24170e"); sg.addColorStop(1, "#160c07");
+      c.fillStyle = sg; c.fillRect(x, y, w, h);
+      const cell = Math.max(24, w / 8);
+      c.strokeStyle = "rgba(8,3,1,.45)"; c.lineWidth = 1.3;
+      for (let gx = x; gx <= x + w; gx += cell) { c.beginPath(); c.moveTo(gx, y); c.lineTo(gx, y + h); c.stroke(); }
+      for (let gy = y; gy <= y + h; gy += cell) { c.beginPath(); c.moveTo(x, gy); c.lineTo(x + w, gy); c.stroke(); }
+      const cx0 = x + w * .5, cy0 = y + h * .48, s0 = Math.min(w, h) / 108;
+      c.save(); c.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 9; i++) {
+        const px = x + w * (.1 + ((i * 31) % 82) / 100), py = y + h * (.12 + ((i * 47) % 76) / 100);
+        c.fillStyle = "rgba(214,255,172,.48)";
+        c.beginPath(); c.arc(px, py, Math.max(1, w / 300) * (i % 3 ? 1 : 1.5), 0, Math.PI * 2); c.fill();
+      }
+      c.restore();
+      if (dash) {
+        c.strokeStyle = "rgba(226,255,152,.45)"; c.lineWidth = Math.max(2, w / 110); c.lineCap = "round";
+        for (let i = 0; i < 3; i++) {
+          const yy = y + h * (.36 + i * .14);
+          c.beginPath(); c.moveTo(x + w * .16, yy); c.quadraticCurveTo(x + w * .32, yy - h * .06, x + w * .39, yy); c.stroke();
+        }
+      }
+      G.draw.icon(c, "pool", cx0, cy0, s0);
+    } else if (key === "bf-garden" || key === "bf-white") {
+      /* 蝴蝶二级卡：花园彩蝶 / 素白蝴蝶，直接复用游戏内蝴蝶绘制。 */
+      const white = key === "bf-white";
+      const g = c.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, white ? "#dff2f4" : "#bfe3f5");
+      g.addColorStop(.62, white ? "#eef7e6" : "#e8f4d8");
+      g.addColorStop(1, "#9ec878");
+      c.fillStyle = g; c.fillRect(x, y, w, h);
+      const s0 = Math.min(w, h) / 142;
+      for (let i = 0; i < 8; i++) {
+        const fx = x + w * (.09 + ((i * 29) % 86) / 100), fy = y + h * (.68 + ((i * 37) % 26) / 100);
+        c.fillStyle = ["#f7d3e0", "#ffe6a3", "#d9c5f2", "#ffffff"][i % 4];
+        for (let k = 0; k < 5; k++) {
+          const a = k / 5 * Math.PI * 2;
+          c.beginPath(); c.ellipse(fx + Math.cos(a) * w * .025, fy + Math.sin(a) * h * .025,
+            w * .022, h * .028, a, 0, Math.PI * 2); c.fill();
+        }
+        c.fillStyle = "#f6c85f"; c.beginPath(); c.arc(fx, fy, Math.max(1.4, w / 160), 0, Math.PI * 2); c.fill();
+      }
+      c.save(); c.translate(x + w * .5, y + h * .42); c.scale(s0, s0); c.translate(-60, -56);
+      const variants = G.BFLY_VARIANTS || [];
+      const fake = { state: "GLIDE", phase: .6,
+        bflyVar: white ? (variants[0] || { key: "cabbage", fore: "#eeeade", fore2: "#fafaf2", hind: "#dcd9c8", hind2: "#f0eee2", body: "#6a675a" })
+                       : (variants[variants.length - 1] || variants[0]) };
+      G.draw.butterfly(c, fake, .6);
+      c.restore();
+    } else if (key === "lz-classic" || key === "lz-swift") {
+      const swift = key === "lz-swift";
+      const g = c.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, "#17181a"); g.addColorStop(.62, "#23232a"); g.addColorStop(1, "#0f1013");
+      c.fillStyle = g; c.fillRect(x, y, w, h);
+      c.fillStyle = "rgba(90,66,46,.26)"; c.fillRect(x, y + h * .68, w, h * .32);
+      const cx0 = x + w * .5, cy0 = y + h * .46;
+      if (swift) {
+        c.save(); c.strokeStyle = "rgba(255,90,90,.5)"; c.lineWidth = Math.max(2, w / 120); c.lineCap = "round";
+        for (let i = 0; i < 4; i++) {
+          const yy = y + h * (.26 + i * .15);
+          c.beginPath(); c.moveTo(x + w * .12, yy); c.lineTo(x + w * .43, yy - h * .04); c.stroke();
+        }
+        c.restore();
+      }
+      G.draw.icon(c, "laser", cx0, cy0, Math.min(w, h) / 78);
+    } else if (key === "tadpole" || key === "paper") {
+      /* 白纸墨影：纯白卡面 + 一条折返轨迹 + 黑色剪影。
+         轨迹用虚线画，折点打淡环并标 +2，一屏说清「触边折返 / 折返时更好拍」。 */
+      c.fillStyle = "#ffffff"; c.fillRect(x, y, w, h);
+      const pts = [
+        [x + w * .04, y + h * .70], [x + w * .36, y + h * .30],
+        [x + w * .68, y + h * .62], [x + w * .97, y + h * .34]
+      ];
+      c.save();
+      c.strokeStyle = "rgba(16,18,22,.20)";
+      c.lineWidth = Math.max(1, w / 230);
+      c.setLineDash([Math.max(3, w * .035), Math.max(3, w * .03)]);
+      c.beginPath(); c.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) c.lineTo(pts[i][0], pts[i][1]);
+      c.stroke();
+      c.restore();
+      // 折返点：淡灰环 + 极小的 +2
+      [pts[1], pts[2]].forEach((pt, i) => {
+        c.strokeStyle = "rgba(16,18,22,.26)"; c.lineWidth = Math.max(1, w / 260);
+        c.beginPath(); c.arc(pt[0], pt[1], Math.max(4, w * .036), 0, Math.PI * 2); c.stroke();
+        if (i === 1) {
+          c.fillStyle = "rgba(16,18,22,.55)";
+          c.font = Math.max(7, Math.round(h * .1)) + "px sans-serif";
+          c.textAlign = "center"; c.textBaseline = "middle";
+          c.fillText("+2", pt[0], pt[1] - Math.max(10, h * .13));
+          c.textAlign = "left"; c.textBaseline = "alphabetic";
+        }
+      });
+      // 当前造型的大图预览：换造型时这张卡立即跟着变，是样式选择的主反馈
+      G.draw.tadpolePreview(c, (G.config && G.config.tadStyle) || "ink",
+        x + w * .5, y + h * .48, Math.min(w * .74, h * .86), 0.8);
+      // 右下角一枚小墨点，补足"墨"的语义
+      c.fillStyle = "rgba(16,18,22,.20)";
+      c.beginPath(); c.arc(x + w * .86, y + h * .80, Math.max(2, w * .02), 0, Math.PI * 2); c.fill();
+    } else if (key === "frog" || key === "lotus" || key === "dusk" || key === "pond") {
+      /* 青蛙玩法组与荷塘卡：只画荷塘，不复用任何老鼠布景。 */
+      const dusk = key === "dusk";
+      const frogCard = key === "frog" || key === "pond";
+      const wg = c.createLinearGradient(0, y, 0, y + h);
+      if (dusk) { wg.addColorStop(0, "#101b3a"); wg.addColorStop(.52, "#1d2d55"); wg.addColorStop(1, "#0a1226"); }
+      else if (frogCard) { wg.addColorStop(0, "#1c5860"); wg.addColorStop(.5, "#206e6a"); wg.addColorStop(1, "#0b313b"); }
+      else { wg.addColorStop(0, "#2fa7ab"); wg.addColorStop(.5, "#33b5ab"); wg.addColorStop(1, "#156473"); }
+      c.fillStyle = wg; c.fillRect(x, y, w, h);
+      // 晨光光束 / 暮色高光
+      if (!dusk) {
+        [[.16, .10, .30], [.38, .12, .26], [.62, .10, .30], [.83, .09, .22]].forEach(bp => {
+          const lg = c.createLinearGradient(0, y, 0, y + h);
+          lg.addColorStop(0, "rgba(220,255,250,.19)"); lg.addColorStop(1, "rgba(220,255,250,0)");
+          c.fillStyle = lg;
+          c.beginPath();
+          c.moveTo(x + w * bp[0], y); c.lineTo(x + w * (bp[0] + bp[1]), y);
+          c.lineTo(x + w * (bp[0] + bp[1] + bp[2]), y + h); c.lineTo(x + w * (bp[0] + bp[2] * .3), y + h);
+          c.closePath(); c.fill();
+        });
+      }
+      // 藕叶 / 荷叶
+      const pad = (px, py, pr) => {
+        c.fillStyle = dusk ? "rgba(70,110,90,.45)" : (frogCard ? "rgba(35,112,72,.72)" : "rgba(54,142,92,.5)");
+        c.beginPath(); c.ellipse(px, py, pr, pr * .82, 0, 0, Math.PI * 2); c.fill();
+        c.strokeStyle = "rgba(220,245,210,.28)"; c.lineWidth = Math.max(1, w / 240);
+        c.beginPath(); c.moveTo(px, py);
+        for (let i = 0; i < 6; i++) {
+          const a = i / 6 * Math.PI * 2 + .3;
+          c.lineTo(px + Math.cos(a) * pr * .88, py + Math.sin(a) * pr * .7);
+        }
+        c.stroke();
+      };
+      pad(x + w * .20, y + h * .27, w * .13);
+      pad(x + w * .82, y + h * .72, w * .16);
+      pad(x + w * .55, y + h * .86, w * .10);
+      // 猎物：青蛙卡用青蛙，其余用水中蝌蚪
+      const ic = Math.min(w, h) / 148;
+      if (frogCard) G.draw.icon(c, "frog", x + w * .5, y + h * .47, ic);
+      else G.draw.icon(c, "tadpole", x + w * .5 - 58 * ic, y + h * .45 - 60 * ic, ic);
+      // 浮尘 / 萤光点
+      for (let i = 0; i < 9; i++) {
+        const px = x + w * (.08 + ((i * 37) % 90) / 100), py = y + h * (.14 + ((i * 53) % 72) / 100);
+        c.fillStyle = dusk ? "rgba(214,255,158,.75)" : "rgba(235,255,230,.62)";
+        c.beginPath(); c.arc(px, py, Math.max(1, w / 320) * (i % 3 ? 1 : 1.6), 0, Math.PI * 2); c.fill();
+      }
+    } else if (key === "swarm") {
       // 群鼠乱窜：深色斑驳地板 + 3 只俯视小灰鼠（大粉耳/粉尾）
       const sg = c.createLinearGradient(0, y, 0, y + h);
       sg.addColorStop(0, "#28312a"); sg.addColorStop(1, "#141a15");
@@ -1248,7 +1602,7 @@ module.exports = function (G) {
       // 真实的泳池金鱼（游戏内 POOL_FISH_SPECIES 造型）
       const spG = (G.POOL_FISH_SPECIES || [])[0];
       if (spG) drawRealFish(c, spG, spG.variants[0], x + w * 0.5, y + h * 0.46, 0.62, 0.6);
-    } else {
+    } else if (key === "room" || key === "plaid") {
       // 室内房间：墙 + 窗体 + 木地板 + 一排老鼠洞 + 一只探头的鼠（与游戏内布局一致）
       c.fillStyle = "#554b40"; c.fillRect(x, y, w, h * 0.40);
       c.fillStyle = "#7a6a58"; c.fillRect(x, y + h * 0.40, w, h * 0.60);
@@ -1283,6 +1637,11 @@ module.exports = function (G) {
         G.draw.mouse(c, { state: "peek", phase: 0.7, mouseVar: G.MOUSE_VARIANTS[0] }, 1.2);
         c.restore();
       }
+    } else {
+      // 兜底：未知 key 用中性水色，不能误画成老鼠房间。
+      const bg2 = c.createLinearGradient(0, y, 0, y + h);
+      bg2.addColorStop(0, "#dff3ec"); bg2.addColorStop(1, "#b8ddd2");
+      c.fillStyle = bg2; c.fillRect(x, y, w, h);
     }
     c.restore();
   }
@@ -1294,7 +1653,7 @@ module.exports = function (G) {
      只把绘制层换掉：绘制副本循环取模，逻辑 idx / 指示点不循环，保持跨局记忆正确。 */
   const PLAY_TITLE = {
     fish: "小鱼游玩", frog: "青蛙跳跳", mouse: "小鼠躲躲", pool: "萤火奇遇",
-    butterfly: "蝴蝶飞舞", laser: "昆虫乐园", tadpole: "蝌蚪快跑"
+    butterfly: "蝴蝶飞舞", laser: "激光乐园", tadpole: "蝌蚪快跑"
   };
   /* 底部设置面板的文案必须跟着当前玩法走：不能玩老鼠还写「小鱼数量 / 水声陪伴」。
      prey=猎物名 / unit=量词 / amb=环境音名；进场景选择页的只有 fish / mouse / tadpole，
@@ -1350,7 +1709,8 @@ module.exports = function (G) {
     const { W, H, land, safe, menu } = layout();
     const P = G.bgPick;
     if (!P) return;
-    const list = G.bgsFor(G.config.targetType);
+    const group = (P && P.group && G.MODE_GROUPS) ? G.MODE_GROUPS[P.group] : null;
+    const list = group ? group.cards : G.bgsFor(G.config.targetType);
     const n = list.length;
     if (!n) return;
     const visIdx = P.visIdx == null ? P.idx : P.visIdx;
@@ -1372,12 +1732,14 @@ module.exports = function (G) {
     const backW = backPill(edgeL, top, navS, { color: C.ink, key: "bgpick-top-back", cb: () => G.closeBgPick() });
     const titleFs = land ? F(30) : F(26), subFs = F(13);
     const tx = edgeL + backW + F(16), ty = top + navS * .30;
-    const playTitle = PLAY_TITLE[G.config.targetType] || "逗猫乐园";
+    const playTitle = group ? group.title : (PLAY_TITLE[G.config.targetType] || "逗猫乐园");
     const realTitleFs = fitFont(playTitle, titleFs, W * .34, "normal");
     text(playTitle, tx, ty, realTitleFs + "px sans-serif", C.ink, "left");
-    text("挑一个世界，让好奇心出发", tx + 1, ty + realTitleFs * .52 + subFs * .52 + F(3),
+    text(group ? group.sub : "挑一个世界，让好奇心出发",
+      tx + 1, ty + realTitleFs * .52 + subFs * .52 + F(3),
       subFs + "px sans-serif", C.ink2, "left");
-    const stepTxt = "01 选猎物  /  02 选场景", stepFs = land ? F(12) : F(10);
+    const stepTxt = group ? group.step : "01 选猎物  /  02 选场景";
+    const stepFs = land ? F(12) : F(10);
     ctx.font = stepFs + "px sans-serif";
     const stepW = ctx.measureText(stepTxt).width + F(28), stepH = F(30);
     // 避开微信原生胶囊（devtools 的「···|◎」会盖在右上）：胶囊右缘不超过 menu.left
@@ -1499,16 +1861,18 @@ module.exports = function (G) {
     });
     ctx.restore();
 
-    /* ---- 指示点：可点跳卡 ---- */
-    list.forEach((b, i) => {
-      const dx = cx0 + (i - (n - 1) / 2) * dsp;
-      ctx.fillStyle = "rgba(90,140,118,.32)";
-      ctx.beginPath(); ctx.arc(dx, dotY, dotR, 0, Math.PI * 2); ctx.fill();
-      btn(dx - F(16), dotY - F(16), F(32), F(32), () => G.bgPickJump(i));
-    });
-    const dotPos = ((visIdx - off / step) % n + n) % n;
-    ctx.fillStyle = "#12a489";
-    G.rr(ctx, cx0 + (dotPos - (n - 1) / 2) * dsp - F(8), dotY - F(4), F(16), F(8), F(4)); ctx.fill();
+    /* ---- 指示点：只有多张卡时才需要；单卡模式不画点、不注册跳卡热区 ---- */
+    if (n > 1) {
+      list.forEach((b, i) => {
+        const dx = cx0 + (i - (n - 1) / 2) * dsp;
+        ctx.fillStyle = "rgba(90,140,118,.32)";
+        ctx.beginPath(); ctx.arc(dx, dotY, dotR, 0, Math.PI * 2); ctx.fill();
+        btn(dx - F(16), dotY - F(16), F(32), F(32), () => G.bgPickJump(i));
+      });
+      const dotPos = ((visIdx - off / step) % n + n) % n;
+      ctx.fillStyle = "#12a489";
+      G.rr(ctx, cx0 + (dotPos - (n - 1) / 2) * dsp - F(8), dotY - F(4), F(16), F(8), F(4)); ctx.fill();
+    }
 
     /* ---- 底部设置面板：速度 / 数量 / 水声 + 开始游戏 ---- */
     raisedCard(edgeL, panelY, panelW, panelH, F(20), {
@@ -1539,27 +1903,68 @@ module.exports = function (G) {
       btn(ox, sy, sw, sh, () => { G.config.difficulty = sp.v; G.saveConfig(); G.playTick(); });
     });
 
-    // 猎物数量（− / +，1~7）：标签跟玩法走（小鱼/小鼠/蝌蚪…）
-    text(term.prey + "数量", colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
+    // 猎物数量：部分玩法按阶段/命中能力自动调节，显示固定说明而不是无效的调节键。
+    // 可增减的玩法各自读数量键（默认 preyCount；萤火虫走 ffCount）。
+    const countKey = (group && group.countKey) || "preyCount";
+    const countNote = (group && group.count === "fixed") ? "固定 1 只"
+      : ((group && group.count === "auto") || G.config.targetType === "tadpole") ? "自动 1–3 只" : null;
+    text(countNote ? "猎物数量" : term.prey + "数量", colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const os = F(24), oy = settingsTop + F(24);
-    const minusX = colX[1] + F(4), plusX = colX[1] + colW - os - F(6);
-    [[minusX, -1], [plusX, 1]].forEach(pb => {
-      ctx.fillStyle = "#ffffff";
-      G.rr(ctx, pb[0], oy, os, os, F(7)); ctx.fill();
-      ctx.fillStyle = "transparent"; ctx.strokeStyle = "rgba(21,154,140,.28)"; ctx.lineWidth = 1;
-      rrPath(pb[0] + .5, oy + .5, os - 1, os - 1, F(7)); ctx.stroke();
-      ctx.strokeStyle = C.ink2; ctx.lineWidth = F(1.6); ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(pb[0] + os * .30, oy + os / 2); ctx.lineTo(pb[0] + os * .70, oy + os / 2);
-      if (pb[1] > 0) { ctx.moveTo(pb[0] + os / 2, oy + os * .30); ctx.lineTo(pb[0] + os / 2, oy + os * .70); }
-      ctx.stroke(); ctx.lineCap = "butt";
-      btn(pb[0], oy, os, os, () => {
-        G.config.preyCount = Math.max(1, Math.min(7, (G.config.preyCount || 1) + pb[1]));
-        G.saveConfig(); G.playTick();
+    if (countNote) {
+      const t = countNote;
+      ctx.font = F(13) + "px sans-serif";
+      const tw = ctx.measureText(t).width;
+      const bw = Math.min(colW - F(10), tw + F(22));
+      ctx.fillStyle = "rgba(214,235,218,.62)";
+      G.rr(ctx, colX[1] + F(4), oy - F(2), bw, os + F(4), F(10)); ctx.fill();
+      text(t, colX[1] + F(4) + bw / 2, oy + os / 2, F(13) + "px sans-serif", C.tealDeep);
+    } else {
+      const minusX = colX[1] + F(4), plusX = colX[1] + colW - os - F(6);
+      [[minusX, -1], [plusX, 1]].forEach(pb => {
+        ctx.fillStyle = "#ffffff";
+        G.rr(ctx, pb[0], oy, os, os, F(7)); ctx.fill();
+        ctx.fillStyle = "transparent"; ctx.strokeStyle = "rgba(21,154,140,.28)"; ctx.lineWidth = 1;
+        rrPath(pb[0] + .5, oy + .5, os - 1, os - 1, F(7)); ctx.stroke();
+        ctx.strokeStyle = C.ink2; ctx.lineWidth = F(1.6); ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(pb[0] + os * .30, oy + os / 2); ctx.lineTo(pb[0] + os * .70, oy + os / 2);
+        if (pb[1] > 0) { ctx.moveTo(pb[0] + os / 2, oy + os * .30); ctx.lineTo(pb[0] + os / 2, oy + os * .70); }
+        ctx.stroke(); ctx.lineCap = "butt";
+        btn(pb[0], oy, os, os, () => {
+          G.config[countKey] = Math.max(1, Math.min(7, (G.config[countKey] || 1) + pb[1]));
+          G.saveConfig(); G.playTick();
+        });
       });
-    });
-    text((G.config.preyCount || 1) + " " + term.unit, (minusX + plusX + os) / 2, oy + os / 2,
-      F(15) + "px sans-serif", C.ink);
+      text((G.config[countKey] || 1) + " " + term.unit, (minusX + plusX + os) / 2, oy + os / 2,
+        F(15) + "px sans-serif", C.ink);
+    }
 
+    /* 蝌蚪卡：第三列换成「蝌蚪造型」——四种黑白造型可点选，跨局记忆。
+       非蝌蚪卡仍显示原来的环境音开关。 */
+    const selCard = list[((P.idx % n) + n) % n] || list[0];
+    const isTadCard = !!(group && group.targetByKey && group.targetByKey[selCard.key] === "tadpole");
+    if (isTadCard) {
+      const styles = G.TAD_STYLES || [];
+      const cur = styles.find(st => st.key === G.config.tadStyle) || styles[0] || { name: "墨影" };
+      text("蝌蚪造型 · " + cur.name, colX[2], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
+      const gap2 = F(4);
+      const chip = Math.min(F(34), (colW - F(6) - (styles.length - 1) * gap2) / Math.max(1, styles.length));
+      styles.forEach((st, i) => {
+        const sx = colX[2] + F(4) + i * (chip + gap2), sy2 = settingsTop + F(22);
+        const on = st.key === G.config.tadStyle;
+        ctx.fillStyle = on ? "rgba(214,235,218,.92)" : "#ffffff";
+        G.rr(ctx, sx, sy2, chip, chip, F(8)); ctx.fill();
+        ctx.fillStyle = "transparent";
+        ctx.strokeStyle = on ? "#12a489" : "rgba(21,154,140,.24)";
+        ctx.lineWidth = on ? 1.8 : 1;
+        rrPath(sx + .5, sy2 + .5, chip - 1, chip - 1, F(8)); ctx.stroke();
+        G.draw.tadpolePreview(ctx, st.key, sx + chip / 2, sy2 + chip / 2, chip * 0.82, 0.6 + i * 0.3);
+        btn(sx, sy2, chip, chip, () => {
+          if (G.config.tadStyle === st.key) return;
+          G.config.tadStyle = st.key; G.saveConfig(); G.playTick();
+          if (P) P.selT0 = performance.now();
+        });
+      });
+    } else {
     // 环境音陪伴（true / false）：标签跟玩法走（水声/环境音/虫鸣…）
     text(term.amb + "陪伴", colX[2], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const tgX = colX[2] + F(4), tgY = settingsTop + F(24), tgW = F(38), tgH = F(22);
@@ -1572,6 +1977,7 @@ module.exports = function (G) {
     btn(tgX - F(4), tgY - F(4), tgW + F(92), tgH + F(8), () => {
       G.config.sound = !soundOn; G.saveConfig(); G.playTick();
     });
+    }
 
     // 开始游戏
     raisedButton(btnX, btnY, btnW, btnH, {
@@ -1596,10 +2002,12 @@ module.exports = function (G) {
         F(10) + "px sans-serif", C.ink3, "right");
     }
 
-    /* ---- 左右侧卡点击翻页（设计稿没有圆形箭头，命中区铺在露出的侧卡上） ---- */
-    const leftW = Math.max(F(50), cx0 - CW / 2), rightX = cx0 + CW / 2;
-    btn(0, cardY, leftW, CH, () => G.bgPickArrow(-1));
-    btn(rightX, cardY, Math.max(F(50), W - rightX), CH, () => G.bgPickArrow(1));
+    /* ---- 左右侧卡点击翻页：单卡模式没有侧卡，不铺热区 ---- */
+    if (n > 1) {
+      const leftW = Math.max(F(50), cx0 - CW / 2), rightX = cx0 + CW / 2;
+      btn(0, cardY, leftW, CH, () => G.bgPickArrow(-1));
+      btn(rightX, cardY, Math.max(F(50), W - rightX), CH, () => G.bgPickArrow(1));
+    }
     ctx.restore();
   };
 
@@ -1996,7 +2404,7 @@ module.exports = function (G) {
         rrPath(x, y, cellW, rowH, 12); ctx.stroke();
         const cy = y + rowH / 2;
         text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
-        const typeName = { fish: "小鱼", butterfly: "蝴蝶", mouse: "小鼠", laser: "昆虫", pool: "萤光", frog: "青蛙", tadpole: "蝌蚪" }[L.type] || "";
+        const typeName = { fish: "小鱼", butterfly: "蝴蝶", mouse: "小鼠", laser: "红点", pool: "萤光", frog: "青蛙", tadpole: "蝌蚪" }[L.type] || "";
         // 玩法标签：浅色药丸，比纯文字更好扫读
         const tagW = 38, tagX = x + 56;
         ctx.fillStyle = "rgba(21,154,140,.10)";
@@ -3426,6 +3834,16 @@ module.exports = function (G) {
       G.rr(ctx, xCb, hy, wCb, PH2, Math.round(PH2 / 2)); ctx.fill(); ctx.stroke();
       text("×" + S.combo, xCb + wCb / 2, hy + PH2 / 2 + 1, Math.round(13 * ks) + "px sans-serif", "#fff");
     }
+    /* 蝌蚪：漏击计数（灰徽，只在真的漏过时出现；3 次以上加重，提醒连击已经掉档） */
+    if (G.config.targetType === "tadpole" && (S.escapes || 0) > 0) {
+      const wEsc = Math.round(46 * ks);
+      let xEsc = xHit + wHit + 8;
+      if (S.combo >= 2) xEsc += Math.round(50 * ks) + 8;
+      ctx.fillStyle = (S.escapes >= 3) ? "rgba(90,96,108,.78)" : "rgba(16,18,22,.34)";
+      G.rr(ctx, xEsc, hy, wEsc, PH2, Math.round(PH2 / 2)); ctx.fill(); ctx.stroke();
+      text("漏击 " + S.escapes, xEsc + wEsc / 2, hy + PH2 / 2 + 1,
+        Math.round(12 * ks) + "px sans-serif", "#fff");
+    }
 
     if (G.uiFX.stagePop > 0) {
       G.uiFX.stagePop -= dt;
@@ -3511,6 +3929,10 @@ module.exports = function (G) {
     // 鱼玩法：开局亮出本局海域主题名（每局自动轮换）
     const sea = G.config.targetType === "fish" && G.session.sea;
     if (sea) text("本局海域 · " + sea.name, W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
+    // 蝌蚪：开局一句话讲清规则（白纸画面里不讲，第一次会不知道折返也能拍）
+    if (G.config.targetType === "tadpole") {
+      text("点中黑蝌蚪 · 折返时 +2", W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
+    }
   };
 
   /* ================= 暂停 ================= */
@@ -3532,6 +3954,11 @@ module.exports = function (G) {
     ctx.fillStyle = "transparent"; ctx.strokeStyle = "rgba(214,218,200,.9)"; ctx.lineWidth = 1;
     rrPath(px, py, pw, ph, 24); ctx.stroke();
     text("暂停中", W / 2, py + 44, "22px sans-serif", C.ink);
+    if (G.config.targetType === "tadpole") {
+      /* 竖屏面板只有 ~270px 内宽：按可用宽度收字号，避免规则提示溢出面板。 */
+      const tip = "折返瞬间命中 +2 · 漏击 1 次扣 3 连击";
+      text(tip, W / 2, py + 66, fitFont(tip, 12, pw - 44, "normal") + "px sans-serif", C.ink3);
+    }
     orangePill(px + 24, py + 84, pw - 48, 48, { dy: 4, blur: 14, ring: false });
     text("继续本局", W / 2, py + 108, "17px sans-serif", "#fff");
     btn(px + 24, py + 84, pw - 48, 48, () => { G.session.paused = false; G.screen = "playing"; });

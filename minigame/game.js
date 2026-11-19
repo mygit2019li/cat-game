@@ -11,6 +11,7 @@ require("./js/scenery.js")(G);
 require("./js/prey.js")(G);
 require("./js/ui.js")(G);
 require("./js/sharecard.js")(G);   // 分享卡片 / 猫咪反应测评图
+require("./js/ad.js")(G);        // 原生模板广告（仅非游戏页面：电子猫粮机）
 require("./js/feeder.js")(G);     // 电子猫粮机（定时定量 / 手动出粮）
 
 /* 自定义召唤卡（标题/图片/音频都存在本机）：卡牌列表要在第一帧就把它排在第一，
@@ -121,6 +122,8 @@ G.switchScreen = (name) => {
   if (G.ui && G.ui.summonEdit && G.ui.closeSummonEdit) G.ui.closeSummonEdit();
   // 离开声音页时停止试听（含从声音页直接跳设置等所有路径）
   if (G.screen === "sound" && name !== "sound" && G.stopAnimalSound) G.stopAnimalSound();
+  // 离开猫粮机页时销毁广告实例（hide + destroy），再进页会重新创建，不重复堆实例
+  if (G.screen === "feeder" && name !== "feeder" && G.ad) G.ad.leave("switch:" + name);
   G.nextScreen = name;
   G.transitionT = 0;
 };
@@ -244,7 +247,8 @@ G.startGame = () => {
   S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
-  S.tadCount = 1; S.tadEval = 0; S.tadMark = 0; S.tadDown = 0;   // 蝌蚪快跑：数量动态 1–7
+  S.tadCount = 1; S.tadEval = 0; S.tadMark = 0; S.tadDown = 0;   // 蝌蚪快跑：同屏 1→2→3
+  S.escapes = 0;                                                  // 蝌蚪快跑：漏击次数
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
   // 鱼玩法：海域由背景选择层决定（水草森林 / 泳池追鱼，左右滑动切换、跨局记忆）
   S.sea = G.config.targetType === "fish" ? (G.SEA_THEMES.find(t => t.key === G.currentBg()) || G.SEA_THEMES[0]) : null;
@@ -287,10 +291,30 @@ function beginPlay() {
    每张卡对应一套布景+运动规则+猎物种类；只有 1 套的玩法照旧直接开始，不额外打扰。
    卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
 G.requestStart = () => {
+  /* 青蛙/萤火虫/蝴蝶/激光都有二级玩法卡：先选卡，再进场景或直接开局。 */
+  const group = G.groupForType && G.groupForType(G.config.targetType);
+  if (group) { G.openModePick(G.groupKeyForType(G.config.targetType)); return; }
   const arr = G.bgsFor(G.config.targetType);
   if (arr.length > 1) { G.openBgPick(); return; }
   G.startGame();
 };
+
+/* 当前卡片层的数据源：普通玩法走背景表，玩法组走对应卡片表。 */
+G.bgPickList = () => {
+  const g = G.bgPick && G.bgPick.group && G.MODE_GROUPS && G.MODE_GROUPS[G.bgPick.group];
+  return g ? g.cards : G.bgsFor(G.config.targetType);
+};
+
+G.openModePick = (groupKey) => {
+  const g = G.MODE_GROUPS && G.MODE_GROUPS[groupKey];
+  if (!g || !g.cards || !g.cards.length) return;
+  const cur = G.config[g.configKey];
+  const idx0 = Math.max(0, g.cards.findIndex(b => b.key === cur));
+  G.bgPick = { idx: idx0, visIdx: idx0, off: 0, drag: false, x0: 0, moved: 0, cw: 0, gap: 0,
+    t0: performance.now(), relOff: 0, relT0: 0, touchActive: false, selT0: 0, group: groupKey };
+  G.switchScreen("bgpick");
+};
+G.openFrogPick = () => G.openModePick("frog");
 
 G.openBgPick = () => {
   const arr = G.bgsFor(G.config.targetType);
@@ -306,12 +330,22 @@ G.openBgPick = () => {
 
 G.closeBgPick = () => { G.bgPick = null; G.switchScreen("home"); };
 
-/* 确认背景 → 记住选择（跨局） → 开局 */
+/* 确认卡片 → 记住选择（跨局） → 开局 / 进入玩法场景选择 */
 G.confirmBgPick = () => {
-  const type = G.config.targetType;
-  const arr = G.bgsFor(type);
+  const arr = G.bgPickList();
   const P = G.bgPick;
   const sel = arr[P ? Math.max(0, Math.min(arr.length - 1, P.idx)) : 0];
+  const group = P && P.group && G.MODE_GROUPS && G.MODE_GROUPS[P.group];
+  if (group) {
+    const key = sel ? sel.key : group.cards[0].key;
+    G.config[group.configKey] = key;
+    if (group.targetByKey && group.targetByKey[key]) G.config.targetType = group.targetByKey[key];
+    G.saveConfig();
+    G.bgPick = null;
+    if (group.next && group.next[key] === "bgs") G.openBgPick(); else G.startGame();
+    return;
+  }
+  const type = G.config.targetType;
   if (sel) { G.config["bg_" + type] = sel.key; G.saveConfig(); }
   G.bgPick = null;
   G.startGame();
@@ -325,8 +359,8 @@ function bgPickStep() {
    与松手吸附共用同一动画（relOff 连续归零），拖动中忽略。 */
 G.bgPickArrow = (dir) => {
   const P = G.bgPick; if (!P || P.drag) return;
-  const arr = G.bgsFor(G.config.targetType);
-  if (!arr.length) return;
+  const arr = G.bgPickList();
+  if (arr.length < 2) return;
   const ni = (P.visIdx == null ? P.idx : P.visIdx) + dir;
   const step = bgPickStep();
   P.relOff = P.off + (ni - (P.visIdx == null ? P.idx : P.visIdx)) * step;
@@ -339,8 +373,8 @@ G.bgPickArrow = (dir) => {
 /* 点指示点直接跳到对应卡：走环形最短路径，动画与点侧卡一致 */
 G.bgPickJump = (target) => {
   const P = G.bgPick; if (!P || P.drag) return;
-  const arr = G.bgsFor(G.config.targetType);
-  const n = arr.length; if (!n) return;
+  const arr = G.bgPickList();
+  const n = arr.length; if (n < 2) return;
   const cur = P.visIdx == null ? P.idx : P.visIdx;
   const curReal = ((cur % n) + n) % n;
   let delta = target - curReal;
@@ -358,6 +392,7 @@ G.bgPickJump = (target) => {
 
 G.bgPickTouchStart = (x) => {
   const P = G.bgPick; if (!P) return;
+  if (G.bgPickList().length < 2) return;   // 单卡页不跟手
   P.drag = true; P.x0 = x; P.moved = 0;
   P.touchActive = true;
   P.visIdx = P.idx;                                // 拖动从真实索引起步，避免从循环索引跳变
@@ -365,7 +400,7 @@ G.bgPickTouchStart = (x) => {
 };
 G.bgPickTouchMove = (x) => {
   const P = G.bgPick; if (!P || !P.drag) return;
-  const arr = G.bgsFor(G.config.targetType);
+  const arr = G.bgPickList();
   let d = x - P.x0;
   P.moved = Math.max(P.moved, Math.abs(d));
   // 首尾边界：继续往外拖只跟 35%，手感"拉不动"而不是硬顶
@@ -381,7 +416,7 @@ G.bgPickTouchEnd = (x) => {
   P.drag = false;
   const wasActive = P.touchActive; P.touchActive = false;
   if (!wasActive) return;                          // 按钮点按（onTouchStart 已被 hitButton 截走）：不翻页
-  const arr = G.bgsFor(G.config.targetType);
+  const arr = G.bgPickList();
   const step = bgPickStep();
   let dir = 0;
   if (P.moved > 8) {                               // 拖动：按位移阈值换页
@@ -445,6 +480,8 @@ function changeStage(st) {
   G.uiFX.stageText = G.stageName(st);
   G.uiFX.stagePop = 1.6;
   G.pokeHud();
+  /* 蝌蚪：阶段推进时把同屏基线抬到 1→2→3（topUpPreys 会补上从边缘进场的个体）。 */
+  if (G.config.targetType === "tadpole") S.tadCount = Math.max(S.tadCount || 1, Math.min(3, st));
   if (G.config.targetType === "frog" && st >= 4 && prev < 4 && G.rebuildFrogPads) {
     G.rebuildFrogPads(4);
     (G.preys || []).forEach(p => { if (p.type === "frog" && p.spawnOnPad) p.spawnOnPad(); });
@@ -522,11 +559,14 @@ G.endGame = (fromPause) => {
   else if (hpm >= 9 || (interacted && hpm >= 6)) { title = "矫健猎手"; desc = "扑击精准、节奏稳健，状态很好。"; }
   else if (hpm >= 3.5 || interacted) { title = "灵巧学徒"; desc = "全程都有参与，正在建立信心。"; }
   else                { title = "慵懒观察员"; desc = "今天兴趣不大？换个猎物类型试试。"; }
-  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "彩星爆散" : G.config.targetType === "frog" ? "空中截击" : "奖励命中";
+  const tag = G.config.targetType === "mouse" ? "追击" : G.config.targetType === "butterfly" ? "精准扑击" : G.config.targetType === "laser" ? "光点落网" : G.config.targetType === "pool" ? "彩星爆散" : G.config.targetType === "frog" ? "空中截击" : G.config.targetType === "tadpole" ? "折返截击" : "奖励命中";
+  const bonusBits = [];
+  if (S.bonusHits > 0) bonusBits.push("含" + tag + " ×" + S.bonusHits);
+  if (G.config.targetType === "tadpole" && S.escapes > 0) bonusBits.push("漏击 " + S.escapes + " 次");
   G.result = {
     t0: performance.now(),
     title, desc, touches: S.touches, hits: totalHits, acc, maxCombo: S.maxCombo,
-    bonusTag: S.bonusHits > 0 ? "含" + tag + " ×" + S.bonusHits : ""
+    bonusTag: bonusBits.join(" · ")
   };
   G.switchScreen("result");
 };
@@ -582,7 +622,7 @@ function onHit(x, y, prey) {
   S.combo++;
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
-  G.shake = Math.min(G.shake + 8, 20); // Add screen shake
+  G.shake = Math.min(G.shake + (isTad ? 5 : 8), 20); // 白纸画面震动更克制，只保留"拍实了"的触感
   prey.vanish();
   const sparkC = isPool
     ? (POOL_SPARK[prey.species] || "#eaf9ff")
@@ -590,6 +630,8 @@ function onHit(x, y, prey) {
     ? ((G.laserColorSet && G.laserColorSet())[(prey.laserVar && prey.laserVar.key) || "red"] || {}).spark || "#ff8a8a"
     : isFrog
     ? "#bdf58a"
+    : isTad
+    ? "#14161a"
     : (isMouse || isBfly ? (prey.def.sparkColor || "#ffd76a") : (G.seaThemeNow().spark || prey.def.sparkColor || "#ffd76a"));
   // 兔子是整只玩具被拍散：星爆/碎光以兔子中心为准，不跟着手指边缘跑
   G.sparkBurst(isPool ? prey.x : x, isPool ? prey.y : y, sparkC, isPool ? 6 : 8);
@@ -640,11 +682,14 @@ function onHit(x, y, prey) {
     if (G.padSway) G.padSway(prey.x, prey.y);
     if (aerial) { S.bonusHits++; G.playMilestone(); }
   } else if (isTad) {
-    // 蝌蚪：头/尾同分 +1（方案 v0.2 §4.2），水花 + 涟漪 + pop；命中即触发逃窜由 onMiss/near-miss 决定
-    G.sparkBurst(x, y, "#d6ff9e", 8);
-    if (G.ripple) G.ripple(x, y, false);
-    if (G.playSchoolPop) G.playSchoolPop();
-    G.floatText(x, y - 26, "+1", "");
+    /* 白纸墨影：命中即墨爆（黑点 + 灰环）+ 短促音效。
+       折返弧里命中算「折返截击」+2——这是唯一的速度低谷，也是唯一需要预判的窗口。 */
+    const foldHit = (prey.tadFold || 0) > 0.12;
+    G.inkBurst(x, y, prey.tadAng || 0, foldHit);
+    if (G.tadpoleWake) G.tadpoleWake(x, y, true);
+    if (G.playTadpoleHit) G.playTadpoleHit(foldHit);
+    if (foldHit) { S.bonusHits++; G.playMilestone(); }
+    G.floatText(x, y - 28, foldHit ? "折返截击 +2" : "+1", foldHit ? "big" : "");
   } else {
     // 捕鱼命中：泳池海域走夸张的金橙水花、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
     const seaKey = G.session.sea && G.session.sea.key;
@@ -668,12 +713,34 @@ function onHit(x, y, prey) {
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
     else if (isFrog) G.floatText(prey.x, prey.y - (prey.jumpH || 0) - 62, aerial ? "空中截击 +2！" : "抓住！", aerial ? "big" : "");
-    else G.floatText(x, y - 20, "+1");
+    else if (!isTad) G.floatText(x, y - 20, "+1");
   }
   G.pokeHud();
 }
 
 G.onHit = onHit;                                   // 测试钩子：命中路径可直接驱动
+
+/* ================= 蝌蚪漏击 =================
+   蝌蚪完整穿出画面（不是被拍散）才算一次漏击：
+   · 连击 -3（最低 0），漏击计数 +1，连续漏击会触发原有的自适应放慢；
+   · 只给一圈灰环 + 一声低音，不弹大字——白纸画面里任何大块提示都比猎物更抢眼。 */
+G.tadpoleEscape = (prey) => {
+  const S = G.session;
+  if (!S || !S.running) return;
+  S.escapes = (S.escapes || 0) + 1;
+  S.combo = Math.max(0, (S.combo || 0) - 3);
+  S.missStreak = (S.missStreak || 0) + 1;
+  G.playTadpoleMiss && G.playTadpoleMiss();
+  if (G.ripple) G.ripple(prey.x, prey.y, true);
+  /* 离场点可能已经在画面外：把提示夹回可玩区，否则玩家只看得到"什么都没发生"。 */
+  const bb = G.bounds();
+  const fx2 = Math.max(bb.x + 34, Math.min(bb.x + bb.w - 34, prey.x));
+  const fy2 = Math.max(bb.y + 24, Math.min(bb.y + bb.h - 24, prey.y));
+  G.floatText(fx2, fy2 - 20, "漏击", "hint");
+  applyAdaptive();
+  applyComboBoost();
+  G.pokeHud();
+};
 
 /* ================= 拍偏 ================= */
 function onMiss(x, y) {
@@ -975,6 +1042,9 @@ function loop() {
     }
   }
   ctx.globalAlpha = screenAlpha;
+
+  // 广告实例兜底巡检：任何绕过 switchScreen 的页面切换，下一帧销毁，避免实例残留
+  if (G.ad && G.ad.watchdog) G.ad.watchdog(G.screen);
 
   if (G.screen === "home") uiScaleCtx(() => G.ui.drawHome());
   else if (G.screen === "bgpick") {
