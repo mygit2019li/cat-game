@@ -9,7 +9,7 @@ module.exports = function (G) {
   G.GAME_NAME = "逗猫触屏玩具";
 
   const DEFAULTS = {
-    targetType: "fish", preyCount: 1, difficulty: "normal", duration: 180, infinite: false,
+    targetType: "fish", preyCount: 1, difficulty: "normal", duration: 60, infinite: false,
     keepScreen: true,        // 屏幕常亮（给猫玩时不自动锁屏）
     antiMistouch: true,      // 进入游戏首次弹「系统防误触」引导
     sound: true,             // 音效默认开
@@ -436,6 +436,22 @@ module.exports = function (G) {
     2: { peek: 1.4,  dartSpeed: 380, fakeP: 0.35, adjacent: false, dartP: 0.85 },
     3: { peek: 0.85, dartSpeed: 500, fakeP: 0.55, adjacent: false, dartP: 1 }
   };
+  /* 群鼠乱窜（swarm）专用参数表：只作用于 mouse + mouseBg==="swarm"，不影响室内打地鼠。
+     active      各阶段在场活跃鼠（硬顶 maxActive，任意时刻不得超过）
+     stageSplit  群鼠专用阶段切分（占一局时长比例）：①25% / ②中间45% / ③30%（③比通用 20s/50s 明显缩短）
+     wave        波次：intervalMin~Max 秒触发一次换场呼吸；breath=呼吸总时长，edgeFade=逃边淡出，calm=安静段
+     tell        停步抬头预兆时长；window=预兆后可拍停留时长（命中主窗口，随阶段缩短）
+     skittish    怕爪鼠比例（触点靠近会反窜）；skittishCap=同时怕爪的鼠只数上限；flee*=反窜参数
+     pauseChance 直走一段后进入停留的概率；否则只做小幅转向继续走 */
+  G.SWARM_PARAMS = {
+    active: { 1: 3, 2: 4, 3: 4 }, maxActive: 4,
+    stageSplit: { p1: 0.25, p3: 0.30 },
+    wave: { intervalMin: 16, intervalMax: 22, breath: 2.2, edgeFade: 0.7, calm: 1.0, stageGuard: 8 },
+    tell: 0.2, window: { 1: 1.3, 2: 1.0, 3: 0.85 },
+    skittish: { 1: 0, 2: 0.25, 3: 0.34 }, skittishCap: 2,
+    fleeRadius: 140, fleeTell: 0.15, fleeDist: [60, 90],
+    pauseChance: 0.45, margin: 0.12
+  };
   /* 青蛙跳三阶段：一次循环 = 蓄力 → 腾空 → 落水 → 静坐，循环结束换一片荷叶。
      crouch/leap/land/settle = 各状态基准时长（秒，按速度倍率缩放）
      prep   = 起跳前落点光圈提前量（猫唯一的预判依据，三个段位都保留）
@@ -678,6 +694,12 @@ module.exports = function (G) {
       const f2 = f1 + Math.min(15, dur * 0.25);         // 60s → 33s
       const f3 = f2 + Math.min(15, dur * 0.25);         // 60s → 48s
       return elapsed < f1 ? 1 : elapsed < f2 ? 2 : elapsed < f3 ? 3 : 4;
+    }
+    // 群鼠乱窜：按一局时长比例切分 ①25% / ②45% / ③30%（③明显短于通用 20s/50s 规则，缓解长局③偏长偏平）
+    if (G.config.targetType === "mouse" && G.currentBg && G.currentBg() === "swarm") {
+      const sp = G.SWARM_PARAMS.stageSplit;
+      const s1 = dur * sp.p1, s2 = dur * (1 - sp.p3);
+      return elapsed < s1 ? 1 : elapsed < s2 ? 2 : 3;
     }
     const t1 = Math.min(20, dur * 0.3);
     const t2 = t1 + Math.min(50, dur * 0.5);

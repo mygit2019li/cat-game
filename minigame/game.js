@@ -251,6 +251,7 @@ G.startGame = () => {
   G.fx.clear();
   G.buildPreys();
   G.topUpPreys();   // 开局即补足到当前阶段的目标数量（鱼群模式开局就该是一大群，而非 3 条等阶段②）
+  if (G.swarmReset) G.swarmReset();   // 群鼠乱窜：重置全场波次时钟与怕爪分配
   if (G.config.keepScreen) { G.platform.keepScreen(true); S._keepOn = true; }
   const beginGame = () => {
     countT = 3; lastInt = -1;
@@ -541,6 +542,7 @@ function onHit(x, y, prey) {
   const isLaser = G.config.targetType === "laser";
   const isPool = G.config.targetType === "pool";
   const isFrog = G.config.targetType === "frog";
+  const isSwarm = isMouse && G.scene && G.scene.mouseBg === "swarm";   // 群鼠乱窜：去屏震/去飘字
   const chasing = isMouse && prey.state === "dart";
   const resting = isBfly && prey.state === "RESTING";
   const holding = (isLaser || isPool) && prey.state === "hold";
@@ -550,7 +552,8 @@ function onHit(x, y, prey) {
   S.combo++;
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
-  G.shake = Math.min(G.shake + 8, 20); // Add screen shake
+  // 群鼠乱窜命中不做全屏抖动（猫正贴着屏，整屏晃易过度刺激/带动机身），仅保留局部粒子反馈
+  if (!isSwarm) G.shake = Math.min(G.shake + 8, 20);
   prey.vanish();
   const sparkC = isPool
     ? (POOL_SPARK[prey.species] || "#eaf9ff")
@@ -622,10 +625,11 @@ function onHit(x, y, prey) {
     // 所有目标命中均不触发设备震动：真机上震动会带得整块屏幕（设备）一起晃动，喧宾夺主
   }
   if (S.combo > 0 && S.combo % 5 === 0) {
-    if (!isPool) G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");
+    if (!isPool && !isSwarm) G.floatText(prey.x, prey.y - 30, "连击 ×" + S.combo + "！", "big");
     G.playMilestone();
-  } else if (!isPool) {
+  } else if (!isPool && !isSwarm) {
     // 兔子模式不弹"光爆 +1"文字：猫不识字，文字会挡住星爆；分数看左上角 HUD 即可
+    // 群鼠乱窜同样不弹任何飘字（连击/得分仅体现在音效与 HUD），避免遮挡猎物
     if (isMouse) G.floatText(x, y - 20, chasing ? "+2 追击成功！" : "+1 抓住！", chasing ? "big" : "");
     else if (isBfly) G.floatText(prey.x, prey.y - 30, resting ? "精准扑击 +2" : "+1", resting ? "big" : "");
     else if (isLaser) G.floatText(x, y - 20, holding ? "+2 光点落网！" : "抓住光点！", "big");
@@ -710,6 +714,10 @@ G.platform.onTouchStart = (e) => {
     }
     G.pauseHold.active = false;
     if (G.hitButton(vx, vy)) return;
+    // 记录最近一次猫爪触点（真实坐标），供群鼠"怕爪鼠"判断是否反窜
+    G.lastPaw = { x: x, y: y, t: performance.now() };
+    // 群鼠换场呼吸期间：鼠在逃边/淡入，拍击直接忽略（不命中也不计失误）
+    if (G.swarmBreathing && G.swarmBreathing()) return;
     // 命中测试（后绘制的优先，对齐 DOM 顶层元素语义）
     let hit = null;
     for (let i = G.preys.length - 1; i >= 0; i--) {
@@ -820,6 +828,7 @@ function loop() {
     S.time += dt;
     S.secAcc += dt;
     while (S.secAcc >= 1) { S.secAcc -= 1; tickSecond(); }
+    if (G.swarmTick) G.swarmTick(dt);   // 群鼠波次/呼吸时钟（须在猎物 update 前推进）
     G.preys.forEach(p => p.update(dt, S.time));
   }
   // 老鼠出洞循环声：有 peek/dart 的鼠就唧唧叫，全部回洞就停；暂停/切后台也会停

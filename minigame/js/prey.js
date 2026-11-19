@@ -21,6 +21,61 @@ module.exports = function (G) {
   /* 鱼群模式判定：捕鱼 + 当前海域为鱼群巡游（boids 结群游动，鱼不出屏） */
   const inSchoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "school");
 
+  /* ===== 群鼠乱窜：全场共享一个波次时钟（追猎段 active ↔ 换场呼吸 breath） =====
+     所有群鼠同节奏：active 段正常乱窜/停留；到点进 breath（逃边淡出 edgeFade → 安静 calm
+     → 新一批边入淡入）。呼吸期鼠 fade 降到 0（不可命中），onMiss 也跳过，不算失误。
+     波次触发避开阶段切换后 stageGuard 秒，防止呼吸与阶段提示叠在一起。 */
+  const swarm = { phase: "active", t: 0, bt: 0, nextWave: 0, stage: 0, stageEnterAt: 0 };
+  const inSwarmMode = () => !!(G.session && G.config.targetType === "mouse" && G.scene && G.scene.mouseBg === "swarm");
+  function swarmAssignSkittish() {
+    const SP = G.SWARM_PARAMS;
+    const st = G.session ? G.session.stage : 1;
+    const p = SP.skittish[st] != null ? SP.skittish[st] : 0;
+    let chosen = 0;
+    preys.forEach(q => {
+      if (q.type !== "mouse") return;
+      q.skittish = p > 0 && chosen < SP.skittishCap && Math.random() < p;
+      if (q.skittish) chosen++;
+    });
+  }
+  function swarmReset() {
+    const SP = G.SWARM_PARAMS;
+    swarm.phase = "active"; swarm.t = 0; swarm.bt = 0;
+    swarm.stage = G.session ? G.session.stage : 1; swarm.stageEnterAt = 0;
+    swarm.nextWave = rand(SP.wave.intervalMin, SP.wave.intervalMax);
+    swarmAssignSkittish();
+  }
+  G.swarmBreathing = () => inSwarmMode() && swarm.phase === "breath";
+  G.swarmTick = (dt) => {
+    if (!inSwarmMode()) return;
+    const SP = G.SWARM_PARAMS;
+    if (G.session.stage !== swarm.stage) { swarm.stage = G.session.stage; swarm.stageEnterAt = swarm.t; swarmAssignSkittish(); }
+    swarm.t += dt;
+    if (swarm.phase === "active") {
+      // 到点且不在阶段切换保护窗内才进入呼吸；否则顺延，避免和阶段提示/补员撞在一起
+      if (swarm.t >= swarm.nextWave && swarm.t - swarm.stageEnterAt >= SP.wave.stageGuard) {
+        swarm.phase = "breath"; swarm.bt = 0;
+      } else if (swarm.t >= swarm.nextWave) {
+        swarm.nextWave += 0.5;
+      }
+    } else {
+      swarm.bt += dt;
+      if (swarm.bt >= SP.wave.breath) {
+        swarm.phase = "active";
+        swarm.nextWave = swarm.t + rand(SP.wave.intervalMin, SP.wave.intervalMax);
+        swarmAssignSkittish();
+      }
+    }
+  };
+  // 呼吸段子相位：out=逃边淡出 / calm=安静 / in=新位置淡入；非呼吸期返回 null
+  function swarmBreathPhase() {
+    if (swarm.phase !== "breath") return null;
+    const W = G.SWARM_PARAMS.wave, bt = swarm.bt;
+    if (bt < W.edgeFade) return { sub: "out", k: bt / W.edgeFade };
+    if (bt < W.edgeFade + W.calm) return { sub: "calm", k: (bt - W.edgeFade) / W.calm };
+    return { sub: "in", k: (bt - W.edgeFade - W.calm) / (W.breath - W.edgeFade - W.calm) };
+  }
+
   /* 选洞：优先「未被占用 且 非蹲守热点」；不可用时依次放宽 */
   G.pickHoleIdx = (prey, excludeIdx) => {
     const S = G.scene;
@@ -216,13 +271,10 @@ module.exports = function (G) {
         return;
       }
       if (this.type === "mouse") {
-        // 群鼠模式：无洞口——随机落位（互不重叠）+ 随机初始航向
+        // 群鼠模式：无洞口——中部安全区随机落位（互不重叠）+ 随机初始航向
         if (G.scene.mouseBg === "swarm") {
-          for (let attempt = 0; attempt < 6; attempt++) {
-            this.x = b.x + rand(0.08, 0.92) * b.w;
-            this.y = b.y + rand(0.12, 0.88) * b.h;
-            if (!preys.some(q => q !== this && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
-          }
+          this.swarmInit();
+          this.swarmPlace(false);
           this.swimAng = rand(0, Math.PI * 2);
           this.state = "scurry"; this.stateT = 0; this.stateDur = rand(0.7, 1.6);
           this.fade = 1;
@@ -930,47 +982,128 @@ module.exports = function (G) {
       G.dustBurst(this.x, this.dartFromY + 6, 2);
     }
     /* ============ 群鼠乱窜：俯视群鼠状态机 ============
-       无洞口——scurry 直线疾走（随机航向+撞边反射）→ 随机换向或短暂停顿（停顿=主要命中窗口）；
-       被拍中走 vanish 动画，结束后随机换位重生，满屏数量恒定 */
-    updateSwarmMouse(dt, t) {
-      const b = G.bounds(), MS = Math.pow(G.platform.S || 1, 0.5);
+       无洞口。追猎段：scurry 直走 → tell 停步抬头预兆 → pause 停留可拍（主命中窗口）；
+       部分鼠为"怕爪鼠"，猫爪靠近先缩身再反向短窜。全场共享波次时钟，到点 breath 换场呼吸
+       （逃边淡出→安静→边入淡入），呼吸期不可命中/不计失误。被拍走 vanish 换位重生，数量恒定 3/4/4。 */
+    swarmInit() {
+      this.skittish = false;
+      this.fleeCd = 0; this.fleeT = 0; this.fleeRun = 0; this.fleeAng = 0;
+      this._swarmAlpha = 1; this._reX = 0; this._reY = 0; this._reA = 0; this._breathReloc = false;
       if (this.swimAng == null) this.swimAng = rand(0, Math.PI * 2);
-      if (this._visAng == null) this._visAng = this.swimAng;   // 朝向单独初始化（spawn 只给了 swimAng）
-      // 消失动画：倒计时结束随机换位重生
+    }
+    /* 落位：atEdge=false 落中部安全区（追猎段/重生）；true 落屏边头朝屏内（换场入场）。
+       与其它存活鼠保持 ≥100px，最多 6 次，失败接受最后一次落点。 */
+    swarmPlace(atEdge) {
+      const b = G.bounds(), MS = Math.pow(G.platform.S || 1, 0.5), SP = G.SWARM_PARAMS;
+      const pad = 20 * MS, m = SP.margin;
+      const blocked = () => preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100);
+      for (let i = 0; i < 6; i++) {
+        if (atEdge) {
+          // 四边等概率：贴边落位，再沿进深退 8%–18%
+          const side = Math.floor(rand(0, 4));
+          if (side === 0)      { this.x = b.x + pad + rand(0, 0.1) * b.w; this.y = b.y + rand(0.1, 0.9) * b.h; }
+          else if (side === 1) { this.x = b.x + b.w - pad - rand(0, 0.1) * b.w; this.y = b.y + rand(0.1, 0.9) * b.h; }
+          else if (side === 2) { this.x = b.x + rand(0.1, 0.9) * b.w; this.y = b.y + pad + rand(0, 0.1) * b.h; }
+          else                 { this.x = b.x + rand(0.1, 0.9) * b.w; this.y = b.y + b.h - pad - rand(0, 0.1) * b.h; }
+        } else {
+          this.x = b.x + (m + rand(0, 1 - 2 * m)) * b.w;
+          this.y = b.y + (m + rand(0, 1 - 2 * m)) * b.h;
+        }
+        if (!blocked()) break;
+      }
+    }
+    updateSwarmMouse(dt, t) {
+      const SP = G.SWARM_PARAMS;
+      const b = G.bounds(), MS = Math.pow(G.platform.S || 1, 0.5);
+      if (this._swarmAlpha == null) this._swarmAlpha = 1;
+      if (this.swimAng == null) this.swimAng = rand(0, Math.PI * 2);
+      if (this._visAng == null) this._visAng = this.swimAng;
+      if (this.fleeCd > 0) this.fleeCd -= dt;
+
+      // 被拍消失动画：倒计时结束在中部安全区换位重生
       if (this.vanishT > 0) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
           this.vanishT = 0;
-          for (let attempt = 0; attempt < 5; attempt++) {
-            this.x = b.x + rand(0.1, 0.9) * b.w;
-            this.y = b.y + rand(0.14, 0.86) * b.h;
-            if (!preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
-          }
+          this.swarmPlace(false);
           this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng;
           this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8);
-          this.fade = 1;
+          this.fade = 1; this._swarmAlpha = 1;
         }
-        return;                                   // 消失期间不移动
+        return;
       }
-      if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
 
+      // 波次呼吸：逃边淡出 → 安静 → 边入淡入。呼吸期不更新常规状态机、不可命中
+      const bp = swarmBreathPhase();
+      if (bp) {
+        const pad = 20 * MS;
+        if (bp.sub === "out") {
+          const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+          // 朝最近的屏边逃
+          const ex = Math.abs(this.x - (b.x + pad)) < Math.abs(this.x - (b.x + b.w - pad)) ? b.x + pad : b.x + b.w - pad;
+          const ey = Math.abs(this.y - (b.y + pad)) < Math.abs(this.y - (b.y + b.h - pad)) ? b.y + pad : b.y + b.h - pad;
+          const ea = Math.atan2(ey - cy, ex - cx);
+          const esc = 240 * MS * dt;
+          this.x += Math.cos(ea) * esc; this.y += Math.sin(ea) * esc;
+          this._swarmAlpha = 1 - bp.k;
+          if (bp.k >= 1) { this.swarmPlace(true); this._reX = this.x; this._reY = this.y; this._reA = this.swimAng; this._breathReloc = true; }
+        } else if (bp.sub === "calm") {
+          this._swarmAlpha = 0;
+        } else {
+          if (this._breathReloc) { this.x = this._reX; this.y = this._reY; this.swimAng = this._reA; this._visAng = this._reA; this._breathReloc = false; }
+          this._swarmAlpha = clamp(bp.k, 0, 1);
+          if (bp.k >= 1) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); this.fleeCd = 0.6; }
+        }
+        this.x = clamp(this.x, b.x + 16 * MS, b.x + b.w - 16 * MS);
+        this.y = clamp(this.y, b.y + 16 * MS, b.y + b.h - 16 * MS);
+        this.faceDir = Math.cos(this.swimAng) >= 0 ? 1 : -1;
+        return;
+      }
+      this._swarmAlpha = 1;
+
+      if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
       const pad = 20 * MS;
       const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
+      const stage = G.session.stage || 1;
 
-      // 节奏：直爬一段 → 偶尔停一下；换向只做小幅调整（不画圈）
-      this.stateT += dt;
-      if (this.state === "pause") {
-        if (this.stateT >= this.stateDur) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
-      } else if (this.stateT >= this.stateDur) {
-        this.stateT = 0;
-        if (Math.random() < 0.45) { this.state = "pause"; this.stateDur = 0.4; }   // 停驻嗅探 0.4s = 命中窗口
-        else { this.stateDur = rand(1.4, 2.8); this._turnTo = this.swimAng + rand(-0.45, 0.45); }   // 小幅转向也平滑过渡
+      // 怕爪鼠：仅在跑动(scurry)中、猫爪进入 fleeRadius 才反窜；停留窗口(tell/pause)不逃，保证可被拍中
+      const paw = G.lastPaw, canFlee = this.skittish && this.fleeCd <= 0 && this.fleeT <= 0
+        && this.state === "scurry" && paw && (performance.now() - paw.t < 600);
+      if (canFlee) {
+        const pdx = this.x - paw.x, pdy = this.y - paw.y;
+        if (Math.hypot(pdx, pdy) < SP.fleeRadius) {
+          this.fleeT = SP.fleeTell; this.fleeAng = Math.atan2(pdy, pdx);
+          this._turnTo = this.fleeAng; this.state = "scurry";
+        }
+      }
+      if (this.fleeT > 0) {
+        this.fleeT -= dt;
+        if (this.fleeT <= 0) { this.fleeRun = rand(SP.fleeDist[0], SP.fleeDist[1]) / MS; this.fleeCd = 1.5; }
       }
 
-      if (this.state !== "pause") {
-        const sp = this.def.speed * this.speedMul * (1 + ((G.session.stage || 1) - 1) * 0.16)
+      // 节奏：scurry 一段 → tell 抬头预兆 → pause 可拍窗口；或仅小幅换向继续走
+      if (this.fleeT <= 0 && this.fleeRun <= 0) {
+        this.stateT += dt;
+        if (this.state === "tell") {
+          if (this.stateT >= SP.tell) { this.state = "pause"; this.stateT = 0; this.stateDur = SP.window[stage] || 1.0; }
+        } else if (this.state === "pause") {
+          if (this.stateT >= this.stateDur) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+        } else if (this.stateT >= this.stateDur) {
+          this.stateT = 0;
+          if (Math.random() < SP.pauseChance) { this.state = "tell"; this.stateT = 0; }
+          else { this.stateDur = rand(1.4, 2.8); this._turnTo = this.swimAng + rand(-0.45, 0.45); }
+        }
+      }
+
+      // 位移：pause/tell 与缩身预兆(fleeT)停住；反窜(fleeRun)加速；其余匀速直走
+      if (this.state !== "pause" && this.state !== "tell" && this.fleeT <= 0) {
+        let sp = this.def.speed * this.speedMul * (this.mSpeed || 1) * (1 + (stage - 1) * 0.16)
           * (this.adaptiveSlow || 1) * (this.comboSpeed || 1);
-        // 撞墙后的新航向：逐步转过去（沿墙滑行），不瞬间甩头
+        if (this.fleeRun > 0) {
+          sp *= 1.9;
+          this.fleeRun -= sp * dt;
+          this._turnTo = this.fleeAng;
+        }
         if (this._turnTo != null) {
           let da = this._turnTo - this.swimAng;
           while (da > Math.PI) da -= Math.PI * 2;
@@ -979,22 +1112,21 @@ module.exports = function (G) {
           this.swimAng += clamp(da, -step, step);
           if (Math.abs(da) < 0.06) this._turnTo = null;
         }
-        // 直线前进（位移沿当前朝向，不绕目标点转圈）
         this.x += Math.cos(this.swimAng) * sp * dt * MS;
         this.y += Math.sin(this.swimAng) * sp * dt * MS;
-        // 撞墙：夹回屏内 + 指定一个朝屏内的新航向（下面逐步转过去）
+        // 撞边：夹回 + 指定朝屏内新航向（限速平滑转过去，沿墙滑行）
         let bumped = false;
         if (this.x < L)      { this.x = L; this._turnTo = rand(-0.7, 0.7); bumped = true; }
         else if (this.x > R) { this.x = R; this._turnTo = Math.PI + rand(-0.7, 0.7); bumped = true; }
         if (this.y < T)      { this.y = T; this._turnTo = Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
         else if (this.y > B) { this.y = B; this._turnTo = -Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
-        if (bumped) { this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+        if (bumped) { this.stateT = 0; this.stateDur = rand(1.4, 2.8); this.fleeRun = 0; }
       }
 
       // 位置兜底夹在屏内
       this.x = clamp(this.x, b.x + 16 * MS, b.x + b.w - 16 * MS);
       this.y = clamp(this.y, b.y + 16 * MS, b.y + b.h - 16 * MS);
-      // 渲染朝向快速对齐实际航向（撞墙换向时也不会长时间背对前进方向）
+      // 渲染朝向快速对齐实际航向（撞墙/反窜时也不会长时间背对前进方向）
       let dv = this.swimAng - this._visAng;
       while (dv > Math.PI) dv -= Math.PI * 2;
       while (dv < -Math.PI) dv += Math.PI * 2;
@@ -1621,6 +1753,8 @@ module.exports = function (G) {
       if (Math.abs(x - this.x) > hw || Math.abs(y - cy) > hh) return false;
       if (this.type === "mouse") {
         if (G.scene && G.scene.mouseBg === "swarm") {
+          // 呼吸换场（逃边/安静/淡入）期间不可命中；淡入到一定程度才恢复判定
+          if (G.swarmBreathing() || (this._swarmAlpha != null && this._swarmAlpha < 0.35)) return false;
           // 群鼠：加高命中盒覆盖头+耳（视觉 120×100,命中 116×86 中心略偏上）
           const hw2 = this.baseW * this.sc * 0.42, hh2 = this.baseH * this.sc * 0.74;
           return Math.abs(x - this.x) <= hw2 && Math.abs(y - this.y - this.baseH * this.sc * 0.08) <= hh2;
@@ -1634,7 +1768,9 @@ module.exports = function (G) {
     /* ============ 渲染 ============ */
     render(ctx, t) {
       const vs = this.vanishT > 0 ? (0.25 + 0.75 * this.vanishT / 0.3) : 1;
-      const alpha = this.fade * (this.vanishT > 0 ? this.vanishT / 0.3 : 1);
+      // 群鼠额外叠加波次呼吸透明度（逃边淡出/边入淡入）；其它玩法该字段缺省为 1
+      const breathA = (this.type === "mouse" && G.scene && G.scene.mouseBg === "swarm" && this._swarmAlpha != null) ? this._swarmAlpha : 1;
+      const alpha = this.fade * (this.vanishT > 0 ? this.vanishT / 0.3 : 1) * breathA;
       if (alpha <= 0.02) return;
       ctx.save();
       ctx.globalAlpha = clamp(alpha, 0, 1);
@@ -1650,7 +1786,11 @@ module.exports = function (G) {
           ctx.beginPath(); ctx.arc(0, 0, 66 * this.sc, 0, Math.PI * 2); ctx.fill();
           // 整只鼠按爬行方向旋转（头朝行进方向）+ 极轻的待机晃动，动作与移动方向一致
           ctx.rotate((this._visAng || 0) + Math.PI / 2 + Math.sin(t * 1.7 + (this.phase || 0)) * 0.03);
-          const s = this.sc * vs;
+          // 姿态给猫看：停步抬头(tell)轻微放大、被爪惊到缩身(fleeT)压小，均为命中/反窜预兆
+          let poseK = 1;
+          if (this.state === "tell") poseK = 1.1;
+          else if (this.fleeT > 0) poseK = 0.9;
+          const s = this.sc * vs * poseK;
           ctx.scale(s, s);
           ctx.translate(-60, -50);
           G.draw.mouseTop(ctx, this, t);
@@ -1804,9 +1944,11 @@ module.exports = function (G) {
   /* 多只模式：猎物同时在场数量随阶段循序渐进（①3 → ②5 → ③7，上限 7）；单只模式不变。
      捕鼠按洞口数封顶（至少留 1 个空洞供轮换）。 */
   G.stageTargetCount = () => {
-    // 群鼠乱窜：固定数量（4/5/6），不受「猎物数量」设置影响（俯视群鼠玩法本身即多只）
+    // 群鼠乱窜：固定 3/4/4 只并硬顶 4，不受「猎物数量」设置影响（俯视群鼠玩法本身即多只；
+    // 阶段②③难度靠速度/命中窗口/怕爪鼠提升，不靠加数量，避免过度刺激与拥挤）
     if (G.config.targetType === "mouse" && G.scene && G.scene.mouseBg === "swarm") {
-      return ({ 1: 4, 2: 5, 3: 6 })[G.session.stage] || 4;
+      const SP = G.SWARM_PARAMS;
+      return Math.min(SP.maxActive, SP.active[G.session.stage] || SP.active[1]);
     }
     // 鱼群巡游：小银鱼聚成"饵球"；数量按「猎物数量」设置分两档、随阶段递增。
     // 必须放在下面的单只判断之前——否则单只设置下鱼群也会只剩 1 条，失去结群效果。
@@ -1846,5 +1988,9 @@ module.exports = function (G) {
         preys.push(new Prey(G.config.targetType));
       }
     }
+    // 群鼠：补员后重新分配怕爪鼠（新补进来的鼠也要参与），总数仍受 maxActive 封顶
+    if (inSwarmMode()) swarmAssignSkittish();
   };
+  // 开局重置全场波次时钟（active 段、首个波次间隔、怕爪分配），由 game.js startGame 调用
+  G.swarmReset = () => { if (inSwarmMode()) swarmReset(); };
 };
