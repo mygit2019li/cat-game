@@ -1299,6 +1299,25 @@ module.exports = function (G) {
     });
   };
 
+  /* 原生模板广告位（由 ad.js 读取）：只落在首页竖屏的"玩法卡与底栏之间"空白带上。
+     横屏不出——那条带被 hero 猫图/场景图与「开始玩耍」键占据，硬塞会盖猫或盖按钮。
+     返回 null 时 ad.enter 静默跳过（宁可空着，也不盖核心操作）。 */
+  G.homeAdRect = () => {
+    const { W, H, land, safe } = layout();
+    if (land) return null;                       // 横屏：猫图 + 开始键占了这条带，不展示
+    const bottomH = 60, bottomY = H - safe.bottom - bottomH - 14;
+    const modesTop = safe.top + 72;
+    const modesBottom = Math.min(bottomY - 14, modesTop + (H - safe.top - safe.bottom) * .52);
+    const left = 24;
+    const top = modesBottom + 14;
+    const bandBottom = bottomY - 8;              // 距底栏留 8，不贴边
+    const width = Math.min(W - left - safe.right - 24, 340);
+    const height = bandBottom - top;
+    /* 留白带净高不足（矮屏 / 面板被拉高挤占）时不出，避免广告比留白还高 */
+    if (width < 160 || height < 88) return null;
+    return { left, top: Math.round(top), width: Math.floor(width) };
+  };
+
   /* ================= 设置 ================= */
   /* 用游戏内的鱼绘制函数画预览鱼：预览与实机造型完全一致（设计空间 120×72，中心 60,36） */
   function drawRealFish(c, sp, v, cx, cy, k, ph) {
@@ -3957,116 +3976,21 @@ module.exports = function (G) {
   };
   G.pokeHud = () => { ui.hudDimT = 0; };
 
-  /* ================= 游戏前倒计时 =================
-     当前状态：G.screen === "counting"，只出现在 G.startGame() 之后、beginPlay() 之前。
-     视觉规则：独立全屏准备页；无卡片、无进度条、无按钮；数字下方仅展示一条猫咪提示，并上下翻页。 */
-  ui.countdown = {
-    hints: [
-      "清晨和黄昏猫咪最活跃",
-      "尾巴快速摆动时可能分心",
-      "缓慢眨眼说明猫咪比较放松",
-      "耳朵贴平时可能有点紧张",
-      "咕噜声通常代表舒适",
-      "喂食时不要打扰猫咪",
-      "避免拉扯尾巴、四肢和胡须",
-      "猫咪停顿瞬间更容易互动",
-      "互动后给猫咪一点休息空间"
-    ],
-    index: 0,
-    lastAt: 0,
-    reset: function (now) {
-      this.index = 0;
-      this.lastAt = now || 0;
-    }
-  };
-
+  /* ================= 倒计时 ================= */
   ui.drawCountdown = (c) => {
-    const { W, H, land, safe } = layout();
-    const safeTop = safe.top, safeBottom = safe.bottom, safeLeft = safe.left, safeRight = safe.right;
-    const cx = safeLeft + (W - safeLeft - safeRight) / 2;
-
+    const { W, H } = layout();
+    ctx.fillStyle = C.countMask; ctx.fillRect(0, 0, W, H);
+    const frac = c - Math.floor(c);
+    const sc2 = 0.8 + frac * 0.5;
     ctx.save();
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = "#f4fbf8";
-    ctx.fillRect(0, 0, W, H);
-
-    const glowA = ctx.createRadialGradient(W * 0.12, H * 0.18, 0, W * 0.12, H * 0.18, Math.max(W, H) * 0.34);
-    glowA.addColorStop(0, "rgba(15,157,142,.14)");
-    glowA.addColorStop(1, "rgba(15,157,142,0)");
-    ctx.fillStyle = glowA;
-    ctx.fillRect(0, 0, W, H);
-
-    const glowB = ctx.createRadialGradient(W * 0.88, H * 0.84, 0, W * 0.88, H * 0.84, Math.max(W, H) * 0.34);
-    glowB.addColorStop(0, "rgba(255,176,46,.12)");
-    glowB.addColorStop(1, "rgba(255,176,46,0)");
-    ctx.fillStyle = glowB;
-    ctx.fillRect(0, 0, W, H);
+    ctx.translate(W / 2, H * 0.42); ctx.scale(sc2, sc2);
+    ctx.globalAlpha = clamp(frac * 2, 0, 1);
+    text(String(Math.ceil(c)), 0, 0, "bold 96px sans-serif", "#fff");
     ctx.restore();
-
-    const topY = safeTop + (land ? 34 : 24);
-    const statusText = "准备出发";
-    const durationText = "本局倒计时 · 3 秒";
-    text(statusText, land ? safeLeft + 42 : cx, topY, fitFont(statusText, land ? 17 : 16, W * 0.24, "800") + "px sans-serif", "#0f9d8e", land ? "left" : "center");
-    if (land) {
-      text(durationText, safeLeft + W - safeRight - 42, topY, fitFont(durationText, 16, W * 0.24, "700") + "px sans-serif", "rgba(83,117,124,.78)", "right");
-    }
-
-    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
-    if (now - ui.countdown.lastAt >= 950) {
-      ui.countdown.index = (ui.countdown.index + 1) % ui.countdown.hints.length;
-      ui.countdown.lastAt = now;
-    }
-    const hint = ui.countdown.hints[ui.countdown.index] || ui.countdown.hints[0];
-
-    const centerY = safeTop + (H - safeTop - safeBottom) * 0.44;
-    const title = "猫咪互动准备中";
-    text(title, cx, centerY - (land ? 118 : 104), fitFont(title, land ? 28 : 24, W * 0.58, "900") + "px sans-serif", "#0f9d8e");
-
-    const rawRemaining = Math.max(0, Number(c) || 0);
-    const remaining = Math.max(0, Math.ceil(rawRemaining));
-    const countdownLabel = remaining > 0 ? String(remaining) : "开始";
-    const digitSize = (land ? Math.min(W * 0.28, H * 0.58, 260) : Math.min(W * 0.42, H * 0.42, 220)) * 0.7;
-    const secondIn = remaining > 0 ? Math.min(1, Math.max(0, rawRemaining - Math.floor(rawRemaining))) : 1;
-    const enterT = Math.min(1, secondIn / 0.22);
-    const easeOut = 1 - Math.pow(1 - enterT, 3);
-    const numScale = (remaining > 0 ? 0.82 + 0.22 * easeOut : 0.9 + 0.22 * Math.min(1, rawRemaining / 0.22)) * (1 + 0.015 * Math.sin(performance.now() / 230));
-    const numAlpha = remaining > 0 ? 0.2 + 0.8 * easeOut : 0.96;
-    const numColor = remaining > 0 ? "#ffb02e" : "#0f9d8e";
-
-    ctx.save();
-    ctx.translate(cx, centerY);
-    ctx.scale(numScale, numScale);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.globalAlpha = numAlpha;
-    ctx.font = "900 " + Math.round(digitSize) + "px sans-serif";
-    ctx.fillStyle = numColor;
-    ctx.fillText(countdownLabel, 0, 0);
-    ctx.restore();
-
-    const hintY = safeTop + (H - safeTop - safeBottom) * 0.70;
-    const hintW = Math.min(land ? 920 : 560, W - safeLeft - safeRight - 64);
-    const arrow = "▶";
-    const hintFont = fitFont(hint, land ? 22 : 18, hintW - 36, "700");
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.font = "900 " + hintFont + "px sans-serif";
-    ctx.fillStyle = "#0f9d8e";
-    const arrowW = Math.min(30, ctx.measureText(arrow).width + 12);
-    ctx.fillText(arrow, cx - (ctx.measureText(hint).width + arrowW) / 2 + arrowW / 2, hintY);
-    ctx.fillStyle = "#53757c";
-    ctx.fillText(hint, cx + arrowW / 2, hintY);
-    ctx.restore();
-
-    const metaY = safeTop + (H - safeTop - safeBottom) * 0.82;
-    text("独立页 · 无卡片 · 无进度条 · 无按钮", cx, metaY, fitFont("独立页 · 无卡片 · 无进度条 · 无按钮", land ? 14 : 13, W * 0.72) + "px sans-serif", "rgba(83,117,124,.72)");
-
-    const footerY = H - Math.max(34, safeBottom) + 18;
-    text("倒计时结束后自动进入游戏", cx, footerY, fitFont("倒计时结束后自动进入游戏", land ? 15 : 14, W * 0.72, "700") + "px sans-serif", "rgba(83,117,124,.78)");
-
-    ui.countdown.hintRect = { x: cx - hintW / 2, y: hintY - 24, w: hintW, h: 48 };
+    text("准备……", W / 2, H * 0.42 + 110, "18px sans-serif", "rgba(255,255,255,.85)");
+    // 鱼玩法：开局亮出本局海域主题名（每局自动轮换）
+    const sea = G.config.targetType === "fish" && G.session.sea;
+    if (sea) text("本局海域 · " + sea.name, W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
   };
 
   /* ================= 暂停 ================= */
@@ -4302,5 +4226,23 @@ module.exports = function (G) {
       text("返回首页", rx + bw2 / 2, by4 + bh2 / 2, "17px sans-serif", C.ink);
       btn(rx, by4, bw2, bh2, () => { G.switchScreen("home"); G.clearPreys(); });
     }
+  };
+
+  /* 原生模板广告位（由 ad.js 读取）：只落在结算页竖屏的"标题 ↔ 数据卡"窄带里，
+     整条位于四按钮（2×2 网格，by1/by4）与数据卡上方，不压任何按钮与数据。
+     横屏不出——设置键 + 模式标签药丸把标题带占满，没有干净留白。
+     带子太窄（卡片被推得靠上、留白不足）时返回 null，静默跳过。 */
+  G.resultAdRect = () => {
+    const { W, H, land, safe } = layout();
+    if (land) return null;                       // 横屏标题区被设置键 + 模式标签占满，不展示
+    const innerH = H - safe.top - safe.bottom;
+    const left = 24;
+    const top = safe.top + innerH * 0.15 + 52;   // 描述行（标题 +38，约 14px）之下
+    const width = Math.min(W - left - safe.right - 24, 320);
+    const bh2 = 54;
+    const btnTop = H - safe.bottom - 26 - 2 * (bh2 + 14);   // 2×2 网格上沿
+    const height = btnTop - top - 8;           // 距按钮留 8
+    if (width < 160 || height < 84) return null;  // 留白太窄不出
+    return { left, top: Math.round(top), width: Math.floor(width) };
   };
 };

@@ -1019,21 +1019,21 @@ module.exports = function (G) {
     // 俯视：耳朵长在头两侧偏后，露出耳廓背面 + 一点内耳
     ear(44, 22, -1); ear(76, 22, 1);
 
-    // ---- 身体（俯视轮廓：细长鼠形——鼻尖收窄 → 头部渐宽 → 肩 → 腰明显收细 → 圆臀膨大；
-    //      设计稿"细长鼠形"：腰比肩/臀窄 25%+，臀略宽于肩，避免上一版的"水滴/香肠"观感）----
+    // ---- 身体（俯视轮廓：细长鼠形——鼻尖收窄 → 头宽 → 肩 → 腰急剧收细（腰仅肩宽 50%）→ 圆臀膨大；
+    //      设计稿"细长鼠形"，修复上一版"水滴/香肠"观感）----
     const bodyPath = () => {
       ctx.beginPath();
       ctx.moveTo(60, 3);                               // 鼻尖
-      ctx.bezierCurveTo(66, 3, 69.5, 9, 70, 18);       // 右吻→右头侧（收窄）
-      ctx.bezierCurveTo(70.5, 27, 74, 33, 75, 42);     // 头→肩（肩为最宽点）
-      ctx.bezierCurveTo(76.5, 54, 72.5, 62, 71.5, 70); // 右身（腰明显收细）
-      ctx.bezierCurveTo(74.5, 78, 75, 85, 71, 91);     // 右臀（膨大后收窄）
-      ctx.bezierCurveTo(67.5, 96, 63, 97.5, 60, 97.5); // 右臀底→尾根
-      ctx.bezierCurveTo(57, 97.5, 52.5, 96, 49, 91);   // 左臀底
-      ctx.bezierCurveTo(45, 85, 45.5, 78, 48.5, 70);   // 左臀→左腰（与右对称收窄）
-      ctx.bezierCurveTo(47.5, 62, 43.5, 54, 45, 42);   // 左腰→左肩
-      ctx.bezierCurveTo(46, 33, 49.5, 27, 50, 18);     // 左肩→左头侧
-      ctx.bezierCurveTo(50.5, 9, 54, 3, 60, 3);        // 左吻→鼻尖
+      ctx.bezierCurveTo(65.5, 3, 69, 9, 69.5, 17);     // 右吻→右头侧
+      ctx.bezierCurveTo(70, 26, 73.5, 32, 74.5, 40);   // 头→肩（肩为最宽点，半宽 14.5）
+      ctx.bezierCurveTo(75.5, 51, 69, 60, 67.5, 68);   // 右身（急剧收腰，腰部半宽 7.5）
+      ctx.bezierCurveTo(73, 75, 74.5, 84, 70, 90.5);   // 右臀（重新膨大，半宽 13）
+      ctx.bezierCurveTo(67, 95.5, 63, 97.5, 60, 97.5); // 右臀底→尾根
+      ctx.bezierCurveTo(57, 97.5, 53, 95.5, 50, 90.5); // 左臀底
+      ctx.bezierCurveTo(45.5, 84, 47, 75, 52.5, 68);   // 左臀→左腰（与右对称）
+      ctx.bezierCurveTo(51, 60, 44.5, 51, 45.5, 40);   // 左腰→左肩
+      ctx.bezierCurveTo(46.5, 32, 50, 26, 50.5, 17);   // 左肩→左头侧
+      ctx.bezierCurveTo(51, 9, 54.5, 3, 60, 3);        // 左吻→鼻尖
       ctx.closePath();
     };
     const bg = ctx.createRadialGradient(53, 27, 4, 62, 58, 76);
@@ -1057,16 +1057,16 @@ module.exports = function (G) {
     ctx.fillStyle = ao;
     ctx.fillRect(20, 46, 84, 60);
     // 左右腹侧白带（沿体侧边缘，模拟白色胸腹；底色取变体 belly，霜尖=纯白；宽度随收窄后的体型）
-    const bl = ctx.createLinearGradient(44, 0, 58, 0);
+    const bl = ctx.createLinearGradient(46, 0, 58, 0);
     bl.addColorStop(0, _hexA(pal.bellyBand, bellyA));
     bl.addColorStop(1, _hexA(pal.bellyBand, 0));
     ctx.fillStyle = bl;
-    ctx.beginPath(); ctx.ellipse(49, 65, 7, 28, 0.06, 0, Math.PI * 2); ctx.fill();
-    const br = ctx.createLinearGradient(76, 0, 62, 0);
+    ctx.beginPath(); ctx.ellipse(50, 64, 6, 26, 0.06, 0, Math.PI * 2); ctx.fill();
+    const br = ctx.createLinearGradient(74, 0, 62, 0);
     br.addColorStop(0, _hexA(pal.bellyBand, bellyA));
     br.addColorStop(1, _hexA(pal.bellyBand, 0));
     ctx.fillStyle = br;
-    ctx.beginPath(); ctx.ellipse(71, 65, 7, 28, -0.06, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(70, 64, 6, 26, -0.06, 0, Math.PI * 2); ctx.fill();
     // 吻部/下巴白带（深毛色鼠弱化，避免整体偏浅）
     const mw = ctx.createRadialGradient(60, 16, 1, 60, 16, 15);
     mw.addColorStop(0, _hexA(pal.bellyBand, Math.min(1, bellyA * 1.35)));
@@ -1114,7 +1114,7 @@ module.exports = function (G) {
     spine.addColorStop(0.72, spineMid);
     spine.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = spine;
-    ctx.beginPath(); ctx.ellipse(60, 54, 7, 32, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(60, 54, 6, 31, 0, 0, Math.PI * 2); ctx.fill();
 
     // ---- 细白胡须（俯视：从吻端向前（屏幕上方）散开，不再左右平伸）----
     ctx.strokeStyle = "rgba(255,255,255,.58)"; ctx.lineWidth = 0.9; ctx.lineCap = "round";

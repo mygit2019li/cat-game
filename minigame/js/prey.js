@@ -2048,9 +2048,9 @@ module.exports = function (G) {
       if (Math.abs(x - this.x) > hw || Math.abs(y - cy) > hh) return false;
       if (this.type === "mouse") {
         if (G.scene && G.scene.mouseBg === "swarm") {
-          // 群鼠：加高命中盒覆盖头+耳。baseW/baseH 已含 0.72 群鼠缩放，
-          // 视觉 120×100 → 命中 116×86 中心略偏上 的比例保持不变，随鼠一起等比缩小。
-          const hw2 = this.baseW * this.sc * 0.42, hh2 = this.baseH * this.sc * 0.74;
+          // 群鼠：加高命中盒覆盖头+耳（视觉 120×100，命中 112×84 中心略偏上，覆盖收窄后的肩/臀/尾根）。
+          // baseW/baseH 已含 0.72 群鼠缩放，随鼠一起等比缩小。
+          const hw2 = this.baseW * this.sc * 0.40, hh2 = this.baseH * this.sc * 0.70;
           return Math.abs(x - this.x) <= hw2 && Math.abs(y - this.y - this.baseH * this.sc * 0.08) <= hh2;
         }
         return (this.state === "peek" || this.state === "dart") && this.lift < 48;

@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>猫咪轮廓倒计时数字组件</title>
+  <style>
+    :root {
+      --cd-bg: #07101f;
+      --cd-bg-soft: rgba(255, 255, 255, 0.08);
+      --cd-ink: #f4fbff;
+      --cd-muted: rgba(238, 248, 255, 0.76);
+      --cd-cat-body: #f7fbff;
+      --cd-cat-shade: #c8d4e6;
+      --cd-cat-line: rgba(12, 24, 38, 0.18);
+      --cd-neon-outer: #36d9ff;
+      --cd-neon-mid: #ff8ad8;
+      --cd-neon-glow: rgba(54, 217, 255, 0.34);
+      --cd-accent: #ff8ad8;
+      --cd-panel: rgba(7, 17, 32, 0.72);
+      --cd-border: rgba(151, 225, 255, 0.24);
+      --cd-shadow: rgba(0, 0, 0, 0.28);
+      --cd-digit-size: clamp(180px, 26vw, 330px);
+      --cd-radius: 28px;
+      color-scheme: dark;
+    }
+
+    [data-theme="light"] {
+      --cd-bg: #eef8f6;
+      --cd-bg-soft: rgba(255, 255, 255, 0.58);
+      --cd-ink: #113b43;
+      --cd-muted: #53757c;
+      --cd-cat-body: #ffffff;
+      --cd-cat-shade: #dbeaf0;
+      --cd-cat-line: rgba(17, 59, 67, 0.14);
+      --cd-neon-outer: #0f9d8e;
+      --cd-neon-mid: #ffb02e;
+      --cd-neon-glow: rgba(15, 157, 142, 0.22);
+      --cd-accent: #ffb02e;
+      --cd-panel: rgba(255, 255, 255, 0.78);
+      --cd-border: rgba(15, 157, 142, 0.2);
+      --cd-shadow: rgba(23, 68, 63, 0.12);
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(circle at 18% 12%, rgba(96, 74, 255, 0.18), transparent 28%),
+        radial-gradient(circle at 84% 18%, rgba(255, 96, 199, 0.16), transparent 24%),
+        radial-gradient(circle at 50% 82%, rgba(0, 196, 255, 0.14), transparent 32%),
+        var(--cd-bg);
+      color: var(--cd-ink);
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      transition: background 220ms ease, color 220ms ease;
+    }
+
+    [data-theme="light"] body {
+      background:
+        radial-gradient(circle at 18% 12%, rgba(15, 157, 142, 0.12), transparent 30%),
+        radial-gradient(circle at 82% 20%, rgba(255, 176, 46, 0.12), transparent 26%),
+        radial-gradient(circle at 50% 82%, rgba(15, 157, 142, 0.08), transparent 34%),
+        var(--cd-bg);
+    }
+
+    .stage {
+      min-height: 100vh;
+      padding: clamp(16px, 3vw, 32px);
+      display: grid;
+      gap: clamp(14px, 2.2vw, 24px);
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px;
+      border: 1px solid var(--cd-border);
+      border-radius: 22px;
+      background: var(--cd-panel);
+      box-shadow: 0 18px 44px var(--cd-shadow);
+      backdrop-filter: blur(12px);
+    }
+
+    .toolbar h1 {
+      margin: 0;
+      font-size: clamp(18px, 2vw, 24px);
+      letter-spacing: 0.02em;
+    }
+
+    .toolbar p {
+      margin: 5px 0 0;
+      color: var(--cd-muted);
+      font-size: 13px;
+    }
+
+    .theme-switch {
+      display: inline-flex;
+      padding: 5px;
+      border-radius: 999px;
+      border: 1px solid var(--cd-border);
+      background: var(--cd-bg-soft);
+      gap: 5px;
+    }
+
+    .theme-switch button {
+      border: 0;
+      border-radius: 999px;
+      padding: 9px 14px;
+      color: var(--cd-muted);
+      background: transparent;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .theme-switch button.active {
+      color: #fff;
+      background: var(--cd-neon-outer);
+      box-shadow: 0 0 18px var(--cd-neon-glow);
+    }
+
+    [data-theme="light"] .theme-switch button.active {
+      color: #fff;
+    }
+
+    .countdown {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-height: min(70vh, 620px);
+      perspective: 1100px;
+    }
+
+    .halo {
+      position: absolute;
+      width: min(66vw, 700px);
+      height: min(66vw, 700px);
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--cd-neon-glow) 0%, transparent 64%);
+      filter: blur(2px);
+      animation: halo 2.8s ease-in-out infinite;
+    }
+
+    .cat-digit {
+      position: relative;
+      width: var(--cd-digit-size);
+      height: var(--cd-digit-size);
+      transform-style: preserve-3d;
+      animation: pop 1s ease both;
+    }
+
+    .cat-digit svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      filter:
+        drop-shadow(0 0 14px var(--cd-neon-glow))
+        drop-shadow(0 0 34px var(--cd-neon-glow));
+      animation: breathe 1.6s ease-in-out infinite alternate;
+    }
+
+    .cat-digit[data-value="2"] {
+      animation: pop 1s ease both;
+    }
+
+    .cat-digit[data-value="1"] {
+      animation: pop 1s ease both, wiggle 1.4s ease-in-out 0.25s 1;
+    }
+
+    .digit-shell {
+      fill: none;
+      stroke: var(--cd-neon-outer);
+      stroke-width: 18;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      paint-order: stroke;
+      filter: drop-shadow(0 0 10px var(--cd-neon-glow));
+    }
+
+    .digit-shell-inner {
+      fill: none;
+      stroke: var(--cd-neon-mid);
+      stroke-width: 6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.85;
+    }
+
+    .cat-body {
+      fill: var(--cd-cat-body);
+      stroke: var(--cd-neon-mid);
+      stroke-width: 2.2;
+    }
+
+    .cat-shade {
+      fill: var(--cd-cat-shade);
+    }
+
+    .cat-line {
+      fill: none;
+      stroke: var(--cd-cat-line);
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .cat-eye {
+      fill: #ffffff;
+    }
+
+    .cat-iris {
+      fill: #2fbf9d;
+    }
+
+    .cat-pupil {
+      fill: #111826;
+    }
+
+    .cat-eye-shine {
+      fill: #ffffff;
+    }
+
+    .cat-nose {
+      fill: #ff8fa9;
+    }
+
+    .cat-mouth {
+      fill: none;
+      stroke: #8a6b78;
+      stroke-width: 2.1;
+      stroke-linecap: round;
+    }
+
+    .cat-whisker {
+      fill: none;
+      stroke: var(--cd-cat-line);
+      stroke-width: 2;
+      stroke-linecap: round;
+      opacity: 0.7;
+    }
+
+    .cat-foot {
+      fill: var(--cd-cat-shade);
+    }
+
+    .caption {
+      position: absolute;
+      bottom: 28px;
+      width: 100%;
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      text-align: center;
+      color: var(--cd-muted);
+      font-size: clamp(14px, 1.4vw, 18px);
+      pointer-events: none;
+    }
+
+    .caption strong {
+      color: var(--cd-ink);
+      font-size: clamp(20px, 2.4vw, 28px);
+    }
+
+    .caption .hint {
+      max-width: 720px;
+      line-height: 1.5;
+    }
+
+    .token-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .token {
+      padding: 12px;
+      border-radius: 18px;
+      border: 1px solid var(--cd-border);
+      background: var(--cd-panel);
+      box-shadow: 0 12px 28px var(--cd-shadow);
+    }
+
+    .token span {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--cd-muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .token b {
+      display: block;
+      font-size: 14px;
+      letter-spacing: 0.01em;
+    }
+
+    .token i {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      margin-right: 8px;
+      border-radius: 6px;
+      vertical-align: -4px;
+      background: var(--swatch);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22);
+    }
+
+    @keyframes halo {
+      0%, 100% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.06); opacity: 1; }
+    }
+
+    @keyframes pop {
+      0% { transform: scale(1.32) rotate(-2deg); opacity: 0; }
+      48% { transform: scale(0.97) rotate(1deg); opacity: 1; }
+      74% { transform: scale(1.035) rotate(0deg); }
+      100% { transform: scale(1) rotate(0deg); }
+    }
+
+    @keyframes breathe {
+      from { transform: scale(1); }
+      to { transform: scale(1.025); }
+    }
+
+    @keyframes wiggle {
+      0%, 100% { transform: rotate(0deg); }
+      22% { transform: rotate(-2.2deg); }
+      48% { transform: rotate(1.8deg); }
+      72% { transform: rotate(-0.8deg); }
+    }
+
+    @media (max-width: 720px) {
+      .stage {
+        grid-template-rows: auto auto;
+      }
+
+      .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .theme-switch {
+        justify-content: center;
+      }
+
+      .countdown {
+        min-height: 62vh;
+      }
+
+      .token-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage" data-theme="dark">
+    <section class="toolbar" aria-label="主题切换">
+      <div>
+        <h1>猫咪轮廓倒计时数字组件</h1>
+        <p>数字轮廓由猫咪身体构成，颜色使用 CSS 主题变量，适配深色与浅色背景。</p>
+      </div>
+      <div class="theme-switch" role="tablist" aria-label="主题">
+        <button class="active" data-set-theme="dark" type="button">深色</button>
+        <button data-set-theme="light" type="button">浅色</button>
+      </div>
+    </section>
+
+    <section class="countdown" aria-live="polite">
+      <div class="halo" aria-hidden="true"></div>
+      <div class="cat-digit" data-value="3" id="catDigit" aria-label="倒计时 3">
+        <svg viewBox="0 0 512 512" role="img" aria-labelledby="catDigitTitle">
+          <title id="catDigitTitle">猫咪形状的数字 3</title>
+          <path class="digit-shell" d="M162 84 C108 94 70 140 70 196 C70 260 132 300 210 300 C282 300 340 268 340 210 C340 158 294 124 228 122 L168 120"/>
+          <path class="digit-shell" d="M326 232 C364 236 420 264 420 330 C420 414 344 460 244 460 C154 460 88 424 78 356"/>
+          <path class="digit-shell-inner" d="M168 112 C118 122 86 158 86 198 C86 252 136 286 208 286 C274 286 322 256 322 206 C322 166 282 138 226 136"/>
+          <path class="digit-shell-inner" d="M312 250 C354 256 402 282 402 336 C402 408 336 444 246 444 C170 444 112 414 102 364"/>
+
+          <path class="cat-body" d="M156 186 C130 158 96 154 76 172 C64 184 60 206 62 228 C56 196 58 158 84 134 C104 114 142 112 166 130 C188 108 228 102 260 112 C292 100 328 106 348 132 C374 154 374 198 358 230 C374 262 380 306 374 352 C364 426 306 470 232 470 C160 470 104 430 92 362 C82 306 92 252 118 214 C128 198 142 190 156 186 Z"/>
+          <path class="cat-shade" d="M132 158 C110 154 94 162 88 178 C80 198 84 226 94 246 C82 218 84 186 100 168 C108 160 120 156 132 158 Z"/>
+          <path class="cat-shade" d="M302 126 C328 118 352 128 362 150 C372 174 368 206 354 232 C364 198 358 164 340 148 C330 138 316 130 302 126 Z"/>
+          <path class="cat-shade" d="M132 372 C126 334 136 300 158 280 C152 308 152 342 162 372 C160 390 152 402 142 406 C138 396 134 384 132 372 Z"/>
+          <path class="cat-shade" d="M336 412 C360 390 370 356 366 324 C384 352 386 394 370 424 C360 436 348 440 336 436 C334 428 334 420 336 412 Z"/>
+
+          <path class="cat-line" d="M184 196 C196 184 214 184 226 194"/>
+          <path class="cat-line" d="M288 194 C300 184 318 184 330 196"/>
+          <path class="cat-line" d="M168 252 C196 274 222 284 250 284 C278 284 306 274 332 252"/>
+          <path class="cat-line" d="M232 284 C232 316 242 340 260 352 C284 366 316 364 336 348"/>
+
+          <ellipse class="cat-eye" cx="188" cy="230" rx="28" ry="32"/>
+          <ellipse class="cat-eye" cx="298" cy="226" rx="28" ry="32"/>
+          <ellipse class="cat-iris" cx="188" cy="234" rx="16" ry="18"/>
+          <ellipse class="cat-iris" cx="298" cy="230" rx="16" ry="18"/>
+          <ellipse class="cat-pupil" cx="188" cy="238" rx="7" ry="11"/>
+          <ellipse class="cat-pupil" cx="298" cy="234" rx="7" ry="11"/>
+          <circle class="cat-eye-shine" cx="194" cy="226" r="5"/>
+          <circle class="cat-eye-shine" cx="304" cy="222" r="5"/>
+
+          <path class="cat-nose" d="M238 262 C244 254 262 254 268 262 C270 274 258 286 252 288 C246 286 236 274 238 262 Z"/>
+          <path class="cat-mouth" d="M252 288 C248 298 238 306 226 304 M252 288 C256 298 266 306 278 304"/>
+          <path class="cat-whisker" d="M188 268 C158 262 132 256 112 250 M188 282 C158 282 134 282 114 286 M308 264 C338 258 364 252 384 246 M308 278 C338 278 362 278 382 282"/>
+
+          <ellipse class="cat-foot" cx="190" cy="442" rx="22" ry="16"/>
+          <ellipse class="cat-foot" cx="244" cy="454" rx="22" ry="16"/>
+          <ellipse class="cat-foot" cx="296" cy="444" rx="22" ry="16"/>
+        </svg>
+      </div>
+
+      <div class="caption">
+        <strong id="captionTitle">准备出发</strong>
+        <p class="hint">猫咪身体构成数字轮廓，外圈霓虹线跟随主题变量切换，保证深色和浅色背景下都有清晰边界。</p>
+      </div>
+    </section>
+
+    <section class="token-strip" aria-label="主题变量">
+      <div class="token"><span>--cd-bg</span><b><i style="--swatch: var(--cd-bg)"></i>背景</b></div>
+      <div class="token"><span>--cd-neon-outer</span><b><i style="--swatch: var(--cd-neon-outer)"></i>主轮廓</b></div>
+      <div class="token"><span>--cd-neon-mid</span><b><i style="--swatch: var(--cd-neon-mid)"></i>内轮廓</b></div>
+      <div class="token"><span>--cd-cat-body</span><b><i style="--swatch: var(--cd-cat-body)"></i>猫体填充</b></div>
+    </section>
+  </main>
+
+  <script>
+    const stage = document.querySelector(".stage");
+    const digit = document.querySelector("#catDigit");
+    const caption = document.querySelector("#captionTitle");
+    const buttons = Array.from(document.querySelectorAll("[data-set-theme]"));
+    let value = 3;
+
+    const setTheme = (theme) => {
+      stage.setAttribute("data-theme", theme);
+      buttons.forEach((button) => button.classList.toggle("active", button.dataset.setTheme === theme));
+    };
+
+    const restartAnimation = () => {
+      digit.style.animation = "none";
+      void digit.offsetWidth;
+      digit.style.animation = "";
+    };
+
+    const tick = () => {
+      value = value <= 1 ? 3 : value - 1;
+      digit.dataset.value = String(value);
+      digit.setAttribute("aria-label", "倒计时 " + value);
+      caption.textContent = value === 1 ? "马上开始" : "准备出发";
+      restartAnimation();
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener("click", () => setTheme(button.dataset.setTheme));
+    });
+
+    window.setInterval(tick, 1000);
+  </script>
+</body>
+</html>

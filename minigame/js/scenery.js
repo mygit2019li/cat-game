@@ -771,29 +771,41 @@ module.exports = function (G) {
     for (let i = 0; i < nPlanks; i++) {
       const y = i * ph;
       // 板间色阶微差（±4% 亮度）：奇数板微亮、偶数板微暗
-      c2.fillStyle = (i % 2 === 0) ? "rgba(0,0,0,.10)" : "rgba(255,240,210,.045)";
+      c2.fillStyle = (i % 2 === 0) ? "rgba(0,0,0,.14)" : "rgba(255,240,210,.055)";
       c2.fillRect(0, y, W, ph);
-      // 板缝：1px 暗线
-      c2.fillStyle = "rgba(0,0,0,.5)";
-      c2.fillRect(0, y, W, 1);
+      // 板缝：暗线（加深，让板条分界清晰）
+      c2.fillStyle = "rgba(0,0,0,.62)";
+      c2.fillRect(0, y, W, 1.6);
       // 板缝上方 1px 磨损高光（受顶光，上缘亮一丝）
-      c2.fillStyle = "rgba(210,180,140,.06)";
-      c2.fillRect(0, y + 1, W, 1);
+      c2.fillStyle = "rgba(210,180,140,.09)";
+      c2.fillRect(0, y + 2, W, 1);
     }
-    // 板内横向磨损高光（随机几条细亮带，模拟踩磨）
-    for (let i = 0; i < 10; i++) {
+    // 板内横向磨损高光（随机几条细亮带，模拟踩磨；强度提升）
+    for (let i = 0; i < 14; i++) {
       const y = Math.floor(rand(0, nPlanks)) * ph + rand(0.2, 0.8) * ph;
-      const x = rand(0, W * 0.7), len = rand(W * 0.1, W * 0.35);
+      const x = rand(0, W * 0.7), len = rand(W * 0.12, W * 0.4);
       const wg = c2.createLinearGradient(x, 0, x + len, 0);
       wg.addColorStop(0, "rgba(220,190,150,0)");
-      wg.addColorStop(0.5, "rgba(220,190,150,.05)");
+      wg.addColorStop(0.5, "rgba(220,190,150,.09)");
       wg.addColorStop(1, "rgba(220,190,150,0)");
-      c2.fillStyle = wg; c2.fillRect(x, y, len, 2);
+      c2.fillStyle = wg; c2.fillRect(x, y, len, 2.2);
     }
-    // 大块斑驳（保留原 swarmSpots 的斑驳质感，画在地板上、道具下）
+    // 木节疤：每 2 块板 1 个，深褐椭圆 + 外圈年轮弧（强化"真木头"质感）
+    for (let i = 0; i < 3; i++) {
+      const y = (i * 2 + 1) * ph + rand(0.25, 0.75) * ph;
+      const x = rand(0.1, 0.9) * W;
+      const rw = rand(4, 8), rh = rw * 0.62;
+      c2.save(); c2.translate(x, y);
+      c2.fillStyle = "rgba(20,12,6,.5)";
+      c2.beginPath(); c2.ellipse(0, 0, rw, rh, 0, 0, Math.PI * 2); c2.fill();
+      c2.strokeStyle = "rgba(0,0,0,.25)"; c2.lineWidth = 1;
+      c2.beginPath(); c2.ellipse(0, 0, rw * 1.7, rh * 1.7, 0, 0, Math.PI * 2); c2.stroke();
+      c2.restore();
+    }
+    // 大块斑驳（保留原 swarmSpots 的斑驳质感，画在地板上、道具下；强度提升）
     (S.swarmSpots || []).forEach(s => {
       c2.save(); c2.translate(s.x, s.y); c2.rotate(s.rot);
-      c2.fillStyle = s.lite ? "rgba(255,244,224," + (s.a * 0.18).toFixed(3) + ")" : "rgba(0,0,0," + s.a.toFixed(3) + ")";
+      c2.fillStyle = s.lite ? "rgba(255,244,224," + (s.a * 0.28).toFixed(3) + ")" : "rgba(0,0,0," + (s.a * 1.25).toFixed(3) + ")";
       c2.beginPath(); c2.ellipse(0, 0, s.rx, s.ry, 0, 0, Math.PI * 2); c2.fill();
       c2.restore();
     });
@@ -803,32 +815,46 @@ module.exports = function (G) {
     (S.swarmProps || []).forEach(p => {
       c2.save(); c2.translate(p.x, p.y); c2.rotate(p.rot || 0);
       if (p.kind === "sack") {
-        // 粮袋：圆头方身 + 袋口扎绳，暖褐 #6b5638
+        // 粮袋：圆头方身 + 袋口扎绳，暖褐 #6b5638（提亮一档 + 轮廓描边，从地板上跳出来）
         const w = base * 0.16 * p.s, h = w * 1.25;
-        c2.fillStyle = "#5d4a30";                       // 暗部底
-        c2.beginPath(); c2.ellipse(0, h * 0.06, w * 0.5, h * 0.5, 0, 0, Math.PI * 2); c2.fill();
+        c2.fillStyle = "rgba(0,0,0,.38)";
+        c2.beginPath(); c2.ellipse(0, h * 0.06, w * 0.52, h * 0.52, 0, 0, Math.PI * 2); c2.fill();
         const sg = c2.createLinearGradient(-w * 0.5, 0, w * 0.5, 0);
-        sg.addColorStop(0, "#6b5638"); sg.addColorStop(0.5, "#7d6746"); sg.addColorStop(1, "#54432c");
+        sg.addColorStop(0, "#7d6543"); sg.addColorStop(0.5, "#8f7550"); sg.addColorStop(1, "#614d31");
         c2.fillStyle = sg;
         c2.beginPath(); c2.ellipse(0, 0, w * 0.48, h * 0.48, 0, 0, Math.PI * 2); c2.fill();
+        // 袋体轮廓（压深描边，让形状在暗地板上可辨）
+        c2.strokeStyle = "rgba(0,0,0,.4)"; c2.lineWidth = 1.6;
+        c2.beginPath(); c2.ellipse(0, 0, w * 0.48, h * 0.48, 0, 0, Math.PI * 2); c2.stroke();
         // 袋口扎绳
-        c2.strokeStyle = "#3f3320"; c2.lineWidth = Math.max(1.5, w * 0.05);
+        c2.strokeStyle = "#3a2e1d"; c2.lineWidth = Math.max(1.5, w * 0.05);
         c2.beginPath(); c2.moveTo(-w * 0.28, -h * 0.42); c2.lineTo(w * 0.28, -h * 0.42); c2.stroke();
-        // 麻袋纹理（2 道竖弧）
-        c2.strokeStyle = "rgba(0,0,0,.18)"; c2.lineWidth = 1;
+        // 麻袋纹理（2 道竖弧，加强）
+        c2.strokeStyle = "rgba(0,0,0,.3)"; c2.lineWidth = 1.1;
         c2.beginPath(); c2.ellipse(0, 0, w * 0.3, h * 0.44, 0, 0, Math.PI * 2); c2.stroke();
+        c2.beginPath(); c2.ellipse(0, 0, w * 0.16, h * 0.4, 0, 0, Math.PI * 2); c2.stroke();
+        // 袋面暖光（顶部受仓顶灯）
+        const lg2 = c2.createRadialGradient(-w * 0.12, -h * 0.2, 2, 0, 0, w * 0.55);
+        lg2.addColorStop(0, "rgba(255,224,170,.14)"); lg2.addColorStop(1, "rgba(255,224,170,0)");
+        c2.fillStyle = lg2;
+        c2.beginPath(); c2.ellipse(0, 0, w * 0.48, h * 0.48, 0, 0, Math.PI * 2); c2.fill();
       } else {
-        // 木箱：方框 + 斜撑，#4a3a28 描边
+        // 木箱：方框 + 斜撑，#4a3a28 描边（提亮 + 描边加粗）
         const w = base * 0.15 * p.s, h = w * 0.82;
+        c2.fillStyle = "rgba(0,0,0,.38)"; c2.fillRect(-w * 0.5 + 3, -h * 0.5 + 4, w, h);
         c2.fillStyle = "#3c2f20"; c2.fillRect(-w * 0.5, -h * 0.5, w, h);
         const cg = c2.createLinearGradient(-w * 0.5, 0, w * 0.5, 0);
-        cg.addColorStop(0, "#5a4630"); cg.addColorStop(0.5, "#6b553a"); cg.addColorStop(1, "#463626");
+        cg.addColorStop(0, "#6b553a"); cg.addColorStop(0.5, "#7d6444"); cg.addColorStop(1, "#55412c");
         c2.fillStyle = cg; c2.fillRect(-w * 0.5 + 1.5, -h * 0.5 + 1.5, w - 3, h - 3);
-        c2.strokeStyle = "#4a3a28"; c2.lineWidth = Math.max(1.5, w * 0.04);
+        c2.strokeStyle = "#5d4a30"; c2.lineWidth = Math.max(2, w * 0.05);
         c2.strokeRect(-w * 0.5, -h * 0.5, w, h);
         // 斜撑
         c2.beginPath(); c2.moveTo(-w * 0.5, -h * 0.5); c2.lineTo(w * 0.5, h * 0.5); c2.stroke();
         c2.beginPath(); c2.moveTo(w * 0.5, -h * 0.5); c2.lineTo(-w * 0.5, h * 0.5); c2.stroke();
+        // 箱面暖光
+        const lg3 = c2.createRadialGradient(-w * 0.15, -h * 0.2, 2, 0, 0, w * 0.6);
+        lg3.addColorStop(0, "rgba(255,224,170,.12)"); lg3.addColorStop(1, "rgba(255,224,170,0)");
+        c2.fillStyle = lg3; c2.fillRect(-w * 0.5, -h * 0.5, w, h);
       }
       c2.restore();
     });
@@ -848,15 +874,15 @@ module.exports = function (G) {
     });
 
     // ---------- L4 光影层：顶光晕 + 顶部压暗 + 四周暗角 + 可选光束 ----------
-    // 顶光晕：中央偏上暖色径向（仓顶灯洒下，中央鼠群活动区最亮）
+    // 顶光晕：中央偏上暖色径向（仓顶灯洒下，中央鼠群活动区最亮；强度提升，"暖黄"更明确）
     const lg = c2.createRadialGradient(W * 0.5, H * 0.36, 0, W * 0.5, H * 0.36, Math.max(W, H) * 0.62);
-    lg.addColorStop(0, "rgba(210,170,100,.10)"); lg.addColorStop(0.6, "rgba(210,170,100,.04)"); lg.addColorStop(1, "rgba(210,170,100,0)");
+    lg.addColorStop(0, "rgba(216,176,104,.17)"); lg.addColorStop(0.6, "rgba(216,176,104,.06)"); lg.addColorStop(1, "rgba(216,176,104,0)");
     c2.fillStyle = lg; c2.fillRect(0, 0, W, H);
-    // 可选光束：顶光晕往下 2 道极淡斜向暖光带
+    // 可选光束：顶光晕往下 2 道极淡斜向暖光带（强度提升，"夜里有光"的故事感）
     for (let i = 0; i < 2; i++) {
       const bx = W * (0.32 + i * 0.36);
       const bg2 = c2.createLinearGradient(bx, 0, bx + W * 0.1, H * 0.7);
-      bg2.addColorStop(0, "rgba(200,160,90,.05)"); bg2.addColorStop(1, "rgba(200,160,90,0)");
+      bg2.addColorStop(0, "rgba(206,166,96,.085)"); bg2.addColorStop(1, "rgba(206,166,96,0)");
       c2.fillStyle = bg2;
       c2.beginPath();
       c2.moveTo(bx - W * 0.05, 0); c2.lineTo(bx + W * 0.07, 0);

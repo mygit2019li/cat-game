@@ -1,7 +1,10 @@
 /* ad.js — 微信原生模板广告（wx.createCustomAd）接入层
    ─────────────────────────────────────────────────────────────────────────────
-   只服务一个非游戏页面：电子猫粮机（G.screen === "feeder"）。
-   对局相关页面（counting / playing / paused / result）与首页、设置、记录、召唤、声音页
+   只服务非游戏页面的"内容间隔 / 首屏下方 / 页面末尾"空白带，按页面 key 区分广告位：
+     feeder  电子猫粮机（G.screen === "feeder"）
+     home    首页（G.screen === "home"）——仅竖屏玩法卡与底栏之间的空白带；横屏该区域被猫图/开始键占用，不出
+     result  结算页（G.screen === "result"）——标题下方窄带；横屏标题区被设置键+模式标签占满，不出
+   对局相关页面（counting / playing / paused）与设置、记录、召唤、声音、背景选择页
    一律不创建实例，避免打断操作。
 
    生命周期（与页面严格对齐）：
@@ -61,10 +64,14 @@ module.exports = function (G) {
     return id;
   }
 
-  /* 页面 key → 广告位尺寸提供者：目前只有猫粮机，位置由页面自己的布局算出（见 feeder.js） */
+  /* 页面 key → 广告位尺寸提供者：位置一律由页面自己的布局算出，绝不硬编码屏幕比例。
+     feeder   → G.feederAdRect()   （feeder.js，机器/按钮外侧空白带）
+     home     → G.homeAdRect()     （ui.js，竖屏玩法卡与底栏之间；横屏被猫图/开始键占用 → 返回 null 不出）
+     result   → G.resultAdRect()   （ui.js，标题下方窄带；横屏被设置键/标题区占满 → 返回 null 不出）
+     任何页面算不出干净落位时返回 null，ad.enter 会静默跳过，宁缺毋滥。 */
   function rectFor(key) {
-    if (key === "feeder" && typeof G.feederAdRect === "function") return G.feederAdRect();
-    return null;
+    const fn = { feeder: G.feederAdRect, home: G.homeAdRect, result: G.resultAdRect }[key];
+    return (typeof fn === "function") ? fn() : null;
   }
 
   function clearTimer() {

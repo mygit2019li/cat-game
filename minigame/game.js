@@ -11,7 +11,7 @@ require("./js/scenery.js")(G);
 require("./js/prey.js")(G);
 require("./js/ui.js")(G);
 require("./js/sharecard.js")(G);   // 分享卡片 / 猫咪反应测评图
-require("./js/ad.js")(G);        // 原生模板广告（仅非游戏页面：电子猫粮机）
+require("./js/ad.js")(G);        // 原生模板广告（仅非游戏页面：猫粮机 / 首页 / 结算页）
 require("./js/feeder.js")(G);     // 电子猫粮机（定时定量 / 手动出粮）
 
 /* 自定义召唤卡（标题/图片/音频都存在本机）：卡牌列表要在第一帧就把它排在第一，
@@ -122,8 +122,16 @@ G.switchScreen = (name) => {
   if (G.ui && G.ui.summonEdit && G.ui.closeSummonEdit) G.ui.closeSummonEdit();
   // 离开声音页时停止试听（含从声音页直接跳设置等所有路径）
   if (G.screen === "sound" && name !== "sound" && G.stopAnimalSound) G.stopAnimalSound();
-  // 离开猫粮机页时销毁广告实例（hide + destroy），再进页会重新创建，不重复堆实例
-  if (G.screen === "feeder" && name !== "feeder" && G.ad) G.ad.leave("switch:" + name);
+  // 离开任一广告位页面时销毁广告实例（hide + destroy），再进页会重新创建，不重复堆实例
+  if (G.ad && (G.screen === "feeder" || G.screen === "home" || G.screen === "result") && name !== G.screen) {
+    G.ad.leave("switch:" + name);
+  }
+  // 进入带广告位的页面：尽早建实例（页面生命周期早期，早于首帧）。
+  // show 交给 pageFrame（首页/结算每帧打点）与 900ms 兜底；横屏或留白不足时 rect 返回 null，
+  // ad.enter 自行静默跳过，不残留 page 标记。
+  if (G.ad && (name === "feeder" || name === "home" || name === "result")) {
+    G.ad.enter(name);
+  }
   G.nextScreen = name;
   G.transitionT = 0;
 };
@@ -1051,6 +1059,11 @@ function loop() {
 
   // 广告实例兜底巡检：任何绕过 switchScreen 的页面切换，下一帧销毁，避免实例残留
   if (G.ad && G.ad.watchdog) G.ad.watchdog(G.screen);
+  // 广告首帧心跳：首页/结算每帧打一次点，累计两帧（布局已稳、入场动效已起）后再 show。
+  // 猫粮机页自带打点（feeder.js），这里跳过以免重复计数。
+  if (G.ad && G.ad.pageFrame && (G.screen === "home" || G.screen === "result")) {
+    G.ad.pageFrame(G.screen);
+  }
 
   if (G.screen === "home") uiScaleCtx(() => G.ui.drawHome());
   else if (G.screen === "bgpick") {
