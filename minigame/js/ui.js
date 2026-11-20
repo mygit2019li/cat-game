@@ -362,9 +362,9 @@ module.exports = function (G) {
   const HOME_ICON_SRC = {
     fish: "assets/home/icon-fish.jpg", frog: "assets/home/icon-frog.jpg",
     mouse: "assets/home/icon-mouse.jpg", firefly: "assets/home/icon-firefly.jpg",
-    butterfly: "assets/home/icon-butterfly.jpg", ladybug: "assets/home/icon-ladybug.jpg"
+    butterfly: "assets/home/icon-butterfly.jpg"
   };
-  /* 首页卡片 key → 素材 key（暗夜萤光用「萤火虫」；激光乐园不贴图，改走矢量红色激光点） */
+  /* 首页卡片 key → 素材 key（暗夜荧光用「暗夜荧光」；激光乐园不贴图，改走矢量红色激光点） */
   const HOME_ICON_KEY = { pool: "firefly" };
   ui.initHomeImages = () => {
     if (HOME_IMG.tried) return;
@@ -612,11 +612,11 @@ module.exports = function (G) {
      卡片顺序即数组顺序（3 列排列，一行 3 个）：
      第一行 捕鱼 / 青蛙 / 激光　第二行 捕鼠 / 暗夜 / 蝴蝶 */
   const MODES = [
-    { key: "fish",      name: "小鱼游游", desc: "三条小鱼随波游动" },
-    { key: "frog",      name: "青蛙蹦蹦", desc: "荷叶之间来回跳" },
-    { key: "mouse",     name: "小鼠躲躲", desc: "打地鼠式两排洞口" },
-    { key: "pool",      name: "萤火虫",   desc: "萤光小虫爬过石板地" },
-    { key: "butterfly", name: "蝴蝶飞飞", desc: "花间穿梭，还会停花" },
+    { key: "fish",      name: "小鱼水波", desc: "三条小鱼随波游动" },
+    { key: "frog",      name: "青蛙池塘", desc: "荷叶之间来回跳" },
+    { key: "mouse",     name: "小鼠迷宫", desc: "打地鼠式两排洞口" },
+    { key: "pool",      name: "暗夜荧光",   desc: "荧光小虫爬过石板地" },
+    { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
     { key: "laser",     name: "激光乐园", desc: "红点甩动与停留" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
@@ -934,18 +934,24 @@ module.exports = function (G) {
     const gs = 36;
     const gx = Math.max(safe.left + 10, edgeL - gs - 12);
     const gy = safe.top + 8;
-    const bottomH = land ? 50 : 50, bottomY = H - safe.bottom - bottomH - 12;
+    const bottomH = 60, bottomY = H - safe.bottom - bottomH - 14;
     const modesTop = land ? safe.top + Math.max(50, availH * .22) : safe.top + 72;
-    const modesBottom = land ? bottomY - Math.max(14, availH * .085) : Math.min(bottomY - 16, modesTop + availH * .49);
+    const modesBottom = land ? bottomY - Math.max(10, availH * .06) : Math.min(bottomY - 14, modesTop + availH * .52);
     const panelX = land ? edgeL + availW * (tablet ? .38 : .49) + (tablet ? 14 : 0) : edgeL;
     const panelW = land ? edgeR - panelX : availW;
     const panelY = modesTop, panelH = modesBottom - modesTop;
-    const headH = land ? 40 : 34, pad = land ? 16 : 10, gridGap = land ? 12 : 8;
+    const headH = land ? 48 : 40, pad = land ? 20 : 14, gridGap = land ? 16 : 12;
     const cols = 3, rows = 2;
     const cw = (panelW - pad * 2 - gridGap * (cols - 1)) / cols;
     let ch = (panelH - headH - pad - gridGap * (rows - 1)) / rows;
-    // 平板卡片别被拉成竖长条；限高后多出来的空间让网格在面板内垂直居中
-    if (tablet) ch = Math.min(ch, cw * 1.12);
+    // 卡片高度：横屏用「卡宽 × 系数」做方形上限，多出的面板空间由 gridY 垂直居中吸收，不会溢出。
+    // 系数决定卡片「偏方」还是「偏方高」——调大提升格子垂直空间与可读性：
+    //   平板 1.14：比近方形略高，给图标带与 desc 副标题更舒展的垂直空间；
+    //   手机横屏 1.22：面板窄、ch 本就受 panelH 限制，略高一点提升名称可读性与点击面积。
+    if (land) ch = Math.min(ch, cw * (tablet ? 1.14 : 1.22));
+    // 卡片高度 +3%：等比微增，宽度/内边距/圆角/内部布局全部不变，
+    // gridY 垂直居中公式自动吸收多出的空间，不会溢出。
+    ch *= 1.03;
     const gridY = panelY + headH + Math.max(0, (panelH - headH - pad - (rows * ch + gridGap * (rows - 1))) * .5);
 
     // Left brand and hero, all drawn natively so each part stays responsive and interactive.
@@ -977,7 +983,7 @@ module.exports = function (G) {
        正常屏（≥1000 高的虚拟布局）自然底更小，公式不变，只有矮横屏会自动收短猫图。 */
     /* 猫图底帽随按钮高联动（按钮高 + 上间隙 12 + 下间隙 12）：
        按钮缩小后猫图不用再被无谓压短。 */
-    const heroBottom = land ? Math.min(catY + 100 * catScale, bottomY - startH - 24)
+    const heroBottom = land ? Math.min(catY + 100 * catScale + 40, bottomY - startH - 24)
       : Math.min(bottomY - startH - 12, modesBottom + 190) - 8;
     const scenePic = homeImg("scene");
     if (scenePic) {
@@ -988,21 +994,45 @@ module.exports = function (G) {
       const sBoxL = land ? Math.max(-6, safe.left) : 6;
       const sBoxR = land ? panelX - 12 : W - 6;
       const sBoxW = Math.max(160, sBoxR - sBoxL);
-      const sBoxT = land ? brandY + brandFs * 1.45 : modesBottom + 2;
-      const sBoxH = Math.max(90, heroBottom - sBoxT);
+      const sBoxT = land ? Math.min(brandY + brandFs * 1.45, subY + subFs + 8) : modesBottom + 2;
+      /* 场景图显示底：横屏延伸到「开始玩耍」按钮之下、底栏之上，让图把按钮也盖在里头；
+         竖屏仍按 heroBottom。heroBottom 只控制按钮锚点，不限制图片底边。 */
+      const sBoxBottom = land ? bottomY - 10 : heroBottom;
+      const sBoxH = Math.max(90, sBoxBottom - sBoxT);
       const iw = scenePic.width, ih = scenePic.height;
-      const sc = Math.max(sBoxW / iw, sBoxH / ih);          // cover：两轴同一缩放比，绝不拉伸
-      const vw = Math.min(iw, sBoxW / sc), vh = Math.min(ih, sBoxH / sc);
-      let sx = HERO_SCENE.fx * iw - vw / 2;
-      let sy = HERO_SCENE.fy * ih - vh * .30;
-      sx = Math.max(0, Math.min(sx, iw - vw));
-      sy = Math.max(0, Math.min(sy, ih - vh));
+      const soft = featheredScene(scenePic, HERO_SCENE.feather);
+      /* 大屏（平板，S>1.35）横屏用 contain 完整显示：整张图（猫头+蝴蝶+身体）全露出、
+         不裁切、不变形，在 hero 框内水平+垂直居中，多余空间留两侧/上下边（feather 边缘
+         自然淡入页面背景，不突兀）。小屏（手机横屏 / 竖屏）容器窄、cover 裁掉的是边缘
+         留白，猫和蝴蝶本就在画面内，保持原 cover 不变。 */
+      const bigLandscape = land && S > 1.35;
+      let sc, vw, vh, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH;
+      if (bigLandscape) {
+        // contain：取较小缩放比，整图装进框内，居中；drawImage 用「整图→目标矩形」重载
+        sc = Math.min(sBoxW / iw, sBoxH / ih);
+        srcX = 0; srcY = 0; srcW = iw; srcH = ih;
+        vw = iw * sc; vh = ih * sc;
+        dstX = sBoxL + (sBoxW - vw) / 2;
+        dstY = sBoxT + (sBoxH - vh) / 2;
+        dstW = vw; dstH = vh;
+      } else {
+        // cover：两轴同一缩放比裁进框，绝不拉伸；水平锚点锁猫头中心(~.36)保住左侧猫头+右侧蝴蝶
+        sc = Math.max(sBoxW / iw, sBoxH / ih);
+        vw = Math.min(iw, sBoxW / sc); vh = Math.min(ih, sBoxH / sc);
+        srcX = Math.max(0, Math.min(.36 * iw - vw / 2, iw - vw));
+        srcY = Math.max(0, Math.min(HERO_SCENE.fy * ih - vh * .30, ih - vh));
+        dstX = sBoxL; dstY = sBoxT; dstW = sBoxW; dstH = sBoxH;
+      }
       ctx.save();
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(featheredScene(scenePic, HERO_SCENE.feather), sx, sy, vw, vh, sBoxL, sBoxT, sBoxW, sBoxH);
+      if (bigLandscape) {
+        ctx.drawImage(soft, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH);
+      } else {
+        ctx.drawImage(soft, srcX, srcY, vw, vh, dstX, dstY, dstW, dstH);
+      }
       ctx.restore();
-      G.__heroScene = { x: sBoxL, y: sBoxT, w: sBoxW, h: sBoxH, scale: sc, sx: sx, sy: sy, vw: vw, vh: vh };
+      G.__heroScene = { x: sBoxL, y: sBoxT, w: sBoxW, h: sBoxH, scale: sc, mode: bigLandscape ? "contain" : "cover", dstX, dstY, dstW, dstH };
       G.__heroButterfly = null;
     } else if (catPic) {
       /* 兜底①：旧猫图。按「主体框」等比缩放：主体(猫+蝴蝶)完整装进可用区，四周透明留白溢到框外，
@@ -1142,7 +1172,7 @@ module.exports = function (G) {
     MODES.forEach((item, i) => {
       const r = Math.floor(i / cols), c = i % cols;
       const x = panelX + pad + c * (cw + gridGap), y = gridY + r * (ch + gridGap);
-      /* 蝌蚪属于青蛙卡：targetType 停在 tadpole 时，首页仍要高亮"青蛙蹦蹦"这张卡。 */
+      /* 蝌蚪属于青蛙卡：targetType 停在 tadpole 时，首页仍要高亮"青蛙池塘"这张卡。 */
       const sel = G.config.targetType === item.key || (item.key === "frog" && G.config.targetType === "tadpole");
       const isPressed = ui.pressedBtn && ui.pressedBtn.x === x && ui.pressedBtn.y === y &&
         ui.pressedBtn.w === cw && ui.pressedBtn.h === ch;
@@ -1164,15 +1194,21 @@ module.exports = function (G) {
          旧版图标固定占 70% 卡高、名称固定 y=ch-12，矮横屏（ch≈65）两者直接叠在一起；
          现在图标尺寸/位置随 ch 走，名称字号同时受「卡宽」与「卡高」双重约束。
          平板卡片更高，多出的空间给 desc 副标题（新手能直接看懂玩法差异）。 */
-      const iconH = ch * (tablet ? .55 : .60), iconCY = y + ch * (tablet ? .28 : .30);
+      /* 图标区与名称区按卡高分区。图标尺寸用「卡宽 × 卡高」双约束的响应式比例，
+         随容器等比缩放：iconBoxW = 卡宽 70%（旧 94% → 图标过大），iconH = 卡高 48%/52%。
+         图标实际尺寸 = min(iconBoxW, iconH, 按宽高比换算)，任何分辨率下都等比、不变形、不溢出。 */
+      // 图标带：上部 55% 卡高给图标，iconCY 取该带「垂直中心」——卡片变高后图标在带内仍居中。
+      const iconH = ch * (tablet ? .48 : .52), iconCY = y + ch * .275;
+      const iconBoxW = cw * .70;                 // 图标宽上限：占卡宽 70%（响应式，随 cw 缩放）
       const nameFs = fitFont(item.name, Math.min(F(tablet ? 18 : 17), ch * .21), cw - 12, "normal");
-      const nameY = tablet ? y + ch * .69 : y + ch - Math.max(8, Math.min(F(12), ch * .17));
-      const iconS = Math.max(.36, Math.min(cw * .86, iconH) / 115 * .86);
+      // 名称：取「图标带下缘 → 卡底」这段剩余空间的「垂直中心」，卡片变高后名称随之居中、可读性更好。
+      const nameY = y + (ch * .55 + ch) / 2;
+      const iconS = Math.max(.36, Math.min(iconBoxW, iconH) / 115 * .86);
       const iconPic = homeImg(HOME_ICON_KEY[item.key] || item.key);
       const bobY = Math.sin(t * 1.4 + i) * 1.2;
       if (iconPic) {
         const ar = iconPic.width / iconPic.height;
-        let iw2 = cw * .94, ih2 = iw2 / ar;
+        let iw2 = iconBoxW, ih2 = iw2 / ar;
         if (ih2 > iconH) { ih2 = iconH; iw2 = ih2 * ar; }
         ctx.save();
         rrPath(x + 2, y + 2, cw - 4, ch - 4, 12);
@@ -1188,7 +1224,7 @@ module.exports = function (G) {
           /* 激光乐园：矢量红色激光点。
              尺寸按「卡高图标带」与「卡宽」双重收敛（比其它图标小一档，红点实心更"重"，同尺寸会显得过大）；
              浮动直接复用上面的 bobY，与其它卡片同一套幅度(±1.2)与频率(1.4)，整体节奏统一。 */
-          const dotR = Math.max(5, Math.min(iconH * .16, cw * .09));
+          const dotR = Math.max(5, Math.min(iconH * .16, cw * .075));
           drawLaserDotIcon(ctx, 0, bobY, dotR, t);
         } else {
           ctx.shadowColor = "rgba(150,120,70,.16)"; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
@@ -1200,7 +1236,9 @@ module.exports = function (G) {
       text(item.name, x + cw / 2, nameY, nameFs + "px sans-serif", sel ? "#0f8064" : "#243430");
       if (tablet) {
         const descFs = fitFont(item.desc, Math.min(F(11), ch * .12), cw - 14, "normal");
-        text(item.desc, x + cw / 2, y + ch * .87, descFs + "px sans-serif",
+        // desc 取「名称下方 → 卡底」这段的垂直中心，随卡片高度自适应，不会贴底也不会与名称挤在一起
+        const descY = y + (nameY + ch * .08 + ch) / 2;
+        text(item.desc, x + cw / 2, descY, descFs + "px sans-serif",
           sel ? "rgba(15,128,100,.72)" : "rgba(96,104,96,.62)");
       }
       // 选中态角标：翠绿圆 + 白色对勾（设计稿里卡右上角的勾），卡片太小时不画，免得挤掉图标
@@ -1227,7 +1265,7 @@ module.exports = function (G) {
 
     /* 开始玩耍：设计稿同款「青绿胶囊按钮」——左侧白色播放三角 + 白色文字 + 右端淡爪印水印。
        仍是胶囊形状的实心按钮（不是圆形球），高度沿用 startH，宽度沿用 startW，命中区不变。 */
-    const startY = land ? heroBottom + 14 : Math.min(bottomY - startH - 14, modesBottom + 190);
+    const startY = land ? Math.max(heroBottom, bottomY - startH - 22) : Math.min(bottomY - startH - 14, modesBottom + 190);
     const pillCY = Math.min(startY + startH / 2, bottomY - startH / 2 - 8);
     ui.drawStartPill(heroCenterX - startW / 2, pillCY - startH / 2, startW, startH,
       "开始玩耍", () => G.requestStart());
@@ -1252,10 +1290,10 @@ module.exports = function (G) {
     const homeIconColor = { cat: "#2a6f63", bowl: "#2a6f63", heart: "#2a6f63", chart: "#2a6f63" };
     rowBtns.forEach((item, i) => {
       const x = rowX + i * cellW;
-      if (i > 0) { ctx.strokeStyle = "rgba(122,108,88,.20)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, bottomY + 12); ctx.lineTo(x, bottomY + bottomH - 12); ctx.stroke(); }
+      if (i > 0) { ctx.strokeStyle = "rgba(122,108,88,.20)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, bottomY + 14); ctx.lineTo(x, bottomY + bottomH - 14); ctx.stroke(); }
       const compact = cellW < 116;
-      drawVecIcon(item.icon, x + cellW * (compact ? .2 : .27), bottomY + bottomH / 2, F(compact ? 20 : 24), homeIconColor[item.icon] || C.ink2);
-      const cellFs = fitFont(item.label, Math.min(F(compact ? 12 : 14), bottomH * .34), cellW * .62, "normal");
+      drawVecIcon(item.icon, x + cellW * (compact ? .2 : .27), bottomY + bottomH / 2, F(compact ? 22 : 26), homeIconColor[item.icon] || C.ink2);
+      const cellFs = fitFont(item.label, Math.min(F(compact ? 13 : 15), bottomH * .36), cellW * .62, "normal");
       text(item.label, x + cellW * (compact ? .68 : .62), bottomY + bottomH / 2, cellFs + "px sans-serif", "#2b3230");
       btn(x, bottomY, cellW, bottomH, item.cb);
     });
@@ -1276,7 +1314,7 @@ module.exports = function (G) {
     c.save();
     G.rr(c, x, y, w, h, 12); c.clip();
     if (key === "ff-walk" || key === "ff-dash") {
-      /* 萤火虫二级卡：暗夜石板 + 会呼吸的萤光小虫；急爬卡多两道尾迹。 */
+      /* 暗夜荧光二级卡：暗夜石板 + 会呼吸的荧光小虫；急爬卡多两道尾迹。 */
       const dash = key === "ff-dash";
       const sg = c.createLinearGradient(0, y, 0, y + h);
       sg.addColorStop(0, "#3b2a19"); sg.addColorStop(.55, "#24170e"); sg.addColorStop(1, "#160c07");
@@ -1417,7 +1455,7 @@ module.exports = function (G) {
       const ic = Math.min(w, h) / 148;
       if (frogCard) G.draw.icon(c, "frog", x + w * .5, y + h * .47, ic);
       else G.draw.icon(c, "tadpole", x + w * .5 - 58 * ic, y + h * .45 - 60 * ic, ic);
-      // 浮尘 / 萤光点
+      // 浮尘 / 荧光点
       for (let i = 0; i < 9; i++) {
         const px = x + w * (.08 + ((i * 37) % 90) / 100), py = y + h * (.14 + ((i * 53) % 72) / 100);
         c.fillStyle = dusk ? "rgba(214,255,158,.75)" : "rgba(235,255,230,.62)";
@@ -1652,7 +1690,7 @@ module.exports = function (G) {
      交互仍走 game.js 的 bgPick 状态机（左右滑动、点侧卡翻页、确认开局），
      只把绘制层换掉：绘制副本循环取模，逻辑 idx / 指示点不循环，保持跨局记忆正确。 */
   const PLAY_TITLE = {
-    fish: "小鱼游玩", frog: "青蛙跳跳", mouse: "小鼠躲躲", pool: "萤火奇遇",
+    fish: "小鱼游玩", frog: "青蛙跳跳", mouse: "小鼠迷宫", pool: "暗夜荧光",
     butterfly: "蝴蝶飞舞", laser: "激光乐园", tadpole: "蝌蚪快跑"
   };
   /* 底部设置面板的文案必须跟着当前玩法走：不能玩老鼠还写「小鱼数量 / 水声陪伴」。
@@ -1662,9 +1700,9 @@ module.exports = function (G) {
     fish:      { prey: "小鱼",   unit: "条", amb: "水声" },
     frog:      { prey: "青蛙",   unit: "只", amb: "水声" },
     mouse:     { prey: "小鼠",   unit: "只", amb: "环境音" },
-    pool:      { prey: "萤火虫", unit: "只", amb: "虫鸣" },
+    pool:      { prey: "萤火虫", unit: "只", amb: "夜风" },
     butterfly: { prey: "蝴蝶",   unit: "只", amb: "风声" },
-    laser:     { prey: "小虫",   unit: "只", amb: "虫鸣" },
+    laser:     { prey: "光点",   unit: "个", amb: "环境音" },
     tadpole:   { prey: "蝌蚪",   unit: "只", amb: "水声" }
   };
 
@@ -1675,7 +1713,7 @@ module.exports = function (G) {
     room: "暖暖的房间里，小鼠探出头来~",
     swarm: "好多小鼠乱窜，看你能拍中几只~",
     lotus: "晨光浅塘，小蝌蚪摇着尾巴跑~",
-    dusk: "暮色深塘，萤光点点慢慢游~"
+    dusk: "暮色深塘，荧光点点慢慢游~"
   };
   /* 浅薄荷绿页底（仅用于没有照片素材的页面；首页有猫图，必须走 drawHome 那套暖白底） */
   function greenPageBg(W, H, e) {
@@ -1724,14 +1762,14 @@ module.exports = function (G) {
     ctx.save();
     ctx.translate(0, (1 - openE) * 16);
 
-    const edgeL = safe.left + (land ? 22 : 14), edgeR = W - safe.right - (land ? 22 : 14);
+    const edgeL = safe.left + 14, edgeR = W - safe.right - 14;
     const cx0 = safe.left + (W - safe.left - safe.right) / 2;
 
     /* ---- 顶部：胶囊返回键 + 玩法标题 + 右上步骤胶囊 ---- */
-    const navS = F(38), top = safe.top + F(12);
-    const backW = backPill(edgeL, top, navS, { color: C.ink, key: "bgpick-top-back", cb: () => G.closeBgPick() });
+    const navS = F(40), top = safe.top + F(10);
+    const backW = backPill(edgeL, top, navS, { color: C.ink2, key: "bgpick-top-back", cb: () => G.closeBgPick() });
     const titleFs = land ? F(30) : F(26), subFs = F(13);
-    const tx = edgeL + backW + F(16), ty = top + navS * .30;
+    const tx = edgeL + backW + F(8), ty = top + navS * .30;
     const playTitle = group ? group.title : (PLAY_TITLE[G.config.targetType] || "逗猫乐园");
     const realTitleFs = fitFont(playTitle, titleFs, W * .34, "normal");
     text(playTitle, tx, ty, realTitleFs + "px sans-serif", C.ink, "left");
@@ -1904,10 +1942,19 @@ module.exports = function (G) {
     });
 
     // 猎物数量：部分玩法按阶段/命中能力自动调节，显示固定说明而不是无效的调节键。
-    // 可增减的玩法各自读数量键（默认 preyCount；萤火虫走 ffCount）。
+    // 可增减的玩法各自读数量键（默认 preyCount；暗夜荧光走 ffCount）。
     const countKey = (group && group.countKey) || "preyCount";
+    /* 不支持手动增减数量的模式：显示只读说明徽章，隐藏 ± 按钮（界面与规则一致）。
+       - group.count === "auto"：青蛙跳跳——同屏数量由阶段按荷叶数封顶自动决定（3→4→5），
+         用户调 preyCount 不生效，故不展示可增减控件。
+       - tadpole：蝌蚪快跑——同屏数量由阶段基线 + 命中能力动态调节（1–3），同样不展示控件。
+       - mouse + swarm：群鼠乱窜——同屏数量由阶段固定为 4/5/6，preyCount 不生效，不展示控件。
+       - group.count === "fixed"：固定 1 只（历史口径，保留）。
+       其余模式（蝴蝶/激光/暗夜荧光/室内房间捕鼠）保留 ± 增减入口。 */
     const countNote = (group && group.count === "fixed") ? "固定 1 只"
-      : ((group && group.count === "auto") || G.config.targetType === "tadpole") ? "自动 1–3 只" : null;
+      : (G.config.targetType === "tadpole") ? "自动 1–3 只"
+      : (G.config.targetType === "mouse" && G.currentBg && G.currentBg() === "swarm") ? "自动 4–6 只"
+      : (group && group.count === "auto") ? "自动 3–5 只" : null;
     text(countNote ? "猎物数量" : term.prey + "数量", colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const os = F(24), oy = settingsTop + F(24);
     if (countNote) {
@@ -1965,7 +2012,7 @@ module.exports = function (G) {
         });
       });
     } else {
-    // 环境音陪伴（true / false）：标签跟玩法走（水声/环境音/虫鸣…）
+    // 环境音陪伴（true / false）：标签跟玩法走（水声/夜风/风声…）
     text(term.amb + "陪伴", colX[2], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const tgX = colX[2] + F(4), tgY = settingsTop + F(24), tgW = F(38), tgH = F(22);
     const soundOn = G.config.sound !== false;
@@ -2404,7 +2451,7 @@ module.exports = function (G) {
         rrPath(x, y, cellW, rowH, 12); ctx.stroke();
         const cy = y + rowH / 2;
         text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
-        const typeName = { fish: "小鱼", butterfly: "蝴蝶", mouse: "小鼠", laser: "红点", pool: "萤光", frog: "青蛙", tadpole: "蝌蚪" }[L.type] || "";
+        const typeName = { fish: "小鱼", butterfly: "蝴蝶", mouse: "小鼠", laser: "红点", pool: "荧光", frog: "青蛙", tadpole: "蝌蚪" }[L.type] || "";
         // 玩法标签：浅色药丸，比纯文字更好扫读
         const tagW = 38, tagX = x + 56;
         ctx.fillStyle = "rgba(21,154,140,.10)";
@@ -3424,7 +3471,7 @@ module.exports = function (G) {
     const animBase = G.soundAnimT0 || now;
 
     // 顶部：胶囊返回 / 标题（停止键放在下面的 tab 行，避开微信胶囊）
-    const bs = 40, bX = safe.left + 14, bY = safe.top + 8;
+    const bs = 40, bX = safe.left + 14, bY = safe.top + 10;
     const backW = backPill(bX, bY, bs, { key: "sound-back", cb: () => { G.closeSound(); } });
 
     // 分享键：紧跟返回胶囊放右边（右上角是微信胶囊的固定地盘，不能占）
@@ -3614,12 +3661,12 @@ module.exports = function (G) {
     ctx.globalAlpha = openE;
 
     // 胶囊返回按钮
-    const bs = 42, bX = safe.left + 16, bY = safe.top + 14;
+    const bs = 40, bX = safe.left + 14, bY = safe.top + 10;
     const backW = backPill(bX, bY, bs, { cb: () => { G.stopSummonMusic(); G.switchScreen("home"); } });
 
     /* 自定义召唤卡入口（左上角，紧跟返回胶囊）：标题/图片/音频都可自己传，
        存本机后永远排在卡牌列表第一个。图标-only 42×42，不挤居中标题 */
-    const eX = bX + backW + 10;
+    const eX = bX + backW + 8;
     const hasCustom = !!G.customSummon;
     ctx.fillStyle = hasCustom ? "rgba(46,196,170,.14)" : C.card;
     ctx.strokeStyle = hasCustom ? C.teal : C.line;
@@ -3910,29 +3957,116 @@ module.exports = function (G) {
   };
   G.pokeHud = () => { ui.hudDimT = 0; };
 
-  /* ================= 倒计时 ================= */
-  ui.drawCountdown = (c) => {
-    const { W, H } = layout();
-    ctx.fillStyle = C.countMask; ctx.fillRect(0, 0, W, H);
-    const frac = c - Math.floor(c);
-    const sc2 = 0.8 + frac * 0.5;
-    ctx.save();
-    ctx.translate(W / 2, H * 0.42); ctx.scale(sc2, sc2);
-    ctx.globalAlpha = clamp(frac * 2, 0, 1);
-    text(String(Math.ceil(c)), 0, 0, "96px sans-serif", "#fff");
-    ctx.restore();
-    ctx.fillStyle = "rgba(255,255,255,.16)";
-    G.rr(ctx, W / 2 - 56, H * 0.42 + 92, 112, 36, 18); ctx.fill();
-    ctx.fillStyle = "transparent"; ctx.strokeStyle = "rgba(255,255,255,.4)"; ctx.lineWidth = 1;
-    rrPath(W / 2 - 56, H * 0.42 + 92, 112, 36, 18); ctx.stroke();
-    text("准备……", W / 2, H * 0.42 + 110, "18px sans-serif", "rgba(255,255,255,.92)");
-    // 鱼玩法：开局亮出本局海域主题名（每局自动轮换）
-    const sea = G.config.targetType === "fish" && G.session.sea;
-    if (sea) text("本局海域 · " + sea.name, W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
-    // 蝌蚪：开局一句话讲清规则（白纸画面里不讲，第一次会不知道折返也能拍）
-    if (G.config.targetType === "tadpole") {
-      text("点中黑蝌蚪 · 折返时 +2", W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
+  /* ================= 游戏前倒计时 =================
+     当前状态：G.screen === "counting"，只出现在 G.startGame() 之后、beginPlay() 之前。
+     视觉规则：独立全屏准备页；无卡片、无进度条、无按钮；数字下方仅展示一条猫咪提示，并上下翻页。 */
+  ui.countdown = {
+    hints: [
+      "清晨和黄昏猫咪最活跃",
+      "尾巴快速摆动时可能分心",
+      "缓慢眨眼说明猫咪比较放松",
+      "耳朵贴平时可能有点紧张",
+      "咕噜声通常代表舒适",
+      "喂食时不要打扰猫咪",
+      "避免拉扯尾巴、四肢和胡须",
+      "猫咪停顿瞬间更容易互动",
+      "互动后给猫咪一点休息空间"
+    ],
+    index: 0,
+    lastAt: 0,
+    reset: function (now) {
+      this.index = 0;
+      this.lastAt = now || 0;
     }
+  };
+
+  ui.drawCountdown = (c) => {
+    const { W, H, land, safe } = layout();
+    const safeTop = safe.top, safeBottom = safe.bottom, safeLeft = safe.left, safeRight = safe.right;
+    const cx = safeLeft + (W - safeLeft - safeRight) / 2;
+
+    ctx.save();
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#f4fbf8";
+    ctx.fillRect(0, 0, W, H);
+
+    const glowA = ctx.createRadialGradient(W * 0.12, H * 0.18, 0, W * 0.12, H * 0.18, Math.max(W, H) * 0.34);
+    glowA.addColorStop(0, "rgba(15,157,142,.14)");
+    glowA.addColorStop(1, "rgba(15,157,142,0)");
+    ctx.fillStyle = glowA;
+    ctx.fillRect(0, 0, W, H);
+
+    const glowB = ctx.createRadialGradient(W * 0.88, H * 0.84, 0, W * 0.88, H * 0.84, Math.max(W, H) * 0.34);
+    glowB.addColorStop(0, "rgba(255,176,46,.12)");
+    glowB.addColorStop(1, "rgba(255,176,46,0)");
+    ctx.fillStyle = glowB;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    const topY = safeTop + (land ? 34 : 24);
+    const statusText = "准备出发";
+    const durationText = "本局倒计时 · 3 秒";
+    text(statusText, land ? safeLeft + 42 : cx, topY, fitFont(statusText, land ? 17 : 16, W * 0.24, "800") + "px sans-serif", "#0f9d8e", land ? "left" : "center");
+    if (land) {
+      text(durationText, safeLeft + W - safeRight - 42, topY, fitFont(durationText, 16, W * 0.24, "700") + "px sans-serif", "rgba(83,117,124,.78)", "right");
+    }
+
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    if (now - ui.countdown.lastAt >= 950) {
+      ui.countdown.index = (ui.countdown.index + 1) % ui.countdown.hints.length;
+      ui.countdown.lastAt = now;
+    }
+    const hint = ui.countdown.hints[ui.countdown.index] || ui.countdown.hints[0];
+
+    const centerY = safeTop + (H - safeTop - safeBottom) * 0.44;
+    const title = "猫咪互动准备中";
+    text(title, cx, centerY - (land ? 118 : 104), fitFont(title, land ? 28 : 24, W * 0.58, "900") + "px sans-serif", "#0f9d8e");
+
+    const rawRemaining = Math.max(0, Number(c) || 0);
+    const remaining = Math.max(0, Math.ceil(rawRemaining));
+    const countdownLabel = remaining > 0 ? String(remaining) : "开始";
+    const digitSize = (land ? Math.min(W * 0.28, H * 0.58, 260) : Math.min(W * 0.42, H * 0.42, 220)) * 0.7;
+    const secondIn = remaining > 0 ? Math.min(1, Math.max(0, rawRemaining - Math.floor(rawRemaining))) : 1;
+    const enterT = Math.min(1, secondIn / 0.22);
+    const easeOut = 1 - Math.pow(1 - enterT, 3);
+    const numScale = (remaining > 0 ? 0.82 + 0.22 * easeOut : 0.9 + 0.22 * Math.min(1, rawRemaining / 0.22)) * (1 + 0.015 * Math.sin(performance.now() / 230));
+    const numAlpha = remaining > 0 ? 0.2 + 0.8 * easeOut : 0.96;
+    const numColor = remaining > 0 ? "#ffb02e" : "#0f9d8e";
+
+    ctx.save();
+    ctx.translate(cx, centerY);
+    ctx.scale(numScale, numScale);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.globalAlpha = numAlpha;
+    ctx.font = "900 " + Math.round(digitSize) + "px sans-serif";
+    ctx.fillStyle = numColor;
+    ctx.fillText(countdownLabel, 0, 0);
+    ctx.restore();
+
+    const hintY = safeTop + (H - safeTop - safeBottom) * 0.70;
+    const hintW = Math.min(land ? 920 : 560, W - safeLeft - safeRight - 64);
+    const arrow = "▶";
+    const hintFont = fitFont(hint, land ? 22 : 18, hintW - 36, "700");
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "900 " + hintFont + "px sans-serif";
+    ctx.fillStyle = "#0f9d8e";
+    const arrowW = Math.min(30, ctx.measureText(arrow).width + 12);
+    ctx.fillText(arrow, cx - (ctx.measureText(hint).width + arrowW) / 2 + arrowW / 2, hintY);
+    ctx.fillStyle = "#53757c";
+    ctx.fillText(hint, cx + arrowW / 2, hintY);
+    ctx.restore();
+
+    const metaY = safeTop + (H - safeTop - safeBottom) * 0.82;
+    text("独立页 · 无卡片 · 无进度条 · 无按钮", cx, metaY, fitFont("独立页 · 无卡片 · 无进度条 · 无按钮", land ? 14 : 13, W * 0.72) + "px sans-serif", "rgba(83,117,124,.72)");
+
+    const footerY = H - Math.max(34, safeBottom) + 18;
+    text("倒计时结束后自动进入游戏", cx, footerY, fitFont("倒计时结束后自动进入游戏", land ? 15 : 14, W * 0.72, "700") + "px sans-serif", "rgba(83,117,124,.78)");
+
+    ui.countdown.hintRect = { x: cx - hintW / 2, y: hintY - 24, w: hintW, h: 48 };
   };
 
   /* ================= 暂停 ================= */

@@ -37,12 +37,35 @@ module.exports = function (G) {
       S.rugX = W * rand(0.1, 0.9) - S.rugW / 2;
     }
     if (type === "mouse" && S.mouseBg === "swarm") {
-      // 群鼠乱窜地板：深色底 + 大块暗斑（参考图的斑驳石地）；无洞口、无家具
+      // 群鼠乱窜地板：废弃粮仓俯视（L1 暖棕黑底 / L2 木地板 / L3 道具碎粮 / L4 顶光暗角）
+      // 位置用 _groundSeed 固定（与 groundCache 同 key），重绘缓存时道具不跳
+      S._groundSeed = S._groundSeed || Math.floor(rand(0, 1e9));
       S.swarmSpots = [];
       const nsp = Math.floor(rand(9, 13.99));
       for (let i = 0; i < nsp; i++) S.swarmSpots.push({
         x: rand(0, W), y: rand(0, H), rx: rand(60, 150), ry: rand(40, 110),
         rot: rand(0, Math.PI), a: rand(0.08, 0.2), lite: Math.random() < 0.3
+      });
+      // L3 道具：粮袋 2–3（四角偏内）+ 木箱 2（边沿），尺寸约鼠 2–3 倍
+      S.swarmProps = [];
+      const corners = [[0.1, 0.14], [0.9, 0.14], [0.12, 0.84], [0.88, 0.84]];
+      for (let i = 0; i < 3; i++) {
+        const c = corners[(i * 2 + 1) % 4];
+        S.swarmProps.push({ kind: "sack", x: c[0] * W + rand(-0.04, 0.04) * W, y: c[1] * H + rand(-0.03, 0.03) * H, s: rand(0.9, 1.15), rot: rand(-0.3, 0.3) });
+      }
+      S.swarmProps.push({ kind: "crate", x: W * rand(0.3, 0.4), y: H * rand(0.1, 0.2), s: rand(0.95, 1.1), rot: rand(-0.1, 0.1) });
+      S.swarmProps.push({ kind: "crate", x: W * rand(0.6, 0.72), y: H * rand(0.78, 0.88), s: rand(0.95, 1.1), rot: rand(-0.1, 0.1) });
+      // L3 碎粮：30–50 个 2–4px 暖点，撒中下部
+      S.swarmGrains = [];
+      const ng = Math.floor(rand(34, 50.99));
+      for (let i = 0; i < ng; i++) S.swarmGrains.push({
+        x: rand(0.05, 0.95) * W, y: rand(0.35, 0.95) * H, r: rand(1.2, 2.4), a: rand(0.2, 0.5)
+      });
+      // L3 木屑条：10–16 条 8–18px 短弧线（沿横向板缝方向）
+      S.swarmShavings = [];
+      const nsh = Math.floor(rand(10, 16.99));
+      for (let i = 0; i < nsh; i++) S.swarmShavings.push({
+        x: rand(0.03, 0.97) * W, y: rand(0.08, 0.95) * H, len: rand(8, 18), a: rand(0.18, 0.3)
       });
     }
     if (type === "mouse" && S.mouseBg !== "swarm") {
@@ -162,7 +185,7 @@ module.exports = function (G) {
       }
     }
     if (type === "pool") {
-      /* 第一版萤光：深色石板地 + 环境萤尘（微光点缓漂呼吸），不再轮换主题。 */
+      /* 第一版荧光：深色石板地 + 环境萤尘（微光点缓漂呼吸），不再轮换主题。 */
       S._groundSeed = Math.floor(rand(0, 1e9));
       S.poolMix = false;
       S.poolTheme = 0;
@@ -732,33 +755,210 @@ module.exports = function (G) {
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
-  /* ============ 群鼠乱窜地板：深色斑驳石地（俯视群鼠模式，参考猫抓老鼠玩具） ============ */
+  /* ============ 群鼠乱窜地板：废弃粮仓俯视（L1 暖棕黑底 / L2 木地板 / L3 道具碎粮 / L4 顶光暗角）
+     参考 docs/design-mouse-swarm.md §背景环境。全部静态内容画进离屏缓存（groundCache["swarm"]），
+     运行时只 drawImage 一次；局部照明（drawSwarmLight）在缓存之上逐帧叠加。 ============ */
+  /* L2 木地板：横向板条（板高随 H 自适应 5 条左右），板缝暗线 + 磨损高光，板间色阶微差避免死板 */
+  function paintSwarmFloor(c2, W, H, S) {
+    // ---------- L1 底：深暖棕黑竖渐变 ----------
+    let g = c2.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#241c14"); g.addColorStop(1, "#1a140d");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+
+    // ---------- L2 木地板：横向板条 + 板缝 + 磨损高光 + 板间色阶差 ----------
+    const nPlanks = 6;
+    const ph = Math.ceil(H / nPlanks) + 1;
+    for (let i = 0; i < nPlanks; i++) {
+      const y = i * ph;
+      // 板间色阶微差（±4% 亮度）：奇数板微亮、偶数板微暗
+      c2.fillStyle = (i % 2 === 0) ? "rgba(0,0,0,.10)" : "rgba(255,240,210,.045)";
+      c2.fillRect(0, y, W, ph);
+      // 板缝：1px 暗线
+      c2.fillStyle = "rgba(0,0,0,.5)";
+      c2.fillRect(0, y, W, 1);
+      // 板缝上方 1px 磨损高光（受顶光，上缘亮一丝）
+      c2.fillStyle = "rgba(210,180,140,.06)";
+      c2.fillRect(0, y + 1, W, 1);
+    }
+    // 板内横向磨损高光（随机几条细亮带，模拟踩磨）
+    for (let i = 0; i < 10; i++) {
+      const y = Math.floor(rand(0, nPlanks)) * ph + rand(0.2, 0.8) * ph;
+      const x = rand(0, W * 0.7), len = rand(W * 0.1, W * 0.35);
+      const wg = c2.createLinearGradient(x, 0, x + len, 0);
+      wg.addColorStop(0, "rgba(220,190,150,0)");
+      wg.addColorStop(0.5, "rgba(220,190,150,.05)");
+      wg.addColorStop(1, "rgba(220,190,150,0)");
+      c2.fillStyle = wg; c2.fillRect(x, y, len, 2);
+    }
+    // 大块斑驳（保留原 swarmSpots 的斑驳质感，画在地板上、道具下）
+    (S.swarmSpots || []).forEach(s => {
+      c2.save(); c2.translate(s.x, s.y); c2.rotate(s.rot);
+      c2.fillStyle = s.lite ? "rgba(255,244,224," + (s.a * 0.18).toFixed(3) + ")" : "rgba(0,0,0," + s.a.toFixed(3) + ")";
+      c2.beginPath(); c2.ellipse(0, 0, s.rx, s.ry, 0, 0, Math.PI * 2); c2.fill();
+      c2.restore();
+    });
+
+    // ---------- L3 道具层：粮袋 / 木箱 / 碎粮 / 木屑（地板之上、鼠之下） ----------
+    const base = Math.min(W, H); // 尺度锚：道具约为鼠 2–3 倍
+    (S.swarmProps || []).forEach(p => {
+      c2.save(); c2.translate(p.x, p.y); c2.rotate(p.rot || 0);
+      if (p.kind === "sack") {
+        // 粮袋：圆头方身 + 袋口扎绳，暖褐 #6b5638
+        const w = base * 0.16 * p.s, h = w * 1.25;
+        c2.fillStyle = "#5d4a30";                       // 暗部底
+        c2.beginPath(); c2.ellipse(0, h * 0.06, w * 0.5, h * 0.5, 0, 0, Math.PI * 2); c2.fill();
+        const sg = c2.createLinearGradient(-w * 0.5, 0, w * 0.5, 0);
+        sg.addColorStop(0, "#6b5638"); sg.addColorStop(0.5, "#7d6746"); sg.addColorStop(1, "#54432c");
+        c2.fillStyle = sg;
+        c2.beginPath(); c2.ellipse(0, 0, w * 0.48, h * 0.48, 0, 0, Math.PI * 2); c2.fill();
+        // 袋口扎绳
+        c2.strokeStyle = "#3f3320"; c2.lineWidth = Math.max(1.5, w * 0.05);
+        c2.beginPath(); c2.moveTo(-w * 0.28, -h * 0.42); c2.lineTo(w * 0.28, -h * 0.42); c2.stroke();
+        // 麻袋纹理（2 道竖弧）
+        c2.strokeStyle = "rgba(0,0,0,.18)"; c2.lineWidth = 1;
+        c2.beginPath(); c2.ellipse(0, 0, w * 0.3, h * 0.44, 0, 0, Math.PI * 2); c2.stroke();
+      } else {
+        // 木箱：方框 + 斜撑，#4a3a28 描边
+        const w = base * 0.15 * p.s, h = w * 0.82;
+        c2.fillStyle = "#3c2f20"; c2.fillRect(-w * 0.5, -h * 0.5, w, h);
+        const cg = c2.createLinearGradient(-w * 0.5, 0, w * 0.5, 0);
+        cg.addColorStop(0, "#5a4630"); cg.addColorStop(0.5, "#6b553a"); cg.addColorStop(1, "#463626");
+        c2.fillStyle = cg; c2.fillRect(-w * 0.5 + 1.5, -h * 0.5 + 1.5, w - 3, h - 3);
+        c2.strokeStyle = "#4a3a28"; c2.lineWidth = Math.max(1.5, w * 0.04);
+        c2.strokeRect(-w * 0.5, -h * 0.5, w, h);
+        // 斜撑
+        c2.beginPath(); c2.moveTo(-w * 0.5, -h * 0.5); c2.lineTo(w * 0.5, h * 0.5); c2.stroke();
+        c2.beginPath(); c2.moveTo(w * 0.5, -h * 0.5); c2.lineTo(-w * 0.5, h * 0.5); c2.stroke();
+      }
+      c2.restore();
+    });
+    // 碎粮：30–50 个 2–4px 暖点（#8a6f4a，alpha .2–.5），撒中下部
+    (S.swarmGrains || []).forEach(gr => {
+      c2.fillStyle = "rgba(138,111,74," + gr.a.toFixed(3) + ")";
+      c2.beginPath(); c2.arc(gr.x, gr.y, gr.r, 0, Math.PI * 2); c2.fill();
+    });
+    // 木屑条：10–16 条 8–18px 短弧线，沿横向板缝方向，强化俯视木纹
+    (S.swarmShavings || []).forEach(sh => {
+      c2.strokeStyle = "rgba(150,120,80," + sh.a.toFixed(3) + ")";
+      c2.lineWidth = 1.4;
+      c2.beginPath();
+      c2.moveTo(sh.x - sh.len * 0.5, sh.y);
+      c2.quadraticCurveTo(sh.x, sh.y - sh.len * 0.16, sh.x + sh.len * 0.5, sh.y);
+      c2.stroke();
+    });
+
+    // ---------- L4 光影层：顶光晕 + 顶部压暗 + 四周暗角 + 可选光束 ----------
+    // 顶光晕：中央偏上暖色径向（仓顶灯洒下，中央鼠群活动区最亮）
+    const lg = c2.createRadialGradient(W * 0.5, H * 0.36, 0, W * 0.5, H * 0.36, Math.max(W, H) * 0.62);
+    lg.addColorStop(0, "rgba(210,170,100,.10)"); lg.addColorStop(0.6, "rgba(210,170,100,.04)"); lg.addColorStop(1, "rgba(210,170,100,0)");
+    c2.fillStyle = lg; c2.fillRect(0, 0, W, H);
+    // 可选光束：顶光晕往下 2 道极淡斜向暖光带
+    for (let i = 0; i < 2; i++) {
+      const bx = W * (0.32 + i * 0.36);
+      const bg2 = c2.createLinearGradient(bx, 0, bx + W * 0.1, H * 0.7);
+      bg2.addColorStop(0, "rgba(200,160,90,.05)"); bg2.addColorStop(1, "rgba(200,160,90,0)");
+      c2.fillStyle = bg2;
+      c2.beginPath();
+      c2.moveTo(bx - W * 0.05, 0); c2.lineTo(bx + W * 0.07, 0);
+      c2.lineTo(bx + W * 0.17, H * 0.7); c2.lineTo(bx - W * 0.03, H * 0.7);
+      c2.closePath(); c2.fill();
+    }
+    // 顶部压暗（HUD 可读，沿用现思路）
+    const tg = c2.createLinearGradient(0, 0, 0, H * 0.3);
+    tg.addColorStop(0, "rgba(0,0,0,.45)"); tg.addColorStop(1, "rgba(0,0,0,0)");
+    c2.fillStyle = tg; c2.fillRect(0, 0, W, H * 0.3);
+    // 四周暗角
+    const vg = c2.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.3, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.4)");
+    c2.fillStyle = vg; c2.fillRect(0, 0, W, H);
+  }
+
+  /* 群鼠地板入口：建离屏缓存（key = W×H:seed:swarm），运行时 drawImage 一次 */
   function drawSwarmFloor(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
-    let g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#28312a"); g.addColorStop(1, "#141a15");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 大块暗斑/浅斑：斑驳石地质感
-    (S.swarmSpots || []).forEach(s => {
-      ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot);
-      ctx.fillStyle = s.lite ? "rgba(255,255,240," + (s.a * 0.35).toFixed(3) + ")" : "rgba(0,0,0," + s.a.toFixed(3) + ")";
-      ctx.beginPath(); ctx.ellipse(0, 0, s.rx, s.ry, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.restore();
+    const dpr = Math.min(G.platform.dpr || 2, 2);
+    const key = W + "x" + H + ":" + (S._groundSeed || 0) + ":swarm";
+    let cache = groundCache["swarm"];
+    if (!cache || cache.key !== key) {
+      const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
+      const cv = (cache && cache.cv) || mk();
+      const c2 = cv.getContext("2d");
+      if (!c2) return;
+      cv.width = Math.ceil(W * dpr); cv.height = Math.ceil(H * dpr);
+      c2.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c2.clearRect(0, 0, W, H);
+      paintSwarmFloor(c2, W, H, S);
+      cache = groundCache["swarm"] = { cv, ctx: c2, key };
+    }
+    ctx.drawImage(cache.cv, 0, 0, W, H);
+  }
+  /* 局部照明导出给 game.js 的 drawGameFrame 调用（地板之上、鼠之下叠加暖光洞） */
+  G.drawSwarmLight = drawSwarmLight;
+
+  /* 群鼠乱窜 · 局部照明：在每只鼠位置挖出暖光洞，鼠处被照亮、其余压暗，
+     模拟"顶部光源照着老鼠"。光心用指数平滑跟随鼠群，光洞半径逐帧插值 → 无闪烁。 */
+  function drawSwarmLight(ctx, t, dt) {
+    const S = G.scene, W = S.W, H = S.H;
+    if (!W || !H) return;
+    // 1) 建离屏光晕画布（尺寸不足则重建）
+    if (!swarmLightC || swarmLightC.width < W || swarmLightC.height < H) {
+      swarmLightC = document.createElement("canvas");
+      swarmLightC.width = Math.max(1, W); swarmLightC.height = Math.max(1, H);
+    }
+    const lctx = swarmLightC.getContext("2d");
+    lctx.clearRect(0, 0, W, H);
+    // 2) 收集活鼠位置 + 质心
+    const ms = (G.preys || []).filter(p => p.type === "mouse" && p.x != null && p.vanishT <= 0);
+    if (!ms.length) { swarmLightState.init = false; return; }   // 无鼠：不画光晕
+    let cx = 0, cy = 0;
+    ms.forEach(p => { cx += p.x; cy += p.y; });
+    cx /= ms.length; cy /= ms.length;
+    // 3) 平滑中心（指数 lerp，dt 帧率无关）
+    const dtv = Math.min(dt || 0.016, 0.05);
+    if (!swarmLightState.init) { swarmLightState.x = cx; swarmLightState.y = cy; swarmLightState.init = true; }
+    const k = 1 - Math.exp(-5.5 * dtv);
+    swarmLightState.x += (cx - swarmLightState.x) * k;
+    swarmLightState.y += (cy - swarmLightState.y) * k;
+    // 4) 整体压暗（局部照明基底）+ 暖光洞
+    lctx.globalCompositeOperation = "source-over";
+    lctx.fillStyle = "rgba(6,5,3,.60)";
+    lctx.fillRect(0, 0, W, H);
+    lctx.globalCompositeOperation = "destination-out";
+    const baseR = Math.max(W, H) * 0.30;
+    // 主光心：随鼠群质心平滑移动
+    {
+      const rg = lctx.createRadialGradient(swarmLightState.x, swarmLightState.y, 0, swarmLightState.x, swarmLightState.y, baseR);
+      rg.addColorStop(0, "rgba(0,0,0,.95)"); rg.addColorStop(0.45, "rgba(0,0,0,.55)"); rg.addColorStop(1, "rgba(0,0,0,0)");
+      lctx.fillStyle = rg;
+      lctx.beginPath(); lctx.arc(swarmLightState.x, swarmLightState.y, baseR, 0, Math.PI * 2); lctx.fill();
+    }
+    // 每只鼠各挖一个小光洞（鼠正下方最亮，呼应"顶灯照着它"）
+    ms.forEach(p => {
+      const r = (72 + 46 * (p.sc || 1)) * (G.platform.S || 1);
+      const rg = lctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      rg.addColorStop(0, "rgba(0,0,0,.85)"); rg.addColorStop(0.55, "rgba(0,0,0,.4)"); rg.addColorStop(1, "rgba(0,0,0,0)");
+      lctx.fillStyle = rg;
+      lctx.beginPath(); lctx.arc(p.x, p.y, r, 0, Math.PI * 2); lctx.fill();
     });
-    // 顶部压暗（HUD 可读）+ 四周暗角
-    const tg = ctx.createLinearGradient(0, 0, 0, H * 0.3);
-    tg.addColorStop(0, "rgba(0,0,0,.5)"); tg.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H * 0.3);
-    const vg = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.3, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
-    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,.4)");
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+    // 5) 上屏：先暖色微光（screen 提亮鼠区），再暗场（挖出光洞）
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(swarmLightC, 0, 0, W, H);
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+    ctx.drawImage(swarmLightC, 0, 0, W, H);
+    ctx.restore();
   }
 
   /* ============ 兔子场所地面（旧草地/石板绘制保留但不再调用） ============
-     当前只用 paintStone：深色石板地（第一版萤光场景）；paintRabbitFloor 等 theme 函数是历史备用
+     当前只用 paintStone：深色石板地（第一版荧光场景）；paintRabbitFloor 等 theme 函数是历史备用
      两套都压得很暗（亮度中位数 < 40），让黄色发光玩具跳出来；
      纹理只在离屏 canvas 里画一次并缓存，运行时只 drawImage。 */
   const groundCache = {};
+  /* 群鼠乱窜 · 局部照明：离屏光晕画布（每帧按鼠群位置重绘，destination-out 挖光洞）
+     + 平滑中心（指数 lerp 跟随鼠群质心，避免光斑闪动/跳变）。 */
+  let swarmLightC = null;
+  const swarmLightState = { x: 0, y: 0, init: false };
   /* ---------- 主题 0：暗夜草地（兔子） ----------
      深绿/枯黄的草叶 + 少量碎石，整体压暗；兔子蹲守时能融进草里，发光时又跳得出来。 */
   function paintGrass(c2, W, H, S) {
@@ -843,10 +1043,10 @@ module.exports = function (G) {
     c2.fillRect(0, 0, W, H);
   }
 
-  /* ---------- 备用石板墙（当前暗夜萤光已改用草地，保留给其他场景） ----------
+  /* ---------- 备用石板墙（当前暗夜荧光已改用草地，保留给其他场景） ----------
      不规则的深棕灰石块 + 深缝 + 微弱受光边，整体压暗，衬托发光玩具。 */
-  /* ---------- 第一版萤光石板地（按用户参考截图复刻） ----------
-     暖灰棕大块圆角石板、宽黑缝、石面斜划痕；整体比旧版亮一档，衬萤火虫的暖光。 */
+  /* ---------- 第一版荧光石板地（按用户参考截图复刻） ----------
+     暖灰棕大块圆角石板、宽黑缝、石面斜划痕；整体比旧版亮一档，衬暗夜荧光的暖光。 */
   function paintStone(c2, W, H, S) {
     c2.fillStyle = "#141009";
     c2.fillRect(0, 0, W, H);
@@ -1153,7 +1353,7 @@ module.exports = function (G) {
       cv.width = Math.ceil(W * dpr); cv.height = Math.ceil(H * dpr);
       c2.setTransform(dpr, 0, 0, dpr, 0, 0);
       c2.clearRect(0, 0, W, H);
-      paintStone(c2, W, H, G.platform.S || 1);   // 第一版萤光：深色石板地
+      paintStone(c2, W, H, G.platform.S || 1);   // 第一版荧光：深色石板地
       cache = groundCache[theme] = { cv, ctx: c2, key };
     }
     ctx.drawImage(cache.cv, 0, 0, W, H);
@@ -1258,7 +1458,7 @@ module.exports = function (G) {
       ctx.fillStyle = "#ffe9a8";
       ctx.beginPath(); ctx.arc(l.x, l.y, r * 0.24, 0, Math.PI * 2); ctx.fill();
     });
-    // 萤火：呼吸 + 慢漂
+    // 荧光：呼吸 + 慢漂
     (S.pondDust || []).forEach(d => {
       let y = (d.y - t * d.sp) % (H + 40);
       if (y < 0) y += H + 40;
@@ -1801,7 +2001,7 @@ module.exports = function (G) {
     G.sparkBurst(x, y, P.spark, big ? 12 : 8);
   };
   /* ============ 青蛙被拍中：一拍炸成草屑 ============
-     刻意和捕鱼的水花区分：不做大气泡球，而是"啪"地炸成一圈细环 + 四散草屑 + 上飘萤火。
+     刻意和捕鱼的水花区分：不做大气泡球，而是"啪"地炸成一圈细环 + 四散草屑 + 上飘荧光。
      空中截击（+2）整体放大一档并多一圈金环，让加分时机看得出区别 */
   G.frogPop = (x, y, aerial) => {
     const LEAF = ["#d9ff9a", "#b9f07a", "#8fdd66", "#5fbf55", "#e9ffd0"];
@@ -1835,7 +2035,7 @@ module.exports = function (G) {
     }
     // 4) 中心小爆闪（短促，不是大光球）
     PUSH(fx.shockwaves, { x, y, r: 3, life: 0.34, speed: 120, w: 9, color: "rgba(244,255,206,.95)", glow: true }, 12);
-    // 5) 上飘萤火
+    // 5) 上飘荧光
     for (let i = 0; i < (aerial ? 5 : 3); i++) {
       PUSH(fx.pollen, {
         x: x + rand(-16, 16), y: y + rand(-8, 8),
@@ -2087,7 +2287,7 @@ module.exports = function (G) {
       else ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx.stroke();
     });
-    /* 光爆碎点：发光小球（黄绿=暗夜萤光默认，泳池金橙水花走逐粒自带色） */
+    /* 光爆碎点：发光小球（黄绿=暗夜荧光默认，泳池金橙水花走逐粒自带色） */
     fx.droplets.forEach(p => {
       const a = Math.min(p.life * 1.5, 0.95);
       ctx.globalAlpha = a;

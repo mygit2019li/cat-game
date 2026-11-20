@@ -22,8 +22,8 @@ module.exports = function (G) {
     bg_tadpole: "paper",     // 蝌蚪快跑：纯白纸面（唯一场景，不再做场景选择）
     tadStyle: "ink",         // 蝌蚪造型：ink 墨影 / line 线条 / brush 水墨 / dash 一笔
     frogMode: "frog",        // 青蛙卡内的玩法切换：frog=青蛙跳跳 / tadpole=蝌蚪快跑
-    ffMode: "ff-walk",       // 萤火虫卡内节奏：ff-walk=萤光漫步 / ff-dash=急爬追光
-    ffCount: 1,              // 萤火虫数量：二级页面可增减（1–7 只，默认 1）
+    ffMode: "ff-walk",       // 暗夜荧光卡内节奏：ff-walk=荧光漫步 / ff-dash=急爬追光
+    ffCount: 1,              // 暗夜荧光数量：二级页面可增减（1–7 只，默认 1）
     bflyMode: "bf-garden",   // 蝴蝶卡内花色：bf-garden=花园彩蝶 / bf-white=素白蝴蝶
     laserMode: "lz-classic", // 激光卡内节奏：lz-classic=经典红点 / lz-swift=疾速红点
     /* 电子猫粮机：feedNextAt 存的是「下次出粮的绝对时刻(ms)」，离开本页也照走真实时间；
@@ -166,7 +166,7 @@ module.exports = function (G) {
     ],
     /* 青蛙跳：只有一套布景，点开始直接进游戏（不弹背景选择层） */
     frog: [
-      { key: "pond", name: "夏夜荷塘", desc: "荷叶 · 睡莲 · 萤火" }
+      { key: "pond", name: "夏夜荷塘", desc: "荷叶 · 睡莲 · 荧光" }
     ]
   };
   G.bgsFor = (type) => (G.TYPE_BGS[type] || []);
@@ -183,7 +183,7 @@ module.exports = function (G) {
     { key: "brush", name: "水墨", desc: "笔锋飞白 · 手绘感" },
     { key: "dash",  name: "一笔", desc: "极简逗号 · 一个笔触" }
   ];
-  /* 首页六张卡不变；青蛙/萤火虫/蝴蝶/激光各有自己的二级玩法卡。
+  /* 首页六张卡不变；青蛙/暗夜荧光/蝴蝶/激光各有自己的二级玩法卡。
      卡片不只换文字，分别落到 configKey 指定的真实玩法参数。 */
   G.MODE_GROUPS = {
     frog: {
@@ -192,10 +192,10 @@ module.exports = function (G) {
       targetByKey: { frog: "frog", tadpole: "tadpole" }
     },
     pool: {
-      title: "萤火虫玩法", sub: "夜里的石板地，萤光小虫慢慢爬", step: "01 看玩法  /  02 开始",
+      title: "暗夜荧光玩法", sub: "夜里的石板地，荧光小虫慢慢爬", step: "01 看玩法  /  02 开始",
       configKey: "ffMode", countKey: "ffCount",
       cards: [
-        { key: "ff-walk", name: "暗夜萤光", desc: "石板地 · 萤光小虫" }
+        { key: "ff-walk", name: "暗夜荧光", desc: "石板地 · 荧光小虫" }
       ]
     },
     butterfly: {
@@ -235,7 +235,7 @@ module.exports = function (G) {
     /* 默认改为「单只」：saveConfig 会把整个 config 写进本地存档，旧存档里往往已有显式 3，
        这里用 pcV1 标记做一次性迁移，把它们也拉回新默认；之后用户在设置里改「多只」会一直保留。 */
     if (!saved.pcV1) { c.preyCount = 1; c.pcV1 = 1; }
-    c.ffCount = clamp(Math.round(Number(c.ffCount) || 1), 1, 7);   // 萤火虫数量：1–7 只（默认 1）
+    c.ffCount = clamp(Math.round(Number(c.ffCount) || 1), 1, 7);   // 暗夜荧光数量：1–7 只（默认 1）
     /* 默认难度/时长改为「悠闲 + 1 分钟」（PRD V1.2）：存档里往往已有旧默认的显式值，
        用 cfgV2 标记做一次性迁移——只有仍是旧默认（标准 / 3 分钟）的才拉回新默认，
        用户自己改过的（hard / 5 分钟等）保留，迁移后不再动。 */
@@ -440,7 +440,7 @@ module.exports = function (G) {
     mouse: { 1: "阶段① 慢速探头", 2: "阶段② 快速轮换", 3: "阶段③ 闪电地鼠" },
     butterfly: { 1: "阶段① 轻舞飞扬", 2: "阶段② 花间穿梭", 3: "阶段③ 疾风蝶影" },
     laser: { 1: "阶段① 缓缓游走", 2: "阶段② 快速闪现", 3: "阶段③ 疯狂光点" },
-    pool:  { 1: "阶段① 萤火初现", 2: "阶段② 暗夜疾行", 3: "阶段③ 疯狂萤光" },
+    pool:  { 1: "阶段① 荧光初现", 2: "阶段② 暗夜疾行", 3: "阶段③ 疯狂荧光" },
     frog:  { 1: "阶段① 荷叶慢跳", 2: "阶段② 跨叶远跳", 3: "阶段③ 连跳追击",
              4: "阶段④ 荷叶变阵" }
   };
@@ -454,7 +454,7 @@ module.exports = function (G) {
   };
   /* 水面追光三阶段：高速掠水（频繁变向）→ 悬停水珠（主要命中窗口）→ 再掠。
      比激光整体快一档、转向更勤，靠"亮斑+水痕"制造 Peppy Cat 式的高速光点追逐 */
-  /* 发光玩具（暗夜萤光）公共步态参数，节奏取自早期参考视频的逐帧测量：
+  /* 发光玩具（暗夜荧光）公共步态参数，节奏取自早期参考视频的逐帧测量：
      - 跑动分两档：慢爬 15–20% 屏宽/秒、急爬 50–60% 屏宽/秒，交替周期 0.5–1.4s
        （视频里帧速度中位 18%/s、90 分位 53%/s，段落速度方差达 2.1，是典型的"走走停停"）
      - 呼吸脉动 1.9–2.3Hz；每 2.2–3.6s 耳朵/翅膀/鞘壳放大"亮一下"，给猫一个动态提示
@@ -491,7 +491,7 @@ module.exports = function (G) {
   };
   /* 兼容旧字段（其他模块可能还引用） */
   G.POOL_DRIFT = G.FIREFLY;
-  /* 兔子模式（暗夜萤光按 29.8s 实拍视频重做）30fps 逐帧实测：
+  /* 兔子模式（暗夜荧光按 29.8s 实拍视频重做）30fps 逐帧实测：
      · 走 / 停交替：走 0.9–3.1s、停 0.9–2.0s；停时位移为 0（不是匀速乱飘）。
      · 走段每帧 4–8px（296 宽）≈ 每步 0.16–0.18s 一小跳，步内有前快后慢的顿挫。
      · 段内「移动方向」夹角中位仅 2.7°、90 分位 10.2° —— 一直朝前，不随机拐弯；
@@ -504,13 +504,13 @@ module.exports = function (G) {
     2: { step: 9.5,  hopDur: 0.15, hopGap: 0.020, walk: [1.4, 3.0], rest: [0.8, 1.6], pulse: 2.1, dark: [2.2, 2.8] },
     3: { step: 11.0, hopDur: 0.14, hopGap: 0.020, walk: [1.6, 3.2], rest: [0.7, 1.4], pulse: 2.2, dark: [2.4, 3.0] }
   };
-  /* 暗夜萤光（第一版）：一只萤光小虫在暗色石板地上爬行，腹尾萤火呼吸脉动。
+  /* 暗夜荧光（第一版）：一只荧光小虫在暗色石板地上爬行，腹尾荧光呼吸脉动。
      行为引擎是 updateFirefly（慢爬/急爬两档步态 + 罕见自发暗场换位），节奏见 G.FIREFLY；
      G.RABBIT 表已不再使用。 */
   G.FF_TOYS = [
-    { key: "dog",     name: "萤光小狗", w: 1, spd: 0.94, fastP: -0.06, gait: 1.15, flare: 1.25, size: 1.06 },
-    { key: "mouse",   name: "萤光老鼠", w: 1, spd: 1.12, fastP: 0.10,  gait: 0.92, flare: 0.95, size: 0.98 },
-    { key: "ladybug", name: "萤光瓢虫", w: 1, spd: 0.86, fastP: -0.02, gait: 0.80, flare: 0.70, size: 0.92 }
+    { key: "dog",     name: "荧光小狗", w: 1, spd: 0.94, fastP: -0.06, gait: 1.15, flare: 1.25, size: 1.06 },
+    { key: "mouse",   name: "荧光老鼠", w: 1, spd: 1.12, fastP: 0.10,  gait: 0.92, flare: 0.95, size: 0.98 },
+    { key: "ladybug", name: "荧光瓢虫", w: 1, spd: 0.86, fastP: -0.02, gait: 0.80, flare: 0.70, size: 0.92 }
   ];
   G.POOL_PARAMS = {
     1: { hold: [0.55, 0.9], dart: [0.65, 1.1],  tele: 0.05 },
@@ -559,38 +559,47 @@ module.exports = function (G) {
        小荷叶被踩到会沉没且不再浮起，见 scenery.js G.rebuildFrogPads / G.padSink */
     4: { crouch: 0.52, leap: 0.72, land: 0.26, settle: 0.80, count: 5, prep: 0.35, nearFirst: 0, chain: 1, roam: 2 }
   };
-  /* 老鼠花色 variants：毛色分层（背→中→腹）/ 耳 / 爪 / 尾 / 眼鼻 + 速度体型差异 */
+  /* 老鼠花色 variants：毛色分层（背→中→腹）/ 耳 / 爪 / 尾 / 眼鼻 + 速度体型差异
+     群鼠乱窜（swarm）6 只差异化角色：体型×毛色×配饰×步态，体现性格层次（见 docs/design-mouse-swarm.md）
+     accessory：topknot 头顶翘毛 / scar 耳疤 / spine 背脊纹 / whiteTip 尾尖白毛 / 无
+     gait：stride 昂首阔步 / dash 弓背疾冲 / slink 贴边滑步 / weave 扭腰走 S */
   G.MOUSE_VARIANTS = [
-    { key: "house", name: "灰褐家鼠", speed: 1.0,  size: 1.0,
-      back: "#857a6d", mid: "#a89b8a", belly: "#ddd0bb",
-      ear: "#857a6d", earIn: "rgba(232,180,169,.72)", earFar: "#79705f", earRim: "rgba(255,255,255,.22)",
+    { key: "house", name: "老仓", speed: 0.88, size: 1.18, accessory: "topknot", collar: true, gait: "stride",
+      back: "#7a6450", mid: "#9c8468", belly: "#e2d3ba",
+      ear: "#7a6450", earIn: "rgba(232,180,169,.72)", earFar: "#6a5645", earRim: "rgba(255,255,255,.22)",
       fur: "rgba(78,68,55,.2)", tail: "#c99f85", tailRing: "rgba(120,86,64,.42)",
       paw: "#ccbba4", foot: "#c2b099", eye: "#221a14", eyeRim: "rgba(0,0,0,.25)",
       nose: "#d98a7d", haunch: "rgba(135,121,106,.26)", sheen: "rgba(240,228,209,.6)" },
-    { key: "charcoal", name: "炭灰玄鼠", speed: 1.08, size: 0.98,
-      back: "#4e4c4a", mid: "#75726d", belly: "#b3ada1",
+    { key: "charcoal", name: "炭胆", speed: 1.32, size: 1.05, accessory: "scar", gait: "dash",
+      back: "#544e47", mid: "#6f685f", belly: "#9d968a",
       ear: "#5c5a56", earIn: "rgba(216,166,158,.7)", earFar: "#4a4845", earRim: "rgba(255,255,255,.16)",
       fur: "rgba(30,28,26,.24)", tail: "#a98871", tailRing: "rgba(90,64,50,.5)",
       paw: "#a99c8c", foot: "#9c907f", eye: "#17120e", eyeRim: "rgba(0,0,0,.3)",
       nose: "#c97f74", haunch: "rgba(60,56,52,.3)", sheen: "rgba(214,205,190,.5)" },
-    { key: "albino", name: "小白鼠", speed: 0.92, size: 0.92,
-      back: "#eee7de", mid: "#f7f2ea", belly: "#ffffff",
+    { key: "albino", name: "霜尖", speed: 1.05, size: 0.90, gait: "slink",
+      back: "#f3ede4", mid: "#faf6ef", belly: "#ffffff",
       ear: "#f2ece4", earIn: "rgba(243,177,187,.8)", earFar: "#e6ded4", earRim: "rgba(255,255,255,.55)",
       fur: "rgba(196,182,168,.28)", tail: "#eab6ac", tailRing: "rgba(199,138,126,.42)",
       paw: "#f6dfd9", foot: "#f2d3cc", eye: "#c0392b", eyeRim: "rgba(140,32,22,.5)",
       nose: "#e0908a", haunch: "rgba(214,196,182,.35)", sheen: "rgba(255,255,255,.72)" },
-    { key: "deer", name: "花背鹿鼠", speed: 1.05, size: 1.02,
-      back: "#8a6b4a", mid: "#b3926a", belly: "#f2ecdf",
+    { key: "deer", name: "花栗", speed: 1.00, size: 1.00, accessory: "spine", gait: "weave",
+      back: "#8a6b4f", mid: "#a98a68", belly: "#e8dcc4",
       ear: "#96754f", earIn: "rgba(238,180,170,.75)", earFar: "#7a5d3f", earRim: "rgba(255,240,220,.3)",
       fur: "rgba(88,62,38,.22)", tail: "#d8b49a", tailRing: "rgba(150,105,72,.5)",
       paw: "#fdfaf3", foot: "#f7f2e6", eye: "#1d150e", eyeRim: "rgba(0,0,0,.26)",
       nose: "#d98a7d", haunch: "rgba(120,90,60,.28)", sheen: "rgba(250,242,226,.62)" },
-    { key: "golden", name: "金褐田鼠", speed: 0.95, size: 1.07,
-      back: "#9c7f52", mid: "#c4a468", belly: "#ecdcb2",
-      ear: "#a5854f", earIn: "rgba(238,178,162,.72)", earFar: "#8a6d42", earRim: "rgba(255,236,200,.3)",
-      fur: "rgba(110,84,44,.22)", tail: "#c9a67e", tailRing: "rgba(140,104,64,.44)",
-      paw: "#dcc79c", foot: "#d1ba8d", eye: "#1f170f", eyeRim: "rgba(0,0,0,.26)",
-      nose: "#d98a7d", haunch: "rgba(140,110,66,.3)", sheen: "rgba(246,230,196,.6)" }
+    { key: "pup", name: "灰仔", speed: 0.96, size: 0.78, gait: "slink",
+      back: "#b3aaa0", mid: "#c9c2b6", belly: "#efe9dd",
+      ear: "#b3aaa0", earIn: "rgba(232,180,169,.7)", earFar: "#a2988c", earRim: "rgba(255,255,255,.28)",
+      fur: "rgba(120,112,100,.22)", tail: "#cdb9a8", tailRing: "rgba(130,110,92,.4)",
+      paw: "#d8d2c6", foot: "#cec6b8", eye: "#221a14", eyeRim: "rgba(0,0,0,.25)",
+      nose: "#d98a7d", haunch: "rgba(160,150,138,.26)", sheen: "rgba(248,244,236,.55)" },
+    { key: "smoky", name: "烟尾", speed: 1.18, size: 0.95, accessory: "whiteTip", gait: "dash",
+      back: "#5b5866", mid: "#7c7889", belly: "#b6b2c0",
+      ear: "#5b5866", earIn: "rgba(210,180,200,.72)", earFar: "#4e4b59", earRim: "rgba(255,255,255,.2)",
+      fur: "rgba(40,38,50,.24)", tail: "#a99aae", tailRing: "rgba(90,70,100,.48)",
+      paw: "#b0aab6", foot: "#a49eae", eye: "#1c1822", eyeRim: "rgba(0,0,0,.28)",
+      nose: "#c9848a", haunch: "rgba(70,66,84,.3)", sheen: "rgba(210,205,220,.5)" }
   ];
   /* 激光花色 variants：红色为主（w = 出现权重），翠绿更快更小（约 1/4 概率）；只保留红绿两色 */
   /* 只保留赤红光点：之前 red(权重 3) / green(权重 1) 加权随机，约 25% 概率抽到翠绿光点，
@@ -626,7 +635,7 @@ module.exports = function (G) {
     mouse:     { w: 116, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
-    /* 暗夜萤光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用萤光黄绿 */
+    /* 暗夜荧光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用荧光黄绿 */
     pool:      { w: 66,  h: 66, speed: 330, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.1, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#f4ffa8" },
     /* 青蛙跳：体型大、移动靠跳跃（不参与巡游速度），spark 用荷叶青绿 */
     frog:      { w: 96,  h: 78, speed: 100, wobF: 2.0, wobA: 0.4,  dartMin: 2.0, dartMax: 3.0, yMin: 0.30, yMax: 0.80, face: true,  sparkColor: "#bdf58a" },

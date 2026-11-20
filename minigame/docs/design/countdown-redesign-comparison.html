@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>逗猫猎场 · 倒计时界面重设计 · 两种风格比较</title>
+<style>
+  :root {
+    /* 现有小游戏基线色（来自 js/config.js G.COLORS） */
+    --ink: #14313a;
+    --ink2: #4a6b74;
+    --ink3: #86a3a9;
+    --teal: #159a8c;
+    --teal-deep: #0d6b7d;
+    --bg: #eef7f3;
+    --card: #ffffff;
+    --line: #dcebe6;
+    --amber: #ffb02e;
+    --amber-deep: #f08c00;
+    --danger: #ff5a5a;
+
+    /* 风格 A：夜航猎手（深色高对比） */
+    --a-bg0: #06161b;
+    --a-bg1: #0d2a31;
+    --a-surface: #10353d;
+    --a-surface-2: #0a242b;
+    --a-line: rgba(158, 218, 205, .18);
+    --a-text: #eefbf6;
+    --a-text-2: #a6c8c0;
+    --a-teal: #33d9c0;
+    --a-teal-soft: rgba(51, 217, 192, .16);
+    --a-amber: #ffb84d;
+    --a-red: #ff6b5e;
+    --a-shadow: rgba(0, 0, 0, .34);
+
+    /* 风格 B：阳光庭院（浅色清新） */
+    --b-bg0: #f5fbf8;
+    --b-bg1: #eaf7f1;
+    --b-surface: #ffffff;
+    --b-surface-2: #f2fbf7;
+    --b-line: #d8ece5;
+    --b-text: #16333a;
+    --b-text-2: #53757c;
+    --b-teal: #0f9d8e;
+    --b-teal-soft: rgba(15, 157, 142, .12);
+    --b-amber: #f08c00;
+    --b-red: #e75b5b;
+    --b-shadow: rgba(23, 68, 63, .12);
+
+    /* 设备尺寸：375×667 为基准 */
+    --device-w: 375px;
+    --device-h: 667px;
+    --phone-radius: 38px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: #e9f2ef;
+    color: #17323a;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; }
+
+  .page { min-height: 100vh; padding: 32px 20px 72px; }
+  .page-head { max-width: 1180px; margin: 0 auto 28px; }
+  .kicker { color: var(--teal-deep); font-size: 14px; font-weight: 700; letter-spacing: .08em; margin-bottom: 8px; }
+  h1 { margin: 0 0 10px; font-size: 30px; line-height: 1.2; letter-spacing: -.02em; }
+  .lede { margin: 0; max-width: 880px; color: #48666d; font-size: 16px; }
+  .lede strong { color: #17323a; }
+
+  .toolbar { max-width: 1180px; margin: 24px auto 20px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; background: #fff; border: 1px solid #d8e7e2; border-radius: 18px; padding: 14px 18px; box-shadow: 0 8px 24px rgba(23, 68, 63, .06); }
+  .tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tab {
+    border: 1px solid #cde2dc; background: #f6fbf9; color: #24484f;
+    border-radius: 999px; padding: 10px 16px; min-height: 42px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .tab[aria-pressed="true"] { background: var(--teal-deep); color: #fff; border-color: var(--teal-deep); }
+  .tab small { opacity: .7; font-size: 12px; }
+  .toolbar-note { color: #5b777d; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .toolbar-note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); display: inline-block; }
+
+  .board {
+    max-width: 1180px; margin: 0 auto;
+    display: grid; gap: 28px;
+  }
+  .board.split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 980px) { .board.split { grid-template-columns: 1fr; } }
+
+  .style-card {
+    background: #fff; border: 1px solid #d8e7e2; border-radius: 26px; overflow: hidden;
+    box-shadow: 0 14px 34px rgba(23, 68, 63, .08);
+  }
+  .style-head { padding: 22px 24px 16px; border-bottom: 1px solid #e4efeb; }
+  .style-name { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .style-name h2 { margin: 0; font-size: 24px; letter-spacing: -.01em; }
+  .style-tag { color: #5b777d; font-size: 14px; }
+  .style-desc { margin: 10px 0 0; color: #4c6a70; font-size: 15px; max-width: 680px; }
+  .style-points { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .style-points li { position: relative; padding-left: 20px; color: #36575d; font-size: 14px; }
+  .style-points li::before { content: ""; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
+  .style-card.style-b .style-points li::before { background: var(--b-amber); }
+
+  .screens { padding: 24px; display: grid; gap: 24px; background: linear-gradient(180deg, rgba(247,251,249,.5), rgba(239,247,243,.7)); }
+  .screen-row { display: grid; gap: 18px; }
+  .screen-row.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 720px) { .screen-row.two { grid-template-columns: 1fr; } }
+  .screen { min-width: 0; }
+  .screen-label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .screen-title { font-size: 16px; font-weight: 700; }
+  .screen-state { font-size: 12px; color: #648187; background: rgba(255,255,255,.8); border: 1px solid #d8e7e2; border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+
+  .device {
+    width: 100%;
+    max-width: var(--device-w);
+    aspect-ratio: 375 / 667;
+    margin: 0 auto;
+    border-radius: var(--phone-radius);
+    overflow: hidden;
+    border: 10px solid #10181b;
+    background: #000;
+    box-shadow: 0 22px 52px rgba(11, 34, 36, .24);
+    position: relative;
+  }
+  .device + .device { margin-top: 16px; }
+  .notch {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    width: 128px; height: 24px; border-radius: 12px; background: #10181b; z-index: 50;
+  }
+  .stage {
+    position: absolute; inset: 0; overflow: hidden; color: var(--text, #fff);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* 场景背景：用当前玩法的抽象色块 + 目标提示，不依赖真实图片 */
+  .scene { position: absolute; inset: 0; }
+  .scene::before, .scene::after { content: ""; position: absolute; border-radius: 50%; filter: blur(42px); opacity: .55; }
+  .scene::before { width: 62%; height: 62%; left: -12%; top: 20%; }
+  .scene::after { width: 54%; height: 54%; right: -16%; bottom: 10%; }
+  .scene-fish { background: linear-gradient(180deg, #0b5e65, #0a3f4b 58%, #0b2d36); }
+  .scene-fish::before { background: rgba(51,217,192,.32); }
+  .scene-fish::after { background: rgba(255,176,46,.22); }
+  .scene-pool { background: linear-gradient(180deg, #07262a, #103c36 62%, #153c31); }
+  .scene-pool::before { background: rgba(244,255,168,.18); }
+  .scene-pool::after { background: rgba(51,217,192,.20); }
+  .scene-butterfly { background: linear-gradient(180deg, #f8fff5, #e9f8ee 58%, #d8f1e7); }
+  .scene-butterfly::before { background: rgba(15,157,142,.16); }
+  .scene-butterfly::after { background: rgba(255,176,46,.16); }
+  .scene-laser { background: linear-gradient(180deg, #0a0f12, #171d20 58%, #0b1013); }
+  .scene-laser::before { background: rgba(255,107,94,.20); }
+  .scene-laser::after { background: rgba(255,107,94,.10); }
+
+  .prey {
+    position: absolute; width: 54px; height: 42px; border-radius: 50% 50% 46% 46%;
+    background: radial-gradient(circle at 34% 28%, rgba(255,255,255,.92), rgba(255,255,255,.26) 46%, rgba(255,255,255,.08));
+    box-shadow: 0 0 26px rgba(255,255,255,.30);
+    opacity: .78;
+  }
+  .prey::before { content: ""; position: absolute; right: -12px; top: 10px; width: 22px; height: 22px; border-radius: 50% 18% 50% 18%; transform: rotate(-32deg); background: inherit; opacity: .85; }
+  .prey::after { content: ""; position: absolute; left: 16px; top: 13px; width: 7px; height: 9px; border-radius: 50%; background: #123; opacity: .75; }
+  .prey.p1 { left: 18%; top: 36%; transform: rotate(-18deg); }
+  .prey.p2 { right: 20%; top: 54%; transform: rotate(16deg) scale(.86); opacity: .62; }
+  .prey.p3 { left: 39%; top: 63%; transform: rotate(8deg) scale(.70); opacity: .48; }
+
+  /* HUD */
+  .hud { position: absolute; left: 12px; right: 12px; top: 44px; display: flex; align-items: center; gap: 8px; z-index: 30; pointer-events: none; }
+  .pill {
+    min-height: 34px; padding: 0 13px; border-radius: 18px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 15px; font-weight: 700; color: #fff; border: 1px solid rgba(255,255,255,.22);
+    backdrop-filter: blur(8px);
+  }
+  .pill.small { min-height: 30px; font-size: 13px; padding: 0 10px; border-radius: 16px; }
+  .pill.ghost { background: rgba(10, 30, 35, .30); }
+  .pill.hit { background: rgba(255, 146, 46, .30); }
+  .pill.combo { background: rgba(255, 146, 46, .56); }
+  .pill.combo.hot { background: rgba(255, 107, 74, .86); }
+  .pill.esc { background: rgba(16, 18, 22, .34); }
+  .pill.esc.hot { background: rgba(90, 96, 108, .78); }
+  .pill.time { background: rgba(8, 34, 44, .42); letter-spacing: .04em; }
+  .pill.time.urgent { background: rgba(178, 42, 42, .62); box-shadow: 0 0 0 2px rgba(255, 107, 94, .24) inset; }
+  .pause {
+    position: absolute; top: 44px; right: 12px; width: 40px; height: 40px; border-radius: 14px;
+    background: rgba(8, 32, 42, .55); border: 1px solid rgba(255,255,255,.22);
+    display: grid; place-items: center; z-index: 31;
+  }
+  .pause i { display: block; width: 5px; height: 18px; background: #fff; border-radius: 2px; margin: 0 2px; }
+  .pause span { position: absolute; bottom: -19px; left: 50%; transform: translateX(-50%); font-size: 10px; color: rgba(255,255,255,.75); white-space: nowrap; }
+
+  /* 风格 A 倒计时：夜航猎手 */
+  .a-stage {
+    --text: var(--a-text); --text-2: var(--a-text-2); --accent: var(--a-teal);
+    background: radial-gradient(circle at 50% 38%, rgba(51,217,192,.20), transparent 34%), linear-gradient(180deg, var(--a-bg0), var(--a-bg1) 62%, var(--a-surface-2));
+  }
+  .a-stage::before {
+    content: ""; position: absolute; inset: -30%;
+    background: repeating-conic-gradient(rgba(158,218,205,.10) 0 6deg, transparent 6deg 14deg);
+    transform: rotate(18deg);
+    opacity: .20;
+    animation: a-spin 36s linear infinite;
+  }
+  .a-stage::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 43%, transparent 0 110px, rgba(0,0,0,.50) 111px 100%);
+  }
+  @keyframes a-spin { to { transform: rotate(398deg); } }
+
+  .count-center { position: absolute; inset: 0; display: grid; place-items: center; z-index: 10; }
+  .count-stack { width: 270px; text-align: center; position: relative; }
+  .count-ring {
+    position: relative; width: 238px; height: 238px; margin: 0 auto 22px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(6,22,27,.94) 0 58%, rgba(10,36,43,.78) 59% 64%, transparent 65%),
+      conic-gradient(var(--a-teal) 0 92%, rgba(51,217,192,.22) 92% 100%);
+    box-shadow: 0 0 54px rgba(51,217,192,.22), inset 0 0 42px rgba(0,0,0,.38);
+    display: grid; place-items: center;
+  }
+  .count-ring::before {
+    content: ""; position: absolute; inset: 12px; border-radius: 50%;
+    background: conic-gradient(transparent 0 88%, rgba(51,217,192,.58) 88% 100%);
+    -webkit-mask: radial-gradient(circle, transparent 0 48px, #000 49px); mask: radial-gradient(circle, transparent 0 48px, #000 49px);
+  }
+  .count-ring .ticks { position: absolute; inset: -8px; border-radius: 50%; background:
+    repeating-conic-gradient(rgba(238,251,246,.72) 0 .6deg, transparent .6deg 15deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 112px, #000 113px 120px, transparent 121px); mask: radial-gradient(circle, transparent 0 112px, #000 113px 120px, transparent 121px);
+    opacity: .46;
+  }
+  .count-number { font-size: 94px; line-height: 1; font-weight: 900; letter-spacing: -.05em; color: #f4fffb; text-shadow: 0 0 28px rgba(51,217,192,.34); }
+  .count-word { font-size: 24px; font-weight: 800; color: var(--a-text); margin-bottom: 10px; }
+  .count-hint { font-size: 14px; color: var(--a-text-2); line-height: 1.6; }
+  .count-hint b { color: var(--a-teal); font-weight: 800; }
+  .count-caption {
+    position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; padding: 9px 14px; border-radius: 999px;
+    background: rgba(10, 36, 43, .74); border: 1px solid var(--a-line); color: var(--a-text-2); font-size: 13px;
+  }
+  .count-caption strong { color: var(--a-teal); font-weight: 800; }
+
+  /* 风格 A HUD 变体 */
+  .a-hud .pill { background: rgba(8, 30, 35, .58); border-color: rgba(158,218,205,.26); color: #ecfff9; }
+  .a-hud .pill.time { background: rgba(10, 36, 43, .68); box-shadow: 0 0 0 1px rgba(51,217,192,.20) inset; }
+  .a-hud .pill.time.urgent { background: rgba(132, 31, 31, .70); box-shadow: 0 0 0 1px rgba(255,107,94,.38) inset; color: #ffe3e0; }
+  .a-hud .pill.hit { background: rgba(255, 184, 77, .20); border-color: rgba(255,184,77,.28); color: #ffe4b3; }
+  .a-hud .pill.combo { background: rgba(255, 184, 77, .24); color: #ffe4b3; border-color: rgba(255,184,77,.34); }
+  .a-hud .pill.combo.hot { background: rgba(255, 107, 94, .70); color: #fff; }
+  .a-hud .pill.esc { background: rgba(238,251,246,.10); color: rgba(238,251,246,.72); }
+  .a-hud .pill.esc.hot { background: rgba(255,184,77,.22); color: #ffe4b3; }
+  .a-hud .pause { background: rgba(10, 36, 43, .72); border-color: rgba(158,218,205,.28); }
+
+  /* 风格 A 出粮倒计时 */
+  .a-feeder { background: linear-gradient(180deg, #f7f6ec, #eee8d5); }
+  .feeder-ui { position: absolute; inset: 0; padding: 58px 24px 24px; display: flex; flex-direction: column; gap: 18px; }
+  .feeder-card {
+    background: #fff; border: 1px solid #d9e5df; border-radius: 24px; padding: 18px;
+    box-shadow: 0 18px 38px rgba(20, 40, 36, .10);
+  }
+  .feeder-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .feeder-title { font-size: 18px; font-weight: 900; color: #16333a; }
+  .feeder-status { display: inline-flex; align-items: center; gap: 7px; color: #0d6b7d; font-size: 13px; font-weight: 800; }
+  .feeder-status i { width: 8px; height: 8px; border-radius: 50%; background: #159a8c; box-shadow: 0 0 0 4px rgba(21,154,140,.12); }
+  .lcd {
+    background: #0b262d; color: #8ef0d6; border-radius: 16px; padding: 16px; min-height: 104px;
+    display: flex; flex-direction: column; justify-content: center; gap: 8px;
+    box-shadow: inset 0 0 26px rgba(0,0,0,.34);
+  }
+  .lcd-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .lcd-label { font-size: 12px; color: rgba(142,240,214,.55); }
+  .lcd-value { font-size: 18px; font-weight: 900; letter-spacing: .04em; color: #9ff4df; }
+  .lcd-value.big { font-size: 34px; color: #c7fff0; text-shadow: 0 0 16px rgba(142,240,214,.28); }
+  .lcd-bar { height: 6px; background: rgba(142,240,214,.16); border-radius: 999px; overflow: hidden; }
+  .lcd-bar span { display: block; height: 100%; width: 62%; background: linear-gradient(90deg, #33d9c0, #8ef0d6); border-radius: inherit; }
+  .feeder-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+  .feeder-btn {
+    height: 46px; border-radius: 14px; border: 1px solid #d9e5df; background: #f7fbf9; color: #16333a; font-weight: 800;
+  }
+  .feeder-btn.primary { background: #0d6b7d; color: #fff; border-color: #0d6b7d; }
+  .feeder-note { margin-top: 12px; color: #6a8388; font-size: 12px; text-align: center; }
+
+  /* 风格 B 倒计时：阳光庭院 */
+  .b-stage {
+    --text: var(--b-text); --text-2: var(--b-text-2); --accent: var(--b-teal);
+    background: linear-gradient(180deg, #f8fffb, #e9f8f1 62%, #dcf1e8);
+  }
+  .b-stage::before {
+    content: ""; position: absolute; width: 260px; height: 260px; border-radius: 50%;
+    left: 50%; top: 38%; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255,176,46,.28), rgba(255,176,46,.10) 44%, transparent 70%);
+    filter: blur(8px);
+  }
+  .b-stage::after {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 18% 22%, rgba(15,157,142,.16) 0 26px, transparent 27px),
+      radial-gradient(circle at 82% 30%, rgba(255,176,46,.20) 0 18px, transparent 19px),
+      radial-gradient(circle at 22% 76%, rgba(15,157,142,.14) 0 14px, transparent 15px),
+      radial-gradient(circle at 78% 72%, rgba(15,157,142,.12) 0 20px, transparent 21px);
+  }
+
+  .b-count {
+    position: absolute; left: 50%; top: 37%; transform: translate(-50%, -50%);
+    width: 300px; max-width: calc(100% - 36px); z-index: 10; text-align: center;
+  }
+  .b-card {
+    background: rgba(255,255,255,.94); border: 1px solid rgba(216,236,229,.95);
+    border-radius: 30px; padding: 26px 24px 22px;
+    box-shadow: 0 24px 54px rgba(23,68,63,.13);
+    position: relative; overflow: hidden;
+  }
+  .b-card::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 8px;
+    background: linear-gradient(90deg, var(--b-teal), var(--b-amber));
+  }
+  .b-count-kicker { color: #53757c; font-size: 14px; font-weight: 800; margin-bottom: 12px; }
+  .b-count-number { font-size: 86px; line-height: 1; font-weight: 900; color: #113b43; letter-spacing: -.05em; }
+  .b-count-number span { color: var(--b-amber); }
+  .b-count-bar { height: 10px; background: #e4f2ed; border-radius: 999px; overflow: hidden; margin: 18px 0 12px; }
+  .b-count-bar span { display: block; height: 100%; width: 86%; border-radius: inherit; background: linear-gradient(90deg, var(--b-teal), #59c7b2); }
+  .b-count-hint { color: #53757c; font-size: 14px; line-height: 1.6; }
+  .b-count-hint b { color: var(--b-teal); font-weight: 900; }
+  .b-count-caption {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 16px;
+    color: #0d6b7d; background: var(--b-teal-soft); border-radius: 999px; padding: 8px 12px; font-size: 13px; font-weight: 800;
+  }
+
+  /* 风格 B HUD */
+  .b-hud .pill { color: #113b43; background: rgba(255,255,255,.86); border-color: rgba(216,236,229,.96); box-shadow: 0 10px 22px rgba(23,68,63,.08); }
+  .b-hud .pill.time { background: rgba(13,107,125,.90); color: #fff; border-color: transparent; }
+  .b-hud .pill.time.urgent { background: #e75b5b; color: #fff; }
+  .b-hud .pill.hit { background: rgba(255,176,46,.24); color: #945400; border-color: rgba(255,176,46,.42); }
+  .b-hud .pill.combo { background: rgba(255,176,46,.32); color: #945400; border-color: rgba(255,176,46,.52); }
+  .b-hud .pill.combo.hot { background: #ff5a5a; color: #fff; border-color: #ff5a5a; }
+  .b-hud .pill.esc { background: rgba(22,51,58,.10); color: #345960; border-color: rgba(22,51,58,.18); }
+  .b-hud .pill.esc.hot { background: rgba(231,91,91,.14); color: #a33; border-color: rgba(231,91,91,.36); }
+  .b-hud .pause { background: rgba(255,255,255,.88); border-color: rgba(216,236,229,.98); box-shadow: 0 10px 22px rgba(23,68,63,.10); }
+  .b-hud .pause i { background: #113b43; }
+  .b-hud .pause span { color: #53757c; }
+
+  /* 暂停 & 结算：两种风格共用结构，但配色分别表达 */
+  .modal-mask { position: absolute; inset: 0; background: rgba(8, 32, 42, .48); display: grid; place-items: center; z-index: 40; padding: 22px; }
+  .a-modal-mask { background: rgba(4, 14, 17, .68); }
+  .b-modal-mask { background: rgba(22, 51, 58, .34); }
+  .modal {
+    width: 100%; max-width: 300px; background: #fff; border-radius: 26px; padding: 22px;
+    box-shadow: 0 24px 56px rgba(10, 30, 35, .24);
+  }
+  .a-modal { background: #0d2a31; color: #eefbf6; border: 1px solid rgba(158,218,205,.22); }
+  .b-modal { background: #fff; color: #16333a; border: 1px solid #d8ece5; }
+  .modal-title { font-size: 22px; font-weight: 900; margin: 0 0 8px; }
+  .modal-sub { font-size: 13px; color: var(--text-2, #53757c); margin: 0 0 18px; line-height: 1.55; }
+  .a-modal .modal-sub { color: #a6c8c0; }
+  .btn { width: 100%; height: 48px; border-radius: 16px; border: 1px solid transparent; font-size: 16px; font-weight: 900; margin-bottom: 10px; }
+  .btn.primary { background: linear-gradient(135deg, #46d6c0, #14a093); color: #fff; }
+  .a-modal .btn.primary { background: linear-gradient(135deg, #33d9c0, #0d6b7d); }
+  .b-modal .btn.primary { background: linear-gradient(135deg, #159a8c, #0d6b7d); }
+  .btn.ghost { background: #fff; color: #16333a; border-color: #d8ece5; }
+  .a-modal .btn.ghost { background: transparent; color: #eefbf6; border-color: rgba(158,218,205,.28); }
+  .result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; }
+  .stat { background: #f5fbf8; border: 1px solid #dcebe6; border-radius: 16px; padding: 10px 8px; text-align: center; }
+  .a-modal .stat { background: rgba(158,218,205,.10); border-color: rgba(158,218,205,.18); }
+  .stat-value { font-size: 24px; font-weight: 900; color: #0d6b7d; }
+  .a-modal .stat-value { color: #8ef0d6; }
+  .stat-label { font-size: 11px; color: #648187; margin-top: 4px; }
+  .a-modal .stat-label { color: #a6c8c0; }
+  .rating { margin-bottom: 14px; font-size: 15px; font-weight: 900; color: #16333a; }
+  .a-modal .rating { color: #eefbf6; }
+  .rating span { color: var(--b-amber); }
+  .a-modal .rating span { color: var(--a-amber); }
+
+  .compare-table {
+    max-width: 1180px; margin: 30px auto 0; background: #fff; border: 1px solid #d8e7e2; border-radius: 22px; overflow: hidden;
+  }
+  .compare-table table { width: 100%; border-collapse: collapse; }
+  .compare-table th, .compare-table td { padding: 15px 18px; border-bottom: 1px solid #e7f1ed; text-align: left; vertical-align: top; }
+  .compare-table th { background: #f3faf7; font-size: 14px; color: #24484f; }
+  .compare-table td { font-size: 14px; color: #405f65; }
+  .compare-table tr:last-child td { border-bottom: 0; }
+  .compare-table .rec { color: #0d6b7d; font-weight: 900; }
+
+  .footnote { max-width: 1180px; margin: 18px auto 0; color: #648187; font-size: 13px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <div class="kicker">逗猫猎场 · 倒计时界面重设计</div>
+    <h1>两种风格，同一套倒计时场景</h1>
+    <p class="lede">本次覆盖项目里与“倒计时 / 等待 / 剩余时间”相关的界面：<strong>开局前 3 秒倒计时</strong>、<strong>对局 HUD 剩余时间药丸</strong>、<strong>暂停页</strong>、<strong>结算页</strong>，以及<strong>电子猫粮下次出粮倒计时</strong>。两种风格使用相同内容，只改变视觉方向，便于直接比较。</p>
+  </header>
+
+  <section class="toolbar" aria-label="风格与状态切换">
+    <div class="tabs" role="group" aria-label="风格切换">
+      <button class="tab" type="button" data-view="split" aria-pressed="true">两种风格并排 <small>比较用</small></button>
+      <button class="tab" type="button" data-view="a" aria-pressed="false">风格 A <small>夜航猎手</small></button>
+      <button class="tab" type="button" data-view="b" aria-pressed="false">风格 B <small>阳光庭院</small></button>
+    </div>
+    <div class="tabs" role="group" aria-label="倒计时场景切换">
+      <button class="tab" type="button" data-scene="countdown" aria-pressed="true">开局倒计时</button>
+      <button class="tab" type="button" data-scene="hud" aria-pressed="false">对局 HUD</button>
+      <button class="tab" type="button" data-scene="pause" aria-pressed="false">暂停</button>
+      <button class="tab" type="button" data-scene="result" aria-pressed="false">结算</button>
+      <button class="tab" type="button" data-scene="feeder" aria-pressed="false">出粮倒计时</button>
+    </div>
+    <div class="toolbar-note"><span class="dot"></span>手机预览为静态高保真稿；真实动效、触摸热区与 Canvas 实现在选定风格后落地。</div>
+  </section>
+
+  <main class="board split" id="board">
+    <article class="style-card style-a" data-style="a">
+      <div class="style-head">
+        <div class="style-name">
+          <h2>风格 A · 夜航猎手</h2>
+          <span class="style-tag">Dark Tactical Countdown</span>
+        </div>
+        <p class="style-desc">把倒计时做成一局开始前的“瞄准镜”。深青夜色、同心刻度环、高对比数字让剩余秒数成为唯一主角；HUD 保持轻量半透明，暗场玩法（激光、暗夜荧光）里不抢猎物。</p>
+        <ul class="style-points">
+          <li>视觉核心：238px 环形进度 + 94px 数字，开局仪式感强。</li>
+          <li>适合：激光暗室、暗夜荧光、捕鼠、青蛙等偏暗场景；也适合夜间长时间给猫自玩。</li>
+          <li>风险：浅色背景玩法（蝴蝶、蝌蚪白纸）需要从深转浅做一次过渡，避免开场太“黑”。</li>
+        </ul>
+      </div>
+      <div class="screens" data-screens="a"></div>
+    </article>
+
+    <article class="style-card style-b" data-style="b">
+      <div class="style-head">
+        <div class="style-name">
+          <h2>风格 B · 阳光庭院</h2>
+          <span class="style-tag">Light Garden Countdown</span>
+        </div>
+        <p class="style-desc">延续现有浅色青绿基线，把倒计时做成“庭院里的出发牌”。白色圆角卡片、青绿到琥珀的进度条、柔和阴影，整体更轻松、更偏宠物日常。</p>
+        <ul class="style-points">
+          <li>视觉核心：白色卡片 + 86px 大数字 + 青绿进度条，识别直接、制作成本低。</li>
+          <li>适合：蝴蝶花园、蝌蚪白纸、鱼池等浅色场景；和首页现有 UI 最连续。</li>
+          <li>风险：暗场玩法需要给 HUD 和倒计时加一层“亮色浮层”，否则白字白底或黑字黑底会不稳。</li>
+        </ul>
+      </div>
+      <div class="screens" data-screens="b"></div>
+    </article>
+  </main>
+
+  <section class="compare-table" aria-label="风格比较">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:18%">比较维度</th>
+          <th>风格 A · 夜航猎手</th>
+          <th>风格 B · 阳光庭院</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>第一印象</td><td>更游戏化、更有“开拍”感，倒计时本身成为主视觉。</td><td>更生活化、更轻盈，和首页 / 设置 / 记录的现有浅色体系一致。</td></tr>
+        <tr><td>倒计时表达</td><td>环形进度 + 刻度 + 大数字，强调“马上开始”。</td><td>卡片 + 横向进度条 + 大数字，强调“准备出发”。</td></tr>
+        <tr><td>HUD 可读性</td><td class="rec">暗场强：激光、暗夜荧光、捕鼠等场景不压猎物。</td><td>亮场强：浅色场景更清爽；暗场需要额外加深药丸。</td></tr>
+        <tr><td>与现有 UI 连续性</td><td>首页仍是浅色，倒计时变深色会带来一次明显转场；需要处理好过渡。</td><td class="rec">延续现有浅色青绿体系，改动范围更集中。</td></tr>
+        <tr><td>电子猫粮出粮倒计时</td><td>可用“LCD 真空荧光屏”做拟物小屏，和机器造型强关联。</td><td>用浅色状态卡 + 青绿进度，更贴合设置页，不像设备屏幕那么重。</td></tr>
+        <tr><td>实现成本（Canvas）</td><td>中等偏高：需要环形渐变、刻度、暗色遮罩，暗场与亮场两套 HUD 令牌。</td><td>中等：主要是白卡片、进度条与药丸颜色令牌，现有绘制函数更容易扩展。</td></tr>
+        <tr><td>推荐场景</td><td>若希望小游戏更有“玩法仪式感”，优先 A。</td><td>若希望整体产品更稳、更宠物日常，优先 B。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <p class="footnote">说明：本稿为设计比较稿，未改动 <code>game.js</code>、<code>js/ui.js</code>、<code>js/feeder.js</code>。手机内的画面为可预览的 HTML 高保真模拟；真实 Canvas 实现会复用现有 <code>ui.drawCountdown</code>、<code>ui.drawHud</code>、<code>ui.drawPause</code>、<code>ui.drawResult</code> 与电子猫粮 LCD 绘制逻辑，替换颜色令牌、形状和动效参数。</p>
+</div>
+
+<script>
+  const scenes = {
+    a: {
+      countdown: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">开局倒计时 · 鱼 / 池塘亮场</span><span class="screen-state">3 秒后开始</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage a-stage">
+              <div class="scene scene-fish"></div>
+              <div class="prey p1"></div><div class="prey p2"></div><div class="prey p3"></div>
+              <div class="count-center">
+                <div class="count-stack">
+                  <div class="count-ring"><div class="ticks"></div><div class="count-number">3</div></div>
+                  <div class="count-word">准备出发</div>
+                  <div class="count-hint">本局海域 · <b>水草森林</b><br>点中鱼即得分，连续命中有加成</div>
+                </div>
+              </div>
+              <div class="count-caption"><span>长按暂停</span><strong>·</strong><span>本局 3:00</span></div>
+            </div>
+          </div>
+        </div>`,
+      hud: `
+        <div class="screen-row two">
+          <div class="screen">
+            <div class="screen-label"><span class="screen-title">对局 HUD · 正常剩余时间</span><span class="screen-state">2:07</span></div>
+            <div class="device"><div class="notch"></div>
+              <div class="stage a-stage a-hud">
+                <div class="scene scene-laser"></div>
+                <div class="prey p1" style="opacity:.88"></div><div class="prey p2"></div>
+                <div class="hud">
+                  <span class="pill time">2:07</span>
+                  <span class="pill hit">🐾 12</span>
+                  <span class="pill combo hot">×6</span>
+                  <span class="pill esc hot">漏击 3</span>
+                </div>
+                <div class="pause"><i></i><i></i><span>长按暂停</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="screen">
+            <div class="screen-label"><span class="screen-title">对局 HUD · 最后 10 秒</span><span class="screen-state">0:08</span></div>
+            <div class="device"><div class="notch"></div>
+              <div class="stage a-stage a-hud">
+                <div class="scene scene-pool"></div>
+                <div class="prey p1"></div><div class="prey p3"></div>
+                <div class="hud">
+                  <span class="pill time urgent">0:08</span>
+                  <span class="pill hit">🐾 24</span>
+                  <span class="pill combo hot">×11</span>
+                </div>
+                <div class="pause"><i></i><i></i></div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      pause: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">暂停页</span><span class="screen-state">已暂停</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage a-stage a-hud">
+              <div class="scene scene-laser"></div>
+              <div class="prey p1"></div>
+              <div class="modal-mask a-modal-mask">
+                <div class="modal a-modal">
+                  <h3 class="modal-title">暂停中</h3>
+                  <p class="modal-sub">本局剩余 1:42 · 已连续命中 ×4<br>折返瞬间命中 +2 · 漏击 1 次扣 3 连击</p>
+                  <button class="btn primary" type="button">继续本局</button>
+                  <button class="btn ghost" type="button">结束本局</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      result: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">结算页</span><span class="screen-state">评级展示</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage a-stage a-hud">
+              <div class="scene scene-fish"></div>
+              <div class="modal-mask a-modal-mask">
+                <div class="modal a-modal">
+                  <h3 class="modal-title">捕猎结算</h3>
+                  <div class="rating">评级 <span>「追光猎手」</span></div>
+                  <div class="result-stats">
+                    <div class="stat"><div class="stat-value">38</div><div class="stat-label">命中</div></div>
+                    <div class="stat"><div class="stat-value">72%</div><div class="stat-label">准确</div></div>
+                    <div class="stat"><div class="stat-value">×15</div><div class="stat-label">最高连击</div></div>
+                  </div>
+                  <button class="btn primary" type="button">再来一局</button>
+                  <button class="btn ghost" type="button">生成分享卡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      feeder: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">电子猫粮 · 下次出粮倒计时</span><span class="screen-state">定时 5 分钟</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage a-feeder">
+              <div class="feeder-ui">
+                <div class="feeder-card">
+                  <div class="feeder-top"><div class="feeder-title">电子猫粮</div><div class="feeder-status"><i></i>定时出粮</div></div>
+                  <div class="lcd">
+                    <div class="lcd-row"><span class="lcd-label">下次出粮</span><span class="lcd-value big">04:12</span></div>
+                    <div class="lcd-row"><span class="lcd-label">份量</span><span class="lcd-value">3 份 · 36g</span></div>
+                    <div class="lcd-bar"><span></span></div>
+                  </div>
+                  <div class="feeder-actions">
+                    <button class="feeder-btn primary" type="button">立即出粮</button>
+                    <button class="feeder-btn" type="button">暂停定时</button>
+                  </div>
+                  <div class="feeder-note">出粮中会显示「出粮中」，完成后回到待机</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`
+    },
+    b: {
+      countdown: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">开局倒计时 · 蝴蝶 / 浅色场景</span><span class="screen-state">3 秒后开始</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage b-stage">
+              <div class="scene scene-butterfly"></div>
+              <div class="prey p1" style="background:radial-gradient(circle at 35% 30%, #fff, #e8fff8 55%, rgba(255,255,255,.2)); opacity:.62"></div>
+              <div class="prey p2" style="background:radial-gradient(circle at 35% 30%, #fff, #fff3d6 55%, rgba(255,255,255,.2)); opacity:.5"></div>
+              <div class="b-count">
+                <div class="b-card">
+                  <div class="b-count-kicker">准备出发</div>
+                  <div class="b-count-number">3</div>
+                  <div class="b-count-bar"><span></span></div>
+                  <div class="b-count-hint">本局 3:00 · 蝴蝶停留时最容易拍中<br>拍空不会清连击，附近拍偏会减半</div>
+                  <div class="b-count-caption">🐾 长按暂停可暂停本局</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      hud: `
+        <div class="screen-row two">
+          <div class="screen">
+            <div class="screen-label"><span class="screen-title">对局 HUD · 正常剩余时间</span><span class="screen-state">2:14</span></div>
+            <div class="device"><div class="notch"></div>
+              <div class="stage b-stage b-hud">
+                <div class="scene scene-butterfly"></div>
+                <div class="prey p1" style="background:radial-gradient(circle at 35% 30%, #fff, #e8fff8 55%, rgba(255,255,255,.2)); opacity:.7"></div>
+                <div class="prey p2" style="background:radial-gradient(circle at 35% 30%, #fff, #fff3d6 55%, rgba(255,255,255,.2)); opacity:.56"></div>
+                <div class="hud">
+                  <span class="pill time">2:14</span>
+                  <span class="pill hit">🐾 8</span>
+                  <span class="pill combo">×3</span>
+                </div>
+                <div class="pause"><i></i><i></i><span>长按暂停</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="screen">
+            <div class="screen-label"><span class="screen-title">对局 HUD · 最后 10 秒</span><span class="screen-state">0:09</span></div>
+            <div class="device"><div class="notch"></div>
+              <div class="stage b-hud" style="background:linear-gradient(180deg,#10333a,#081e23);">
+                <div class="scene scene-laser" style="opacity:.7"></div>
+                <div class="prey p1" style="opacity:.72"></div>
+                <div class="hud">
+                  <span class="pill time urgent">0:09</span>
+                  <span class="pill hit">🐾 19</span>
+                  <span class="pill combo hot">×7</span>
+                </div>
+                <div class="pause"><i></i><i></i></div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      pause: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">暂停页</span><span class="screen-state">已暂停</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage b-stage b-hud">
+              <div class="scene scene-butterfly"></div>
+              <div class="modal-mask b-modal-mask">
+                <div class="modal b-modal">
+                  <h3 class="modal-title">暂停中</h3>
+                  <p class="modal-sub">本局剩余 2:14 · 当前连击 ×3<br>横屏放稳手机，再交给猫咪继续</p>
+                  <button class="btn primary" type="button">继续本局</button>
+                  <button class="btn ghost" type="button">结束本局</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      result: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">结算页</span><span class="screen-state">评级展示</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage b-stage b-hud">
+              <div class="scene scene-butterfly"></div>
+              <div class="modal-mask b-modal-mask">
+                <div class="modal b-modal">
+                  <h3 class="modal-title">捕猎结算</h3>
+                  <div class="rating">评级 <span>「庭院小能手」</span></div>
+                  <div class="result-stats">
+                    <div class="stat"><div class="stat-value">26</div><div class="stat-label">命中</div></div>
+                    <div class="stat"><div class="stat-value">64%</div><div class="stat-label">准确</div></div>
+                    <div class="stat"><div class="stat-value">×9</div><div class="stat-label">最高连击</div></div>
+                  </div>
+                  <button class="btn primary" type="button">再来一局</button>
+                  <button class="btn ghost" type="button">查看本周记录</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`,
+      feeder: `
+        <div class="screen">
+          <div class="screen-label"><span class="screen-title">电子猫粮 · 下次出粮倒计时</span><span class="screen-state">定时 5 分钟</span></div>
+          <div class="device"><div class="notch"></div>
+            <div class="stage" style="background:linear-gradient(180deg,#f8fff7,#eaf7ef);">
+              <div class="feeder-ui">
+                <div class="feeder-card" style="border-color:#d8ece5;">
+                  <div class="feeder-top"><div class="feeder-title">电子猫粮</div><div class="feeder-status" style="color:#0f9d8e;"><i style="background:#0f9d8e; box-shadow:0 0 0 4px rgba(15,157,142,.12)"></i>定时出粮</div></div>
+                  <div style="background:#f2fbf7;border:1px solid #dcebe6;border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px;">
+                    <div class="lcd-row"><span class="lcd-label" style="color:#53757c;">下次出粮</span><span class="lcd-value" style="color:#0d6b7d; font-size:30px;">04:12</span></div>
+                    <div class="lcd-row"><span class="lcd-label" style="color:#53757c;">份量</span><span class="lcd-value" style="color:#0d6b7d;">3 份 · 36g</span></div>
+                    <div class="lcd-bar" style="background:#e4f2ed;"><span style="background:linear-gradient(90deg,#159a8c,#59c7b2)"></span></div>
+                  </div>
+                  <div class="feeder-actions">
+                    <button class="feeder-btn primary" style="background:#0f9d8e;border-color:#0f9d8e;" type="button">立即出粮</button>
+                    <button class="feeder-btn" type="button">暂停定时</button>
+                  </div>
+                  <div class="feeder-note">出粮中会显示「出粮中」，完成后回到待机</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>`
+    }
+  };
+
+  const board = document.getElementById('board');
+  const screensA = document.querySelector('[data-screens="a"]');
+  const screensB = document.querySelector('[data-screens="b"]');
+  const cardA = document.querySelector('.style-a');
+  const cardB = document.querySelector('.style-b');
+
+  function render(view, scene) {
+    screensA.innerHTML = scenes.a[scene];
+    screensB.innerHTML = scenes.b[scene];
+    if (view === 'a') {
+      board.classList.remove('split');
+      cardA.style.display = 'block';
+      cardB.style.display = 'none';
+    } else if (view === 'b') {
+      board.classList.remove('split');
+      cardA.style.display = 'none';
+      cardB.style.display = 'block';
+    } else {
+      board.classList.add('split');
+      cardA.style.display = 'block';
+      cardB.style.display = 'block';
+    }
+    document.querySelectorAll('[data-view]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.view === view)));
+    document.querySelectorAll('[data-scene]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.scene === scene)));
+  }
+
+  document.querySelectorAll('[data-view]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const scene = document.querySelector('[data-scene][aria-pressed="true"]').dataset.scene;
+      render(btn.dataset.view, scene);
+    });
+  });
+  document.querySelectorAll('[data-scene]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = document.querySelector('[data-view][aria-pressed="true"]').dataset.view;
+      render(view, btn.dataset.scene);
+    });
+  });
+
+  render('split', 'countdown');
+</script>
+</body>
+</html>

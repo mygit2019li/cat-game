@@ -5,7 +5,7 @@ module.exports = function (G) {
   let preys = [];
   G.preys = preys;
   /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
-  /* 第一版萤光只有一只萤光小虫；保留函数签名给构造/重生调用。 */
+  /* 第一版荧光只有一只荧光小虫；保留函数签名给构造/重生调用。 */
   const pickFfToy = () => (G.FF_TOYS && G.FF_TOYS[0]) || { key: "firefly", size: 1 };
   /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
   const inPoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "pool");
@@ -108,10 +108,19 @@ module.exports = function (G) {
         this.exVx = 0; this.exVy = 0;                      // 飞出屏幕的方向速度
       }
       if (type === "mouse") {
-        this.mouseVar = G.MOUSE_VARIANTS[Math.floor(rand(0, G.MOUSE_VARIANTS.length))];
+        // 变体：swarm 可由外部强制注入（buildPreys/topUpPreys 去重分配），否则随机
+        this.mouseVar = forcedSpecies || G.MOUSE_VARIANTS[Math.floor(rand(0, G.MOUSE_VARIANTS.length))];
         this.mSpeed = this.mouseVar.speed || 1;               // 花色冲刺速度差异
-        this.baseW = this.def.w * (this.mouseVar.size || 1);  // 花色体型差异
-        this.baseH = this.def.h * (this.mouseVar.size || 1);
+        // 群鼠乱窜：整体收小 28%，多只同屏不拥挤，与粮袋/木箱等背景道具比例更协调
+        const swarmScale = (G.scene && G.scene.mouseBg === "swarm") ? 0.72 : 1;
+        this.baseW = this.def.w * (this.mouseVar.size || 1) * swarmScale;  // 花色体型差异
+        this.baseH = this.def.h * (this.mouseVar.size || 1) * swarmScale;
+        // 步态权重（swarm 用）：按 gait 调节奏，让 6 只鼠行为有差异（见 updateSwarmMouse）
+        const gait = this.mouseVar.gait || "slink";
+        if (gait === "dash")      { this._scDur = [1.0, 2.0]; this._pauseP = 0.25; this._turnAmp = 0.55; this._pauseDur = 0.25; }
+        else if (gait === "slink"){ this._scDur = [1.6, 3.2]; this._pauseP = 0.55; this._turnAmp = 0.35; this._pauseDur = 0.55; }
+        else if (gait === "weave"){ this._scDur = [0.9, 1.8]; this._pauseP = 0.35; this._turnAmp = 0.85; this._pauseDur = 0.35; }
+        else                      { this._scDur = [1.4, 2.8]; this._pauseP = 0.45; this._turnAmp = 0.45; this._pauseDur = 0.4; }  // stride
         this.holeWait = 0.7; this.holeIdx = -1; this.hole = null;
         this.mState = null; this.mT = 0;
         this.pawAcc = 0; this.scared = false; this.fakeAt = -1;
@@ -138,7 +147,7 @@ module.exports = function (G) {
       this.comboSpeed = 1; this.comboSpeedTarget = 1; this.comboSize = 1;
       const D0 = G.DIFF[G.config.difficulty];
       this.sizeMul = D0.size;
-      this.ffSizeBase = D0.size;                       // 暗夜萤光换玩具时按它重算体型
+      this.ffSizeBase = D0.size;                       // 暗夜荧光换玩具时按它重算体型
       this.speedMul = D0.speed * ((D0.typeSpeed || {})[type] || 1);   // 标准/激烈下蝴蝶与老鼠额外提速
       this.applySize();
       this.spawn();
@@ -204,7 +213,7 @@ module.exports = function (G) {
         const s0 = this.laserSpot();
         this.x = s0.x; this.y = s0.y;
         if (this.type === "pool") {
-          /* 萤火虫：出生点压在屏内边距里，直接进入爬行态。
+          /* 暗夜荧光：出生点压在屏内边距里，直接进入爬行态。
              造形/步态/亮度全对齐参考视频：慢爬与急爬交替、腹部呼吸、鞘翅周期性张开"闪"一下。 */
           const pad = 34 * Math.pow(G.platform.S || 1, 0.4);
           this.x = Math.min(Math.max(this.x, b.x + pad), b.x + b.w - pad);
@@ -832,7 +841,7 @@ module.exports = function (G) {
         this.tadOut = false; this.tadFold = 0; this.tadStartle = 0;
         return;
       }
-      // 萤光小虫被拍：0.08s 收光即灭（第一版"一拍就灭"），updateFirefly 内接暗场后在别处亮起
+      // 荧光小虫被拍：0.08s 收光即灭（第一版"一拍就灭"），updateFirefly 内接暗场后在别处亮起
       if (this.type === "pool") {
         this.burstT = 0; this.vanishT = 0.08;
         /* 敏锐度（PRD 4.6）：本只存活越短 = 猫反应越快 → 下次停顿越短；打得慢则放宽回去 */
@@ -995,6 +1004,8 @@ module.exports = function (G) {
       const b = G.bounds(), MS = Math.pow(G.platform.S || 1, 0.5);
       if (this.swimAng == null) this.swimAng = rand(0, Math.PI * 2);
       if (this._visAng == null) this._visAng = this.swimAng;   // 朝向单独初始化（spawn 只给了 swimAng）
+      // 步态权重兜底（非 swarm 构造路径或旧数据）
+      if (!this._scDur) { this._scDur = [1.4, 2.8]; this._pauseP = 0.45; this._turnAmp = 0.45; this._pauseDur = 0.4; }
       // 消失动画：倒计时结束随机换位重生
       if (this.vanishT > 0) {
         this.vanishT -= dt;
@@ -1006,35 +1017,35 @@ module.exports = function (G) {
             if (!preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
           }
           this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng;
-          this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8);
+          this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]);
           this.fade = 1;
         }
         return;                                   // 消失期间不移动
       }
-      if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+      if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]); }
 
       const pad = 20 * MS;
       const L = b.x + pad, R = b.x + b.w - pad, T = b.y + pad, B = b.y + b.h - pad;
 
-      // 节奏：直爬一段 → 偶尔停一下；换向只做小幅调整（不画圈）
+      // 节奏：直爬一段 → 偶尔停一下；换向只做小幅调整（不画圈）——步态权重驱动
       this.stateT += dt;
       if (this.state === "pause") {
-        if (this.stateT >= this.stateDur) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+        if (this.stateT >= this.stateDur) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]); }
       } else if (this.stateT >= this.stateDur) {
         this.stateT = 0;
-        if (Math.random() < 0.45) { this.state = "pause"; this.stateDur = 0.4; }   // 停驻嗅探 0.4s = 命中窗口
-        else { this.stateDur = rand(1.4, 2.8); this._turnTo = this.swimAng + rand(-0.45, 0.45); }   // 小幅转向也平滑过渡
+        if (Math.random() < this._pauseP) { this.state = "pause"; this.stateDur = this._pauseDur; }   // 停驻嗅探 = 命中窗口
+        else { this.stateDur = rand(this._scDur[0], this._scDur[1]); this._turnTo = this.swimAng + rand(-this._turnAmp, this._turnAmp); }   // 小幅转向也平滑过渡
       }
 
       if (this.state !== "pause") {
         const sp = this.def.speed * this.speedMul * (1 + ((G.session.stage || 1) - 1) * 0.16)
-          * (this.adaptiveSlow || 1) * (this.comboSpeed || 1);
+          * (this.adaptiveSlow || 1) * (this.comboSpeed || 1) * (this.mSpeed || 1);   // mSpeed：花色速度差异（dash 快 / stride 慢）
         // 撞墙后的新航向：逐步转过去（沿墙滑行），不瞬间甩头
         if (this._turnTo != null) {
           let da = this._turnTo - this.swimAng;
           while (da > Math.PI) da -= Math.PI * 2;
           while (da < -Math.PI) da += Math.PI * 2;
-          const step = 3.6 * dt;
+          const step = (3.6 + this._turnAmp * 1.5) * dt;
           this.swimAng += clamp(da, -step, step);
           if (Math.abs(da) < 0.06) this._turnTo = null;
         }
@@ -1047,7 +1058,7 @@ module.exports = function (G) {
         else if (this.x > R) { this.x = R; this._turnTo = Math.PI + rand(-0.7, 0.7); bumped = true; }
         if (this.y < T)      { this.y = T; this._turnTo = Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
         else if (this.y > B) { this.y = B; this._turnTo = -Math.PI / 2 + rand(-0.7, 0.7); bumped = true; }
-        if (bumped) { this.stateT = 0; this.stateDur = rand(1.4, 2.8); }
+        if (bumped) { this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]); }
       }
 
       // 位置兜底夹在屏内
@@ -1408,7 +1419,7 @@ module.exports = function (G) {
       }
       return best || { x: b.x + rand(0.03, 0.97) * b.w, y: b.y + rand(0.03, 0.97) * b.h };
     }
-    /* 暗夜萤光：发光玩具在石墙/木地板上左右往返，每趟走 S 弯/拱形/斜向/折线；
+    /* 暗夜荧光：发光玩具在石墙/木地板上左右往返，每趟走 S 弯/拱形/斜向/折线；
        主方向不变，只有到达左右侧终点才掉头；点击或两回趟完成才消失 */
     /* ============ 发光玩具：慢爬/急爬两档 + 亮一下 + 呼吸脉动 ============
        节奏沿用早期 23.9s 猫玩平板视频的逐帧测量，造型则按 Peppy Cat 实机图重画：
@@ -1424,7 +1435,7 @@ module.exports = function (G) {
       const b = G.bounds();
       if (this.stage !== G.session.stage) this.stage = G.session.stage;
       const baseP = G.FIREFLY[this.stage] || G.FIREFLY[1];
-      /* 萤火虫二级卡的节奏差异：急爬追光只改运动参数，不改命中盒/判定。 */
+      /* 暗夜荧光二级卡的节奏差异：急爬追光只改运动参数，不改命中盒/判定。 */
       const P = G.config.ffMode === "ff-dash"
         ? Object.assign({}, baseP, {
             slow: baseP.slow * 1.28, fast: baseP.fast * 1.34,
@@ -1829,7 +1840,7 @@ module.exports = function (G) {
       const far = Math.min(b.w, b.h) * 0.42;
       let nx = this.x, ny = this.y;
       if (this.type === "pool" || this.type === "tadpole") {
-        /* 萤光/蝌蚪消失后必须从边上爬回来（PRD 4.6）：贴在活动区边缘出生、朝向屏内，
+        /* 荧光/蝌蚪消失后必须从边上爬回来（PRD 4.6）：贴在活动区边缘出生、朝向屏内，
            左右边为主（横屏地面），上下边少量；离原位太近就重抽，避免"原地消失又原地出现" */
         const pad = inset * 0.75;
         let best = null, bestD = -1;
@@ -1876,14 +1887,14 @@ module.exports = function (G) {
       /* 走停节拍（PRD 4.6）：换点/重生后先走一段（短 30%），停顿状态整体清空 */
       this.pauseT = 0; this.pauseAng = null; this.pauseTurnTo = null; this.nextAng = null;
       this.tpDue = false; this.aliveT = 0; this.freshWalk = true; this.pauseGlow = 0;
-      if (fresh && this.type === "pool") this.applyToy(pickFfToy());   // 萤光重生才换玩具；蝌蚪保持本体
+      if (fresh && this.type === "pool") this.applyToy(pickFfToy());   // 荧光重生才换玩具；蝌蚪保持本体
       this.flareCd = rand(0.6, 1.8) * ((this.toy && this.toy.flare) || 1);
       if (G.emberTrail && !fresh) G.emberTrail(this.x, this.y);     // 亮起那一下撒几点冷色火星
     }
     laserTeleport() {      const s0 = this.laserSpot();
       this.x = s0.x; this.y = s0.y;
       if (this.type === "pool") {
-        // 萤光瞬移：只散几点萤火碎屑，不出冲击环——环留给真实命中（防满屏圆环抢戏）
+        // 荧光瞬移：只散几点荧光碎屑，不出冲击环——环留给真实命中（防满屏圆环抢戏）
         G.sparkBurst(this.x, this.y, "#e8ff9a", 4);
         G.pollenBurst(this.x, this.y, 3);
       } else {
@@ -2037,7 +2048,8 @@ module.exports = function (G) {
       if (Math.abs(x - this.x) > hw || Math.abs(y - cy) > hh) return false;
       if (this.type === "mouse") {
         if (G.scene && G.scene.mouseBg === "swarm") {
-          // 群鼠：加高命中盒覆盖头+耳（视觉 120×100,命中 116×86 中心略偏上）
+          // 群鼠：加高命中盒覆盖头+耳。baseW/baseH 已含 0.72 群鼠缩放，
+          // 视觉 120×100 → 命中 116×86 中心略偏上 的比例保持不变，随鼠一起等比缩小。
           const hw2 = this.baseW * this.sc * 0.42, hh2 = this.baseH * this.sc * 0.74;
           return Math.abs(x - this.x) <= hw2 && Math.abs(y - this.y - this.baseH * this.sc * 0.08) <= hh2;
         }
@@ -2056,14 +2068,16 @@ module.exports = function (G) {
       ctx.globalAlpha = clamp(alpha, 0, 1);
       if (this.type === "mouse") {
         if (G.scene && G.scene.mouseBg === "swarm") {
-          // 群鼠乱窜：俯视鼠——柔光 + 随游动轻微倾斜，无洞口裁剪
+          // 群鼠乱窜：俯视鼠——极淡中性柔光（不再用暖白，避免把炭胆/烟尾等深色鼠打白）+ 随游动轻微倾斜
           ctx.translate(this.x, this.y);
-          const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, 66 * this.sc);
-          gr.addColorStop(0, "rgba(255,248,244,.45)");
-          gr.addColorStop(0.5, "rgba(255,236,240,.16)");
-          gr.addColorStop(1, "rgba(255,236,240,0)");
+          // 柔光半径随视觉尺寸同步收小，避免群鼠缩小后光晕仍过大、互相糊成一团
+          const glowR = 66 * this.sc * 0.72;
+          const gr = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+          gr.addColorStop(0, "rgba(255,246,236,.18)");
+          gr.addColorStop(0.5, "rgba(255,240,232,.06)");
+          gr.addColorStop(1, "rgba(255,240,232,0)");
           ctx.fillStyle = gr;
-          ctx.beginPath(); ctx.arc(0, 0, 66 * this.sc, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath(); ctx.arc(0, 0, glowR, 0, Math.PI * 2); ctx.fill();
           // 整只鼠按爬行方向旋转（头朝行进方向）+ 极轻的待机晃动，动作与移动方向一致
           ctx.rotate((this._visAng || 0) + Math.PI / 2 + Math.sin(t * 1.7 + (this.phase || 0)) * 0.03);
           const s = this.sc * vs;
@@ -2143,7 +2157,7 @@ module.exports = function (G) {
         G.draw.frog(ctx, this, t);
         ctx.restore();
       } else if (this.type === "pool") {
-        // 第一版萤光：萤火虫自带底光/旋转/淡入淡出（D.poolLight 内部按 p.fade 接管透明度）
+        // 第一版荧光：暗夜荧光自带底光/旋转/淡入淡出（D.poolLight 内部按 p.fade 接管透明度）
         ctx.translate(this.x, this.y - (this.hopOff || 0));
         G.draw.poolLight(ctx, this, t);
       } else if (this.type === "tadpole") {
@@ -2205,6 +2219,21 @@ module.exports = function (G) {
   }
   G.Prey = Prey;
 
+  /* 群鼠乱窜 · 变体池：洗牌后按序取，保证同屏 6 只花色/体型/步态不重复（阶段③恰好 6 变体 6 鼠）。
+     每次 buildPreys（开局/换景/旋转）重建；topUpPreys 补鼠时消费，耗尽回绕。 */
+  let swarmVariantPool = [];
+  const swarmVariant = () => {
+    const V = G.MOUSE_VARIANTS || [];
+    if (!V.length) return undefined;
+    if (!swarmVariantPool.length) {
+      const idxs = V.map((_, i) => i);
+      for (let i = idxs.length - 1; i > 0; i--) { const j = Math.floor(rand(0, i + 1)); const tmp = idxs[i]; idxs[i] = idxs[j]; idxs[j] = tmp; }
+      swarmVariantPool = idxs.map(i => V[i]);
+    }
+    return swarmVariantPool.shift();
+  };
+  const resetSwarmVariantPool = () => { swarmVariantPool = []; };
+
   /* 每段只出现一种动物；换景淡入结束时同步切换造型和对应动作。 */
   G.buildPreys = () => {
     preys.forEach(p => {
@@ -2213,7 +2242,15 @@ module.exports = function (G) {
     preys.length = 0;
     if (G.scene.holeOwners) G.scene.holeOwners = G.scene.holeOwners.map(() => null);
     if (G.scene.holeHeat) G.scene.holeHeat = G.scene.holeHeat.map(() => []);
-    // 萤火虫：数量由二级页面增减（默认 1，最多 7）；其余玩法仍按单只/多只两档。
+    // 群鼠乱窜：数量走 stageTargetCount（①4/②5/③6），变体去重分配
+    const isSwarm = G.config.targetType === "mouse" && G.scene && G.scene.mouseBg === "swarm";
+    if (isSwarm) {
+      resetSwarmVariantPool();
+      const n = G.stageTargetCount();
+      for (let i = 0; i < n; i++) preys.push(new Prey("mouse", swarmVariant()));
+      return;
+    }
+    // 暗夜荧光：数量由二级页面增减（默认 1，最多 7）；其余玩法仍按单只/多只两档。
     const n = G.config.targetType === "pool"
       ? Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)))
       : (Number(G.config.preyCount) === 1 ? 1 : 3);
@@ -2246,7 +2283,7 @@ module.exports = function (G) {
         ? ({ 1: 3, 2: 4, 3: 5 })[G.session.stage] || 3
         : ({ 1: 6, 2: 9, 3: 12 })[G.session.stage] || 6;
     }
-    // 萤火虫：整局保持二级页面设定的数量（默认 1，最多 7）。
+    // 暗夜荧光：整局保持二级页面设定的数量（默认 1，最多 7）。
     if (G.config.targetType === "pool") return Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)));
     // 蝌蚪快跑：同屏 1→2→3，阶段决定基线，命中表现好可在上限内多加 1 只。
     if (G.config.targetType === "tadpole") {
@@ -2270,8 +2307,16 @@ module.exports = function (G) {
   };
   G.topUpPreys = () => {
     const target = G.stageTargetCount();
+    const isSwarm = G.config.targetType === "mouse" && G.scene && G.scene.mouseBg === "swarm";
     while (target && preys.length < target) {
-      if (G.config.targetType === "fish") {
+      if (isSwarm) {
+        // 群鼠补鼠：优先取「场上未用」的变体，保持同屏不重样；池空则回绕
+        const used = {};
+        preys.forEach(p => { if (p.type === "mouse" && p.mouseVar) used[p.mouseVar.key] = 1; });
+        let v = swarmVariantPool.find(x => !used[x.key]);
+        if (!v) { if (!swarmVariantPool.length) resetSwarmVariantPool(); v = swarmVariantPool.find(x => !used[x.key]) || swarmVariant(); }
+        preys.push(new Prey("mouse", v));
+      } else if (G.config.targetType === "fish") {
         // 补点时避开已在场品种（限定表 5 种 < 上限 7，池内允许复现；海域 10 种可全程不重样）
         const used = {};
         preys.forEach(p => { if (p.type === "fish" && p.species) used[p.species.key] = 1; });

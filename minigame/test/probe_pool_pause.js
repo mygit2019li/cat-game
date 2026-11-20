@@ -1,4 +1,4 @@
-/* 校验暗夜萤光「走停节拍」（PRD 4.6 V1.3）：停顿次数、停顿中位移、朝向变化、敏锐度 k 反馈
+/* 校验暗夜荧光「走停节拍」（PRD 4.6 V1.3）：停顿次数、停顿中位移、朝向变化、敏锐度 k 反馈
    用法：node test/probe_pool_pause.js */
 const path = require("path");
 const ROOT = path.join(__dirname, "..");

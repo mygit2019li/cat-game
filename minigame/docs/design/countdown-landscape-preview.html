@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>猫咪倒计时横屏效果图</title>
+  <style>
+    :root {
+      --bg: #f4fbf8;
+      --ink: #113b43;
+      --ink-soft: #53757c;
+      --teal: #0f9d8e;
+      --teal-soft: rgba(15, 157, 142, 0.14);
+      --amber: #ffb02e;
+      --line: rgba(17, 59, 67, 0.08);
+      --safe: max(28px, env(safe-area-inset-top));
+      color-scheme: light;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 12% 18%, rgba(15, 157, 142, 0.13), transparent 27%),
+        radial-gradient(circle at 86% 82%, rgba(255, 176, 46, 0.12), transparent 28%),
+        linear-gradient(145deg, #f8fefb, var(--bg));
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .screen {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      padding:
+        max(28px, env(safe-area-inset-top))
+        max(40px, env(safe-area-inset-right))
+        max(34px, env(safe-area-inset-bottom))
+        max(40px, env(safe-area-inset-left));
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      color: var(--ink-soft);
+      font-size: clamp(14px, 1.15vw, 18px);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--teal);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .status::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--teal);
+      box-shadow: 0 0 0 6px rgba(15, 157, 142, 0.1);
+    }
+
+    .duration {
+      white-space: nowrap;
+    }
+
+    .center {
+      display: grid;
+      place-items: center;
+      align-content: center;
+      text-align: center;
+    }
+
+    .title {
+      margin: 0 0 clamp(18px, 3.2vh, 30px);
+      color: var(--teal);
+      font-size: clamp(20px, 2.2vw, 30px);
+      font-weight: 900;
+      letter-spacing: 0.06em;
+      opacity: 0;
+      animation: fadeUp 0.55s 0.05s ease-out forwards;
+    }
+
+    .time {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(2px, 0.5vw, 8px);
+      font-variant-numeric: tabular-nums;
+      font-weight: 950;
+      line-height: 0.82;
+      letter-spacing: -0.1em;
+      color: var(--ink);
+      user-select: none;
+      animation: breathe 2.6s ease-in-out infinite;
+    }
+
+    .digit {
+      min-width: 0.64em;
+      font-size: clamp(128px, 23vw, 320px);
+      text-shadow: 0 24px 70px rgba(17, 59, 67, 0.14);
+      transition: transform 0.18s ease, color 0.22s ease;
+    }
+
+    .digit.tick {
+      transform: scale(1.035);
+    }
+
+    .time.is-warning .digit {
+      color: var(--amber);
+    }
+
+    .separator {
+      font-size: clamp(76px, 12vw, 210px);
+      transform: translateY(-0.09em);
+      color: rgba(17, 59, 67, 0.22);
+      letter-spacing: 0;
+    }
+
+    .hint-zone {
+      grid-column: 1 / -1;
+      display: grid;
+      place-items: center;
+      padding: 0;
+    }
+
+    .hint-window {
+      position: relative;
+      width: min(920px, 72vw);
+      height: clamp(52px, 7vh, 68px);
+      overflow: hidden;
+      isolation: isolate;
+      mask-image: linear-gradient(180deg, transparent, #000 18%, #000 82%, transparent);
+      -webkit-mask-image: linear-gradient(180deg, transparent, #000 18%, #000 82%, transparent);
+    }
+
+    .hint-track {
+      position: absolute;
+      left: 0;
+      width: 100%;
+      display: grid;
+      grid-template-rows: 1fr;
+      transition: transform 0.3s ease-out;
+      will-change: transform;
+    }
+
+    .hint {
+      height: clamp(52px, 7vh, 68px);
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--ink-soft);
+      font-size: clamp(16px, 1.35vw, 22px);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 0 10px;
+    }
+
+    .end-flash {
+      animation: endPulse 0.9s ease-in-out infinite;
+    }
+
+    @keyframes endPulse {
+      0%,
+      100% {
+        transform: scale(1);
+        opacity: 0.94;
+      }
+      50% {
+        transform: scale(1.015);
+        opacity: 1;
+      }
+    }
+
+    .hint strong {
+      color: var(--teal);
+      font-weight: 900;
+      margin-right: 10px;
+    }
+
+    .hint.is-soft strong {
+      color: rgba(15, 157, 142, 0.62);
+    }
+
+    .meta {
+      margin-top: 22px;
+      color: rgba(83, 117, 124, 0.72);
+      font-size: clamp(13px, 1vw, 15px);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      animation: fadeUp 0.55s 0.18s ease-out forwards;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+      color: rgba(83, 117, 124, 0.78);
+      font-size: clamp(14px, 1.1vw, 17px);
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .footer span {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: rgba(83, 117, 124, 0.35);
+    }
+
+    .footer span:first-child {
+      margin-right: 8px;
+    }
+
+    .footer span:last-child {
+      margin-left: 8px;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes breathe {
+      0%,
+      100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.012);
+      }
+    }
+
+    @media (orientation: portrait) {
+      .screen {
+        padding: 24px 24px 28px;
+      }
+
+      .topline {
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        text-align: center;
+      }
+
+      .time {
+        font-size: 72vw;
+      }
+
+      .digit {
+        font-size: 58vw;
+      }
+
+      .separator {
+        font-size: 32vw;
+      }
+
+      .hint-window {
+        width: min(560px, 86vw);
+      }
+
+      .hint {
+        font-size: clamp(17px, 4.4vw, 24px);
+      }
+    }
+
+    @media (max-height: 620px) {
+      .screen {
+        grid-template-rows: auto 1fr;
+      }
+
+      .title {
+        margin-bottom: 10px;
+      }
+
+      .meta {
+        display: none;
+      }
+
+      .footer {
+        display: none;
+      }
+
+      .digit {
+        font-size: clamp(92px, 18vh, 180px);
+      }
+
+      .separator {
+        font-size: clamp(52px, 11vh, 110px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="screen" aria-label="横屏倒计时效果图">
+    <header class="topline">
+      <div class="status">准备出发</div>
+      <div class="duration">本局倒计时 · 3 秒</div>
+    </header>
+
+    <section class="center">
+      <h1 class="title">猫咪互动准备中</h1>
+      <p class="time" id="time" role="timer" aria-live="polite">
+        <span class="digit">00</span>
+        <span class="separator">:</span>
+        <span class="digit">03</span>
+      </p>
+      <p class="meta">横屏独立页 · 无卡片 · 无进度条 · 无按钮</p>
+    </section>
+
+    <footer class="footer">
+      <span></span>
+      倒计时结束后自动进入下一状态
+      <span></span>
+    </footer>
+
+    <section class="hint-zone" aria-label="猫咪提示">
+      <div class="hint-window">
+        <div class="hint-track" id="hintTrack"></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const hints = [
+        "清晨和黄昏猫咪最活跃",
+        "尾巴快速摆动时可能分心",
+        "缓慢眨眼说明猫咪比较放松",
+        "耳朵贴平时可能有点紧张",
+        "咕噜声通常代表舒适",
+        "喂食时不要打扰猫咪",
+        "避免拉扯尾巴、四肢和胡须",
+        "猫咪停顿瞬间更容易互动",
+        "互动后给猫咪一点休息空间"
+      ];
+
+      const track = document.getElementById("hintTrack");
+      const time = document.getElementById("time");
+      const digits = Array.from(time.querySelectorAll(".digit"));
+      const state = {
+        total: 3,
+        remaining: 3,
+        hintIndex: 0
+      };
+
+      function pad(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function formatTime(totalSeconds) {
+        const safe = Math.max(0, Math.ceil(totalSeconds));
+        return pad(Math.floor(safe / 60)) + ":" + pad(safe % 60);
+      }
+
+      function buildHints() {
+        const loop = [...hints, ...hints.slice(0, 2)];
+        track.innerHTML = "";
+        loop.forEach((text, index) => {
+          const item = document.createElement("div");
+          item.className = "hint" + (index % 2 === 1 ? " is-soft" : "");
+          item.innerHTML = "<strong>▶</strong>" + text;
+          track.appendChild(item);
+        });
+      }
+
+      function getHintStep() {
+        const row = track.querySelector(".hint");
+        return row ? row.offsetHeight || 60 : 60;
+      }
+
+      function setHint(index) {
+        state.hintIndex = index;
+        track.style.transform = "translateY(" + (-index * getHintStep()) + "px)";
+      }
+
+      function nextHint() {
+        const total = track.children.length;
+        const next = (state.hintIndex + 1) % total;
+        setHint(next);
+        if (next === 0) {
+          window.setTimeout(function () {
+            setHint(0);
+          }, 320);
+        }
+      }
+
+      function updateTime() {
+        const text = formatTime(state.remaining);
+        const prev = time.dataset.text || "";
+        time.dataset.text = text;
+        if (prev === text) return;
+
+        digits[0].textContent = text.slice(0, 2);
+        digits[1].textContent = text.slice(3, 5);
+        time.classList.toggle("is-warning", state.remaining <= 3);
+        time.classList.toggle("end-flash", state.remaining === 0);
+      }
+
+      function reset() {
+        state.remaining = state.total;
+        updateTime();
+      }
+
+      function start() {
+        buildHints();
+        setHint(0);
+        reset();
+        window.clearInterval(start.timer);
+        window.clearInterval(start.hintTimer);
+        window.clearInterval(start.resetTimer);
+
+        start.timer = window.setInterval(function () {
+          state.remaining -= 1;
+          if (state.remaining <= 0) {
+            state.remaining = 0;
+            window.clearInterval(start.timer);
+            window.clearInterval(start.hintTimer);
+            updateTime();
+            window.setTimeout(reset, 1800);
+            return;
+          }
+          updateTime();
+        }, 1000);
+
+        start.hintTimer = window.setInterval(nextHint, 950);
+      }
+
+      window.addEventListener("resize", function () {
+        setHint(state.hintIndex);
+      });
+
+      start();
+    })();
+  </script>
+</body>
+</html>

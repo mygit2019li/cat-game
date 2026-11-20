@@ -925,7 +925,7 @@ module.exports = function (G) {
   /* ================= 常态界面 ================= */
   /* 顶部圆键规格与首页设置键完全一致：34px 白圆 / 1px 细边 / 15px 齿轮 / 左上角 (12,10) 起排。
      之前这里的齿轮是自绘的实心 8 齿、还为了躲微信胶囊跑到右上角，用户在两个页面看到两种"设置"。 */
-  const HEAD = { size: 34, gap: 8, inset: 12, top: 10, icon: 15 };
+  const HEAD = { size: 40, gap: 8, inset: 14, top: 10, icon: 15 };
   let backExtra = 0;   // 返回胶囊比原圆键多出的宽度，drawBack 每帧刷新；设置/分享键据此顺移
   function headPos(L, i) {
     const s = HEAD.size;
@@ -946,7 +946,7 @@ module.exports = function (G) {
   function drawBack(L) {
     const p = headPos(L, 0);
     // 胶囊返回键（与 ui.js 二级页面同款）：h 沿用圆键直径；此页顶部紧，收紧内边距
-    const bw = G.ui.backPill(p.x, p.y, p.s, { fs: 13, pad: 8, gap: 5, cb: () => G.switchScreen("home"), key: "back" });
+    const bw = G.ui.backPill(p.x, p.y, p.s, { cb: () => G.switchScreen("home"), key: "back" });
     backExtra = bw - p.s;                       // 设置/分享键在 headPos 里自动顺移这段
     const cy = p.y + p.s / 2;
     // 标题排在设置 / 分享圆键之后（headPos(2) 已含顺移），间距收紧避免贴到储粮罐

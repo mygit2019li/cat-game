@@ -318,7 +318,7 @@ module.exports = function (G) {
     mouse: "assets/home/icon-mouse.jpg", firefly: "assets/home/icon-firefly.jpg",
     butterfly: "assets/home/icon-butterfly.jpg", ladybug: "assets/home/icon-ladybug.jpg"
   };
-  /* 首页卡片 key → 素材 key（暗夜萤光用「萤火虫」，激光暗室用「瓢虫/昆虫乐园」） */
+  /* 首页卡片 key → 素材 key（暗夜荧光用「暗夜荧光」，激光暗室用「瓢虫/昆虫乐园」） */
   const HOME_ICON_KEY = { pool: "firefly", laser: "ladybug" };
   ui.initHomeImages = () => {
     if (HOME_IMG.tried) return;
@@ -352,11 +352,11 @@ module.exports = function (G) {
      卡片顺序即数组顺序（3 列排列，一行 3 个）：
      第一行 捕鱼 / 青蛙 / 激光　第二行 捕鼠 / 暗夜 / 蝴蝶 */
   const MODES = [
-    { key: "fish",      name: "小鱼游游", desc: "三条小鱼随波游动" },
-    { key: "frog",      name: "青蛙蹦蹦", desc: "荷叶之间来回跳" },
-    { key: "mouse",     name: "小鼠躲躲", desc: "打地鼠式两排洞口" },
-    { key: "pool",      name: "萤火虫",   desc: "萤光小虫爬过石板地" },
-    { key: "butterfly", name: "蝴蝶飞飞", desc: "花间穿梭，还会停花" },
+    { key: "fish",      name: "小鱼水波", desc: "三条小鱼随波游动" },
+    { key: "frog",      name: "青蛙池塘", desc: "荷叶之间来回跳" },
+    { key: "mouse",     name: "小鼠迷宫", desc: "打地鼠式两排洞口" },
+    { key: "pool",      name: "暗夜荧光",   desc: "荧光小虫爬过石板地" },
+    { key: "butterfly", name: "蝴蝶花园", desc: "花间穿梭，还会停花" },
     { key: "laser",     name: "昆虫乐园", desc: "甩动与停留的红点" }
   ];
   /* 原型同款圆形开始按钮：青绿径向渐变 + 12px 外圈光环 + 内描边圈
@@ -1479,7 +1479,7 @@ module.exports = function (G) {
         G.rr(ctx, x, y, cellW, rowH, 12); ctx.stroke();
         const cy = y + rowH / 2;
         text(L.date || "-", x + 12, cy, "12px sans-serif", C.ink3, "left");
-        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "萤光", frog: "青蛙" }[L.type] || "";
+        const typeName = { fish: "捕鱼", butterfly: "花园", mouse: "捕鼠", laser: "激光", pool: "荧光", frog: "青蛙" }[L.type] || "";
         // 玩法标签：浅色药丸，比纯文字更好扫读
         const tagW = 38, tagX = x + 56;
         ctx.fillStyle = "rgba(21,154,140,.10)";

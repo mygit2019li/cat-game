@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>逗猫猎场 · 阳光庭院倒计时横屏设计稿</title>
+<style>
+  :root {
+    --ink: #14313a;
+    --ink2: #4a6b74;
+    --ink3: #86a3a9;
+    --teal: #159a8c;
+    --teal-deep: #0d6b7d;
+    --bg: #eef7f3;
+    --card: #ffffff;
+    --line: #dcebe6;
+    --amber: #ffb02e;
+    --amber-deep: #f08c00;
+    --danger: #ff5a5a;
+
+    --b-bg0: #f5fbf8;
+    --b-bg1: #eaf7f1;
+    --b-surface: #ffffff;
+    --b-surface-2: #f2fbf7;
+    --b-line: #d8ece5;
+    --b-text: #16333a;
+    --b-text-2: #53757c;
+    --b-teal: #0f9d8e;
+    --b-teal-soft: rgba(15, 157, 142, .12);
+    --b-amber: #f08c00;
+    --b-red: #e75b5b;
+    --b-shadow: rgba(23, 68, 63, .12);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    background: #e9f2ef;
+    color: #17323a;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; cursor: pointer; }
+
+  .page { min-height: 100vh; padding: 32px 24px 72px; }
+  .page-head { max-width: 1280px; margin: 0 auto 28px; }
+  .kicker { color: var(--teal-deep); font-size: 14px; font-weight: 700; letter-spacing: .08em; margin-bottom: 8px; }
+  h1 { margin: 0 0 10px; font-size: 32px; line-height: 1.2; letter-spacing: -.02em; }
+  .lede { margin: 0; max-width: 980px; color: #48666d; font-size: 16px; }
+  .lede strong { color: #17323a; }
+
+  .toolbar {
+    max-width: 1280px; margin: 24px auto 20px;
+    display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between;
+    background: #fff; border: 1px solid #d8e7e2; border-radius: 18px;
+    padding: 14px 18px; box-shadow: 0 8px 24px rgba(23, 68, 63, .06);
+  }
+  .toolbar-title { display: flex; align-items: center; gap: 10px; color: #345960; font-size: 14px; font-weight: 800; }
+  .toolbar-title .swatch { width: 14px; height: 14px; border-radius: 50%; background: linear-gradient(135deg, var(--teal), var(--amber)); box-shadow: 0 0 0 4px var(--b-teal-soft); }
+  .tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tab {
+    border: 1px solid #cde2dc; background: #f6fbf9; color: #24484f;
+    border-radius: 999px; padding: 10px 16px; min-height: 42px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .tab[aria-pressed="true"] { background: var(--teal-deep); color: #fff; border-color: var(--teal-deep); }
+  .tab small { opacity: .72; font-size: 12px; }
+  .toolbar-note { color: #5b777d; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .toolbar-note .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); display: inline-block; }
+
+  .board { max-width: 1280px; margin: 0 auto; display: grid; gap: 28px; }
+
+  .style-card {
+    background: #fff; border: 1px solid #d8e7e2; border-radius: 28px; overflow: hidden;
+    box-shadow: 0 16px 38px rgba(23, 68, 63, .08);
+  }
+  .style-head { padding: 24px 28px 18px; border-bottom: 1px solid #e4efeb; }
+  .style-name { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .style-name h2 { margin: 0; font-size: 28px; letter-spacing: -.01em; }
+  .style-tag { color: #5b777d; font-size: 14px; }
+  .style-desc { margin: 10px 0 0; color: #4c6a70; font-size: 16px; max-width: 980px; }
+  .style-points { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .style-points { grid-template-columns: 1fr; } }
+  .style-points li { position: relative; padding-left: 20px; color: #36575d; font-size: 14px; }
+  .style-points li::before { content: ""; position: absolute; left: 0; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: var(--b-amber); }
+
+  .screens { padding: 28px; display: grid; gap: 22px; background: linear-gradient(180deg, rgba(247,251,249,.55), rgba(239,247,243,.72)); }
+  .screen-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+  .screen-grid.single { grid-template-columns: 1fr; }
+  .screen { min-width: 0; }
+  .screen-label { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .screen-title { font-size: 17px; font-weight: 800; }
+  .screen-state { font-size: 12px; color: #648187; background: rgba(255,255,255,.86); border: 1px solid #d8e7e2; border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+
+  .device {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    margin: 0 auto;
+    border-radius: 28px;
+    overflow: hidden;
+    border: 10px solid #10181b;
+    background: #000;
+    box-shadow: 0 26px 60px rgba(11, 34, 36, .24);
+    position: relative;
+  }
+  .stage {
+    position: absolute; inset: 0; overflow: hidden; color: var(--text, #fff);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .scene { position: absolute; inset: 0; }
+  .scene::before, .scene::after { content: ""; position: absolute; border-radius: 50%; filter: blur(48px); opacity: .55; }
+  .scene::before { width: 44%; height: 78%; left: -12%; top: 12%; }
+  .scene::after { width: 42%; height: 64%; right: -14%; bottom: 4%; }
+  .scene-butterfly { background: linear-gradient(180deg, #f8fff5, #e9f8ee 58%, #d8f1e7); }
+  .scene-butterfly::before { background: rgba(15,157,142,.16); }
+  .scene-butterfly::after { background: rgba(255,176,46,.16); }
+  .scene-laser-dark { background: linear-gradient(180deg, #0a0f12, #171d20 58%, #0b1013); }
+  .scene-laser-dark::before { background: rgba(255,107,94,.18); }
+  .scene-laser-dark::after { background: rgba(255,107,94,.10); }
+
+  .prey {
+    position: absolute; width: 62px; height: 48px; border-radius: 50% 50% 46% 46%;
+    background: radial-gradient(circle at 34% 28%, rgba(255,255,255,.92), rgba(255,255,255,.26) 46%, rgba(255,255,255,.08));
+    box-shadow: 0 0 28px rgba(255,255,255,.30);
+    opacity: .78;
+  }
+  .prey::before { content: ""; position: absolute; right: -12px; top: 11px; width: 24px; height: 24px; border-radius: 50% 18% 50% 18%; transform: rotate(-32deg); background: inherit; opacity: .85; }
+  .prey::after { content: ""; position: absolute; left: 18px; top: 15px; width: 8px; height: 10px; border-radius: 50%; background: #123; opacity: .75; }
+  .prey.p1 { left: 18%; top: 30%; transform: rotate(-18deg); }
+  .prey.p2 { right: 22%; top: 52%; transform: rotate(16deg) scale(.88); opacity: .62; }
+  .prey.p3 { left: 36%; top: 64%; transform: rotate(8deg) scale(.70); opacity: .48; }
+
+  .b-stage {
+    --text: var(--b-text); --text-2: var(--b-text-2); --accent: var(--b-teal);
+    background: linear-gradient(180deg, #f8fffb, #e9f8f1 62%, #dcf1e8);
+  }
+  .b-stage::before {
+    content: ""; position: absolute; width: 390px; height: 390px; border-radius: 50%;
+    left: 50%; top: 43%; transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255,176,46,.30), rgba(255,176,46,.10) 45%, transparent 70%);
+    filter: blur(10px);
+  }
+  .b-stage::after {
+    content: ""; position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 14% 18%, rgba(15,157,142,.15) 0 30px, transparent 31px),
+      radial-gradient(circle at 84% 24%, rgba(255,176,46,.20) 0 22px, transparent 23px),
+      radial-gradient(circle at 18% 76%, rgba(15,157,142,.13) 0 18px, transparent 19px),
+      radial-gradient(circle at 82% 72%, rgba(15,157,142,.12) 0 26px, transparent 27px);
+  }
+
+  .b-count-wrap { position: absolute; inset: 0; display: grid; place-items: center; z-index: 10; padding: 24px; }
+  .b-count { width: min(620px, 54%); text-align: center; }
+  .b-card {
+    background: rgba(255,255,255,.95); border: 1px solid rgba(216,236,229,.98);
+    border-radius: 34px; padding: 30px 32px 26px;
+    box-shadow: 0 28px 62px rgba(23,68,63,.14);
+    position: relative; overflow: hidden;
+  }
+  .b-card::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 10px;
+    background: linear-gradient(90deg, var(--b-teal), var(--b-amber));
+  }
+  .b-count-kicker { color: #53757c; font-size: 16px; font-weight: 800; margin-bottom: 14px; }
+  .b-count-number { font-size: 104px; line-height: 1; font-weight: 900; color: #113b43; letter-spacing: -.05em; }
+  .b-count-number span { color: var(--b-amber); }
+  .b-count-bar { height: 12px; background: #e4f2ed; border-radius: 999px; overflow: hidden; margin: 20px auto 14px; max-width: 430px; }
+  .b-count-bar span { display: block; height: 100%; width: 86%; border-radius: inherit; background: linear-gradient(90deg, var(--b-teal), #59c7b2); }
+  .b-count-hint { color: #53757c; font-size: 15px; line-height: 1.6; max-width: 520px; margin: 0 auto; }
+  .b-count-hint b { color: var(--b-teal); font-weight: 900; }
+  .b-count-caption {
+    display: inline-flex; align-items: center; gap: 7px; margin-top: 18px;
+    color: #0d6b7d; background: var(--b-teal-soft); border-radius: 999px; padding: 9px 14px; font-size: 14px; font-weight: 800;
+  }
+  .b-count-side {
+    position: absolute; left: 4%; bottom: 26px; z-index: 11;
+    display: grid; gap: 10px; max-width: 270px;
+  }
+  .side-chip {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    background: rgba(255,255,255,.92); border: 1px solid #d8ece5; border-radius: 18px;
+    padding: 11px 14px; box-shadow: 0 12px 28px rgba(23,68,63,.10);
+    color: #345960; font-size: 14px; font-weight: 800;
+  }
+  .side-chip b { color: #0d6b7d; font-size: 17px; }
+  .b-count-watermark {
+    position: absolute; right: 4%; top: 26px; z-index: 1;
+    width: 210px; height: 210px; border-radius: 50%;
+    border: 32px solid rgba(15,157,142,.08);
+    box-shadow: 0 28px 70px rgba(15,157,142,.08);
+  }
+
+  .hud { position: absolute; left: 18px; right: 18px; top: 22px; display: flex; align-items: center; gap: 10px; z-index: 30; pointer-events: none; }
+  .pill {
+    min-height: 38px; padding: 0 15px; border-radius: 20px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    font-size: 16px; font-weight: 800; color: #fff; border: 1px solid rgba(255,255,255,.24);
+    backdrop-filter: blur(8px);
+  }
+  .pill.small { min-height: 34px; font-size: 14px; padding: 0 12px; border-radius: 18px; }
+  .pause {
+    position: absolute; top: 22px; right: 18px; width: 46px; height: 46px; border-radius: 16px;
+    background: rgba(8, 32, 42, .55); border: 1px solid rgba(255,255,255,.24);
+    display: grid; place-items: center; z-index: 31;
+  }
+  .pause i { display: block; width: 6px; height: 20px; background: #fff; border-radius: 2px; margin: 0 2px; }
+  .pause span { position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%); font-size: 11px; color: rgba(255,255,255,.78); white-space: nowrap; }
+
+  .b-hud .pill { color: #113b43; background: rgba(255,255,255,.88); border-color: rgba(216,236,229,.98); box-shadow: 0 10px 22px rgba(23,68,63,.09); }
+  .b-hud .pill.time { background: rgba(13,107,125,.92); color: #fff; border-color: transparent; }
+  .b-hud .pill.time.urgent { background: #e75b5b; color: #fff; }
+  .b-hud .pill.hit { background: rgba(255,176,46,.24); color: #945400; border-color: rgba(255,176,46,.42); }
+  .b-hud .pill.combo { background: rgba(255,176,46,.32); color: #945400; border-color: rgba(255,176,46,.52); }
+  .b-hud .pill.combo.hot { background: #ff5a5a; color: #fff; border-color: #ff5a5a; }
+  .b-hud .pill.esc { background: rgba(22,51,58,.10); color: #345960; border-color: rgba(22,51,58,.18); }
+  .b-hud .pill.esc.hot { background: rgba(231,91,91,.14); color: #a33; border-color: rgba(231,91,91,.36); }
+  .b-hud .pause { background: rgba(255,255,255,.90); border-color: rgba(216,236,229,.98); box-shadow: 0 10px 22px rgba(23,68,63,.10); }
+  .b-hud .pause i { background: #113b43; }
+  .b-hud .pause span { color: #53757c; }
+  .b-hud-dark { background: linear-gradient(180deg, #10333a, #081e23); }
+
+  .modal-mask { position: absolute; inset: 0; background: rgba(22, 51, 58, .34); display: grid; place-items: center; z-index: 40; padding: 24px; }
+  .b-modal {
+    width: 100%; max-width: 430px; background: #fff; color: #16333a;
+    border: 1px solid #d8ece5; border-radius: 30px; padding: 28px;
+    box-shadow: 0 28px 64px rgba(10, 30, 35, .24);
+  }
+  .modal-title { font-size: 25px; font-weight: 900; margin: 0 0 8px; }
+  .modal-sub { font-size: 14px; color: #53757c; margin: 0 0 20px; line-height: 1.55; }
+  .btn { width: 100%; height: 52px; border-radius: 18px; border: 1px solid transparent; font-size: 17px; font-weight: 900; margin-bottom: 10px; }
+  .btn.primary { background: linear-gradient(135deg, #159a8c, #0d6b7d); color: #fff; }
+  .btn.ghost { background: #fff; color: #16333a; border-color: #d8ece5; }
+  .result-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
+  .stat { background: #f5fbf8; border: 1px solid #dcebe6; border-radius: 18px; padding: 12px 10px; text-align: center; }
+  .stat-value { font-size: 27px; font-weight: 900; color: #0d6b7d; }
+  .stat-label { font-size: 12px; color: #648187; margin-top: 4px; }
+  .rating { margin-bottom: 16px; font-size: 17px; font-weight: 900; color: #16333a; }
+  .rating span { color: var(--b-amber); }
+
+  .feeder-layout { position: absolute; inset: 0; display: grid; grid-template-columns: 1.35fr .95fr; gap: 22px; padding: 34px; z-index: 10; }
+  .feeder-hero {
+    background: rgba(255,255,255,.95); border: 1px solid #d8ece5; border-radius: 32px;
+    padding: 28px; box-shadow: 0 28px 64px rgba(23,68,63,.14);
+    display: grid; grid-template-rows: auto 1fr auto; gap: 18px;
+  }
+  .feeder-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .feeder-title { font-size: 22px; font-weight: 900; color: #16333a; }
+  .feeder-status { display: inline-flex; align-items: center; gap: 7px; color: #0f9d8e; font-size: 14px; font-weight: 800; }
+  .feeder-status i { width: 9px; height: 9px; border-radius: 50%; background: #0f9d8e; box-shadow: 0 0 0 5px rgba(15,157,142,.12); }
+  .feeder-time-box {
+    background: #f2fbf7; border: 1px solid #dcebe6; border-radius: 24px;
+    padding: 22px; display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center;
+  }
+  .feeder-time-label { color: #53757c; font-size: 14px; font-weight: 800; margin-bottom: 8px; }
+  .feeder-time-value { color: #0d6b7d; font-size: 56px; line-height: 1; font-weight: 900; letter-spacing: -.03em; }
+  .feeder-progress { margin-top: 14px; }
+  .feeder-bar { height: 12px; background: #e4f2ed; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .feeder-bar span { display: block; height: 100%; width: 62%; border-radius: inherit; background: linear-gradient(90deg, #159a8c, #59c7b2); }
+  .feeder-meta { display: grid; gap: 10px; align-self: stretch; padding: 14px 16px; background: #fff; border: 1px solid #e4f2ed; border-radius: 20px; min-width: 190px; }
+  .feeder-meta-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; color: #53757c; font-size: 14px; }
+  .feeder-meta-row b { color: #0d6b7d; font-size: 16px; }
+  .feeder-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .feeder-btn {
+    height: 52px; border-radius: 16px; border: 1px solid #d9e5df; background: #f7fbf9; color: #16333a; font-weight: 800; font-size: 16px;
+  }
+  .feeder-btn.primary { background: #0f9d8e; color: #fff; border-color: #0f9d8e; }
+  .feeder-note { margin-top: 12px; color: #6a8388; font-size: 13px; text-align: center; }
+
+  .feeder-side { display: grid; grid-template-rows: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .side-card {
+    background: rgba(255,255,255,.94); border: 1px solid #d8ece5; border-radius: 24px;
+    padding: 18px; box-shadow: 0 18px 40px rgba(23,68,63,.10);
+    display: grid; gap: 8px;
+  }
+  .side-card h3 { margin: 0; font-size: 16px; color: #16333a; }
+  .side-card p { margin: 0; color: #53757c; font-size: 14px; line-height: 1.5; }
+  .side-card .value { color: #0d6b7d; font-size: 30px; font-weight: 900; line-height: 1; margin-top: 2px; }
+  .side-card .sub { color: #648187; font-size: 12px; }
+  .side-card .bar { height: 9px; border-radius: 999px; background: #e4f2ed; overflow: hidden; margin-top: 4px; }
+  .side-card .bar span { display: block; height: 100%; width: 72%; background: linear-gradient(90deg, #159a8c, #59c7b2); }
+
+  .footnote { max-width: 1280px; margin: 18px auto 0; color: #648187; font-size: 13px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <div class="kicker">逗猫猎场 · 倒计时横屏方向</div>
+    <h1>风格 B · 阳光庭院</h1>
+    <p class="lede">本页只保留此前第二种风格：<strong>阳光庭院</strong>，并按横向 <strong>16:9</strong> 重新组织倒计时相关界面。保留白色圆角卡片、青绿到琥珀的进度条、浅色背景和宠物日常感；覆盖<strong>开局前 3 秒倒计时</strong>、<strong>对局 HUD 剩余时间药丸</strong>、<strong>暂停页</strong>、<strong>结算页</strong>，以及<strong>电子猫粮下次出粮倒计时</strong>。</p>
+  </header>
+
+  <section class="toolbar" aria-label="场景切换">
+    <div class="tabs" role="group" aria-label="倒计时场景切换">
+      <button class="tab" type="button" data-scene="overview" aria-pressed="true">总览 <small>全部场景</small></button>
+      <button class="tab" type="button" data-scene="countdown" aria-pressed="false">开局倒计时</button>
+      <button class="tab" type="button" data-scene="hud" aria-pressed="false">对局 HUD</button>
+      <button class="tab" type="button" data-scene="pause" aria-pressed="false">暂停</button>
+      <button class="tab" type="button" data-scene="result" aria-pressed="false">结算</button>
+      <button class="tab" type="button" data-scene="feeder" aria-pressed="false">出粮倒计时</button>
+    </div>
+    <div class="toolbar-note"><span class="dot"></span>横屏高保真稿；仅保留风格 B，不含其他风格或竖屏内容。</div>
+  </section>
+
+  <main class="board" id="board">
+    <article class="style-card" aria-label="阳光庭院横屏倒计时设计稿">
+      <div class="style-head">
+        <div class="style-name">
+          <h2>风格 B · 阳光庭院</h2>
+          <span class="style-tag">Light Garden Countdown · Landscape 16:9</span>
+        </div>
+        <p class="style-desc">横屏版本把倒计时信息从竖屏中心卡片扩展为“左侧状态、中央出发牌、右侧关键信息”的庭院看板结构。主视觉仍是白色圆角卡片、86～104px 大数字、青绿到琥珀的进度条和浅色柔和阴影。</p>
+        <ul class="style-points">
+          <li>视觉核心：白色卡片 + 大数字 + 横向进度条，识别直接。</li>
+          <li>横屏适配：HUD 上移为顶部轻量状态栏，留出更完整的游玩视野。</li>
+          <li>风格延续：继续使用青绿主色、琥珀提示、白色浮层与浅色背景。</li>
+        </ul>
+      </div>
+      <div class="screens" id="screens"></div>
+    </article>
+  </main>
+
+  <p class="footnote">说明：本稿为横屏方向的设计稿，未改动 <code>game.js</code>、<code>js/ui.js</code>、<code>js/feeder.js</code>。页面中的数值为演示数据，用于表达横屏下的信息层级与倒计时状态。</p>
+</div>
+
+<script>
+  const sceneHTML = {
+    overview: `
+      <div class="screen-grid">
+        ${countdownScreenHTML('开局倒计时 · 蝴蝶 / 浅色场景', '3 秒后开始')}
+        ${hudScreenHTML('对局 HUD · 正常剩余时间', '2:14', false)}
+        ${hudScreenHTML('对局 HUD · 最后 10 秒', '0:09', true)}
+        ${pauseScreenHTML()}
+        ${resultScreenHTML()}
+        ${feederScreenHTML()}
+      </div>`,
+    countdown: `<div class="screen-grid single">${countdownScreenHTML('开局倒计时 · 蝴蝶 / 浅色场景', '3 秒后开始')}</div>`,
+    hud: `
+      <div class="screen-grid">
+        ${hudScreenHTML('对局 HUD · 正常剩余时间', '2:14', false)}
+        ${hudScreenHTML('对局 HUD · 最后 10 秒', '0:09', true)}
+      </div>`,
+    pause: `<div class="screen-grid single">${pauseScreenHTML()}</div>`,
+    result: `<div class="screen-grid single">${resultScreenHTML()}</div>`,
+    feeder: `<div class="screen-grid single">${feederScreenHTML()}</div>`
+  };
+
+  function countdownScreenHTML(title, state) {
+    return `
+      <div class="screen">
+        <div class="screen-label"><span class="screen-title">${title}</span><span class="screen-state">${state}</span></div>
+        <div class="device">
+          <div class="stage b-stage">
+            <div class="scene scene-butterfly"></div>
+            <div class="b-count-watermark"></div>
+            <div class="prey p1" style="background:radial-gradient(circle at 35% 30%, #fff, #e8fff8 55%, rgba(255,255,255,.2)); opacity:.62"></div>
+            <div class="prey p2" style="background:radial-gradient(circle at 35% 30%, #fff, #fff3d6 55%, rgba(255,255,255,.2)); opacity:.5"></div>
+            <div class="b-count-wrap">
+              <div class="b-count">
+                <div class="b-card">
+                  <div class="b-count-kicker">准备出发</div>
+                  <div class="b-count-number">3</div>
+                  <div class="b-count-bar"><span></span></div>
+                  <div class="b-count-hint">本局 <b>3:00</b> · 蝴蝶停留时最容易拍中<br>拍空不会清连击，附近拍偏会减半</div>
+                  <div class="b-count-caption">🐾 长按暂停可暂停本局</div>
+                </div>
+              </div>
+            </div>
+            <div class="b-count-side">
+              <div class="side-chip"><span>本局场景</span><b>蝴蝶花园</b></div>
+              <div class="side-chip"><span>本局时长</span><b>3:00</b></div>
+              <div class="side-chip"><span>开始方式</span><b>3 秒倒计时</b></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function hudScreenHTML(title, time, urgent) {
+    const scene = urgent ? 'scene-laser-dark' : 'scene-butterfly';
+    const stageClass = urgent ? 'b-hud b-hud-dark' : 'b-hud';
+    const preyStyle = urgent
+      ? 'opacity:.72'
+      : 'background:radial-gradient(circle at 35% 30%, #fff, #e8fff8 55%, rgba(255,255,255,.2)); opacity:.7';
+    return `
+      <div class="screen">
+        <div class="screen-label"><span class="screen-title">${title}</span><span class="screen-state">${time}</span></div>
+        <div class="device">
+          <div class="stage ${stageClass}">
+            <div class="scene ${scene}"></div>
+            <div class="prey p1" style="${preyStyle}"></div>
+            <div class="prey p2" style="${urgent ? 'opacity:.52' : 'background:radial-gradient(circle at 35% 30%, #fff, #fff3d6 55%, rgba(255,255,255,.2)); opacity:.56'}"></div>
+            <div class="hud">
+              <span class="pill time ${urgent ? 'urgent' : ''}">${time}</span>
+              <span class="pill hit">🐾 ${urgent ? '19' : '8'}</span>
+              <span class="pill combo ${urgent ? 'hot' : ''}">×${urgent ? '7' : '3'}</span>
+              ${urgent ? '<span class="pill esc hot">漏击 2</span>' : '<span class="pill esc">横屏模式</span>'}
+            </div>
+            <div class="pause"><i></i><i></i><span>长按暂停</span></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function pauseScreenHTML() {
+    return `
+      <div class="screen">
+        <div class="screen-label"><span class="screen-title">暂停页</span><span class="screen-state">已暂停</span></div>
+        <div class="device">
+          <div class="stage b-stage b-hud">
+            <div class="scene scene-butterfly"></div>
+            <div class="b-count-watermark"></div>
+            <div class="modal-mask b-modal-mask">
+              <div class="b-modal">
+                <h3 class="modal-title">暂停中</h3>
+                <p class="modal-sub">本局剩余 2:14 · 当前连击 ×3<br>横屏放稳手机，再交给猫咪继续</p>
+                <button class="btn primary" type="button">继续本局</button>
+                <button class="btn ghost" type="button">结束本局</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function resultScreenHTML() {
+    return `
+      <div class="screen">
+        <div class="screen-label"><span class="screen-title">结算页</span><span class="screen-state">评级展示</span></div>
+        <div class="device">
+          <div class="stage b-stage b-hud">
+            <div class="scene scene-butterfly"></div>
+            <div class="b-count-watermark"></div>
+            <div class="modal-mask b-modal-mask">
+              <div class="b-modal">
+                <h3 class="modal-title">捕猎结算</h3>
+                <div class="rating">评级 <span>「庭院小能手」</span></div>
+                <div class="result-stats">
+                  <div class="stat"><div class="stat-value">26</div><div class="stat-label">命中</div></div>
+                  <div class="stat"><div class="stat-value">64%</div><div class="stat-label">准确</div></div>
+                  <div class="stat"><div class="stat-value">×9</div><div class="stat-label">最高连击</div></div>
+                </div>
+                <button class="btn primary" type="button">再来一局</button>
+                <button class="btn ghost" type="button">查看本周记录</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function feederScreenHTML() {
+    return `
+      <div class="screen">
+        <div class="screen-label"><span class="screen-title">电子猫粮 · 下次出粮倒计时</span><span class="screen-state">定时 5 分钟</span></div>
+        <div class="device">
+          <div class="stage" style="background:linear-gradient(180deg,#f8fff7,#eaf7ef);">
+            <div class="feeder-layout">
+              <div class="feeder-hero">
+                <div class="feeder-top">
+                  <div class="feeder-title">电子猫粮</div>
+                  <div class="feeder-status"><i></i>定时出粮</div>
+                </div>
+                <div class="feeder-time-box">
+                  <div>
+                    <div class="feeder-time-label">下次出粮</div>
+                    <div class="feeder-time-value">04:12</div>
+                    <div class="feeder-progress">
+                      <div class="feeder-bar"><span></span></div>
+                    </div>
+                  </div>
+                  <div class="feeder-meta">
+                    <div class="feeder-meta-row"><span>份量</span><b>3 份 · 36g</b></div>
+                    <div class="feeder-meta-row"><span>周期</span><b>每 5 分钟</b></div>
+                    <div class="feeder-meta-row"><span>状态</span><b>待机</b></div>
+                  </div>
+                </div>
+                <div>
+                  <div class="feeder-actions">
+                    <button class="feeder-btn primary" type="button">立即出粮</button>
+                    <button class="feeder-btn" type="button">暂停定时</button>
+                  </div>
+                  <div class="feeder-note">出粮中会显示「出粮中」，完成后回到待机</div>
+                </div>
+              </div>
+              <div class="feeder-side">
+                <div class="side-card">
+                  <h3>今日进度</h3>
+                  <div class="value">3 / 6</div>
+                  <p>次出粮计划</p>
+                  <div class="bar"><span></span></div>
+                </div>
+                <div class="side-card">
+                  <h3>剩余猫粮</h3>
+                  <div class="value">42g</div>
+                  <p>预计可支撑 11 次</p>
+                  <div class="bar"><span style="width:54%"></span></div>
+                </div>
+                <div class="side-card">
+                  <h3>提醒</h3>
+                  <p>猫咪靠近时优先展示「出粮中」，倒计时自动暂停。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const screens = document.getElementById('screens');
+
+  function render(scene) {
+    screens.innerHTML = sceneHTML[scene];
+    document.querySelectorAll('[data-scene]').forEach(btn => {
+      btn.setAttribute('aria-pressed', String(btn.dataset.scene === scene));
+    });
+  }
+
+  document.querySelectorAll('[data-scene]').forEach(btn => {
+    btn.addEventListener('click', () => render(btn.dataset.scene));
+  });
+
+  render('overview');
+</script>
+</body>
+</html>

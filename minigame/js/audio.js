@@ -188,7 +188,7 @@ module.exports = function (G) {
     return true;
   };
 
-  /* ---------- 暗夜萤光（三种发光玩具）音效 ----------
+  /* ---------- 暗夜荧光（三种发光玩具）音效 ----------
      沿用 tools/gen_firefly_sfx.py 按参考视频实测参数合成的原创音：
        兔子 → 通用中频段；老鼠 → 带短吱的鼠音段；瓢虫 → 最脆的翅膜嗡。
        张翅摩擦与出现 ticks 三种共用。 */
@@ -353,6 +353,24 @@ module.exports = function (G) {
   G.playMiss = () => { if (G.quietMouseRoom && G.quietMouseRoom()) return; tone("triangle", 150, 95, 0.09, 0.16); };
   G.playTick = () => tone("sine", 700, 0, 0.06, 0.14);
   G.playGo = () => { if (G.quietMouseRoom && G.quietMouseRoom()) return; tone("sine", 1046, 0, 0.2, 0.2); };
+  G.playCountdownTick = (step) => {
+    if (G.quietMouseRoom && G.quietMouseRoom()) return;
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (G._lastCountdownTick && now - G._lastCountdownTick < 90) return;
+    G._lastCountdownTick = now;
+    const f = step === 1 ? 760 : step === 2 ? 880 : 1040;
+    tone("sine", f, 0, 0.07, 0.18);
+  };
+  G.playCountdownGo = () => {
+    if (G.quietMouseRoom && G.quietMouseRoom()) return;
+    if (!G.config.sound) return;
+    const now = performance.now();
+    if (G._lastCountdownGo && now - G._lastCountdownGo < 180) return;
+    G._lastCountdownGo = now;
+    tone("sine", 1046, 0, 0.16, 0.24);
+    tone("sine", 1568, 0, 0.22, 0.16, 0.07);
+  };
   G.playMilestone = () => {
     if (G.quietMouseRoom && G.quietMouseRoom()) return;
     tone("sine", 660, 0, 0.09, 0.18); tone("sine", 880, 0, 0.09, 0.18, 0.08); tone("sine", 1100, 0, 0.12, 0.18, 0.16);

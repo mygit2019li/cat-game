@@ -2,6 +2,50 @@
 module.exports = function (G) {
   const D = {};
 
+  /* ---------- 颜色小工具（群鼠 6 变体配色派生用） ---------- */
+  const _hex2rgb = (h) => {
+    const s = h.replace("#", "");
+    return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+  };
+  /* hex → rgba 字符串（带 alpha） */
+  const _hexA = (h, a) => {
+    const c = _hex2rgb(h);
+    return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a.toFixed(3) + ")";
+  };
+  /* 向 (r,g,b) 方向混合 amt（0–1）：amt=0 返回原色，amt=1 返回目标 */
+  const _mix = (h, tgt, amt) => {
+    const a = _hex2rgb(h), b = tgt;
+    const c = a.map((x, i) => Math.round(x + (b[i] - x) * amt));
+    return "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+  };
+  /* 变体配色派生：身体 4 段（受光浅→中→侧→边暗）、耳 3 段、尾/鼻/腹侧带。
+     受光白推只 0.14、侧背直接用 back 压深——保住炭胆/烟尾等深色鼠的花色差异。 */
+  const _mousePalette = (v) => {
+    const back = v.back, mid = v.mid, belly = v.belly;
+    const LIGHT = [255, 248, 235];      // 仓顶灯暖白（弱推，保持底色）
+    const DARK = [42, 32, 22];          // 边缘暗部暖棕黑
+    const backLumP = (c => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]))(_hex2rgb(back)) / 255;
+    const isDark = backLumP <= 0.38;    // 深毛色鼠（炭胆 lum≈.32 / 烟尾 lum≈.36）
+    return {
+      body: [
+        isDark ? mid : _mix(mid, LIGHT, 0.14),   // 深鼠受光面不推白，直接用 mid；亮鼠轻提亮
+        back,                                    // 中（用 back 压深，侧背主体色）
+        _mix(back, [0, 0, 0], isDark ? 0.3 : 0.20), // 深鼠侧背再加深
+        _mix(back, DARK, 0.5)                    // 边缘暗
+      ],
+      ear: [
+        _mix(v.ear, LIGHT, 0.22),
+        v.ear,
+        _mix(v.ear, DARK, 0.4)
+      ],
+      earIn: v.earIn || "rgba(232,180,169,.72)",
+      tail: v.tail || "#c99f85",
+      tailLight: "rgba(255,236,240,.9)",
+      nose: v.nose || "#d98a7d",
+      bellyBand: belly   // 腹侧/吻部白带底色
+    };
+  };
+
   /* ---------- 鱼（设计空间 120×72，中心 60,36） ----------
      体型由品种命中盒宽高比推出：k = (h/w) / 0.6（0.6 = 设计空间 72/120）
        k < 0.85  瘦长：鱼雷体 + 尖吻 + 叉形燕尾（沙丁鱼、小丑鱼）
@@ -769,7 +813,7 @@ module.exports = function (G) {
     }
   };
 
-  /* ---------- 暗夜萤光：发光小虫（俯视爬行：六足步态 + 鞘翅背线 + 萤火尾灯，头朝爬行方向） ---------- */
+  /* ---------- 暗夜荧光：发光小虫（俯视爬行：六足步态 + 鞘翅背线 + 荧光尾灯，头朝爬行方向） ---------- */
   D.poolLight = (ctx, p, t) => {
     const panic = G.session && G.session.combo >= 5;
     const moving = p.state === "crawl";
@@ -837,7 +881,7 @@ module.exports = function (G) {
       ctx.quadraticCurveTo(sx0 - R * 0.07, 0, sx0, R * 0.28);
       ctx.stroke();
     });
-    // 4) 膜翅（半透明小翅收拢在背上，持续快频煽动——萤火虫爬行时也会颤翅）
+    // 4) 膜翅（半透明小翅收拢在背上，持续快频煽动——暗夜荧光爬行时也会颤翅）
     const wingPath = (L, Wd) => {
       ctx.beginPath();
       ctx.moveTo(0, 0);
@@ -859,7 +903,7 @@ module.exports = function (G) {
       ctx.strokeStyle = "rgba(235,255,255,.38)"; ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
     }
-    // 5) 腹尾亮灯（呼吸脉动的"萤火"）：亮核 + 柔光
+    // 5) 腹尾亮灯（呼吸脉动的"荧光"）：亮核 + 柔光
     const lampP = 0.72 + 0.28 * Math.sin(t * 5 + ph * 3);
     const lamp = ctx.createRadialGradient(-R * 0.86, 0, 0, -R * 0.86, 0, R * 0.5);
     lamp.addColorStop(0, "rgba(255,255,235," + (0.35 + 0.6 * lampP).toFixed(2) + ")");
@@ -907,6 +951,9 @@ module.exports = function (G) {
   };
 
   D.mouseTop = (ctx, p, t) => {
+    const v = p.mouseVar || G.MOUSE_VARIANTS[0];        // 花色变体（群鼠 6 只差异化）
+    const pal = _mousePalette(v);
+    const isRedEye = (v.key === "albino");              // 霜尖红眼：眼珠用 v.eye
     const wag = Math.sin(t * 2.4 + (p.phase || 0)) * 10;
     const gaitT = t * 8.6 + (p.phase || 0);           // 爬行步态相位（对角步）
     const bob = Math.sin(gaitT * 2) * 0.9;            // 身体随步频轻颠
@@ -926,8 +973,13 @@ module.exports = function (G) {
       ctx.bezierCurveTo(60 + wag * 0.35, 101, 56 + wag * 0.6, 108, 48 + wag, 114);
     };
     ctx.lineCap = "round";
-    ctx.strokeStyle = "#e79ab0"; ctx.lineWidth = 4.6; tailPath(); ctx.stroke();
-    ctx.strokeStyle = "rgba(255,222,232,.9)"; ctx.lineWidth = 1.7; tailPath(); ctx.stroke();
+    ctx.strokeStyle = pal.tail; ctx.lineWidth = 4.6; tailPath(); ctx.stroke();
+    ctx.strokeStyle = pal.tailLight; ctx.lineWidth = 1.7; tailPath(); ctx.stroke();
+    // 配饰 · whiteTip：尾尖一撮白毛（烟尾）
+    if (v.accessory === "whiteTip") {
+      ctx.strokeStyle = "rgba(250,248,244,.95)"; ctx.lineWidth = 3.2; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(51 + wag * 0.6, 110); ctx.lineTo(48 + wag, 114); ctx.stroke();
+    }
 
     // 腿脚全部收进身体投影里：只画干净的背部剪影（不再露出四肢/爪掌）
 
@@ -939,69 +991,87 @@ module.exports = function (G) {
       ctx.save();
       ctx.translate(ex, ey); ctx.rotate(sgn * 0.18); ctx.scale(1, 0.86);   // 俯视：耳朵略压扁
       const og = ctx.createRadialGradient(-2, -3, 2, 0, 0, 15);
-      og.addColorStop(0, "#f7b6c7");
-      og.addColorStop(0.7, "#e894ab");
-      og.addColorStop(1, "#d9829b");
+      og.addColorStop(0, pal.ear[0]);
+      og.addColorStop(0.7, pal.ear[1]);
+      og.addColorStop(1, pal.ear[2]);
       ctx.fillStyle = og;
       ctx.beginPath(); ctx.ellipse(0, 0, 12, 13, 0, 0, Math.PI * 2); ctx.fill();
       ctx.strokeStyle = "rgba(255,240,246,.30)"; ctx.lineWidth = 1.1; ctx.stroke();
       const ig = ctx.createRadialGradient(-2, -2, 1, 0, 0, 10);
       ig.addColorStop(0, "rgba(255,246,249,.98)");
-      ig.addColorStop(0.7, "rgba(250,206,219,.96)");
-      ig.addColorStop(1, "rgba(240,172,192,.95)");
+      ig.addColorStop(0.7, pal.earIn);
+      ig.addColorStop(1, pal.ear[2]);
       ctx.fillStyle = ig;
       ctx.beginPath(); ctx.ellipse(0, 0, 8, 8.8, 0, 0, Math.PI * 2); ctx.fill();
+      // 配饰 · scar：左耳（sgn=-1，即 ex=44）一道浅米色 V 形刻痕（炭胆）
+      if (v.accessory === "scar" && sgn === -1) {
+        ctx.strokeStyle = "rgba(222,208,178,.95)"; ctx.lineWidth = 1.8; ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-4, -6); ctx.lineTo(0, -1); ctx.lineTo(-4, 3);
+        ctx.stroke();
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(1.5, -4.5); ctx.lineTo(3.5, -0.5);
+        ctx.stroke();
+      }
       ctx.restore();
     };
     // 俯视：耳朵长在头两侧偏后，露出耳廓背面 + 一点内耳
     ear(44, 22, -1); ear(76, 22, 1);
 
-    // ---- 身体（俯视轮廓：细长鼠形——鼻尖收窄 → 头部渐宽 → 腰略收 → 圆臀；驼色背 + 白色腹侧）----
+    // ---- 身体（俯视轮廓：细长鼠形——鼻尖收窄 → 头部渐宽 → 肩 → 腰明显收细 → 圆臀膨大；
+    //      设计稿"细长鼠形"：腰比肩/臀窄 25%+，臀略宽于肩，避免上一版的"水滴/香肠"观感）----
     const bodyPath = () => {
       ctx.beginPath();
       ctx.moveTo(60, 3);                               // 鼻尖
-      ctx.bezierCurveTo(66.5, 3, 70, 10, 70.5, 20);    // 右吻→右头侧
-      ctx.bezierCurveTo(71, 29, 75.5, 34, 77, 44);     // 头→肩
-      ctx.bezierCurveTo(79, 57, 78, 74, 75, 84);       // 右身（细长）
-      ctx.bezierCurveTo(72.5, 92, 67.5, 96, 60, 96);   // 右臀→尾根
-      ctx.bezierCurveTo(52.5, 96, 47.5, 92, 45, 84);   // 左臀
-      ctx.bezierCurveTo(42, 74, 41, 57, 43, 44);       // 左身
-      ctx.bezierCurveTo(44.5, 34, 49, 29, 49.5, 20);   // 肩→左头侧
-      ctx.bezierCurveTo(50, 10, 53.5, 3, 60, 3);       // 左吻→鼻尖
+      ctx.bezierCurveTo(66, 3, 69.5, 9, 70, 18);       // 右吻→右头侧（收窄）
+      ctx.bezierCurveTo(70.5, 27, 74, 33, 75, 42);     // 头→肩（肩为最宽点）
+      ctx.bezierCurveTo(76.5, 54, 72.5, 62, 71.5, 70); // 右身（腰明显收细）
+      ctx.bezierCurveTo(74.5, 78, 75, 85, 71, 91);     // 右臀（膨大后收窄）
+      ctx.bezierCurveTo(67.5, 96, 63, 97.5, 60, 97.5); // 右臀底→尾根
+      ctx.bezierCurveTo(57, 97.5, 52.5, 96, 49, 91);   // 左臀底
+      ctx.bezierCurveTo(45, 85, 45.5, 78, 48.5, 70);   // 左臀→左腰（与右对称收窄）
+      ctx.bezierCurveTo(47.5, 62, 43.5, 54, 45, 42);   // 左腰→左肩
+      ctx.bezierCurveTo(46, 33, 49.5, 27, 50, 18);     // 左肩→左头侧
+      ctx.bezierCurveTo(50.5, 9, 54, 3, 60, 3);        // 左吻→鼻尖
       ctx.closePath();
     };
-    const bg = ctx.createRadialGradient(52, 26, 4, 62, 60, 74);
-    bg.addColorStop(0, "#f6c98c");                     // 背部受光（浅驼）
-    bg.addColorStop(0.4, "#dfa970");                   // 驼橙
-    bg.addColorStop(0.75, "#c9925c");                  // 侧背
-    bg.addColorStop(1, "#a97747");                     // 边缘暗部
+    const bg = ctx.createRadialGradient(53, 27, 4, 62, 58, 76);
+    bg.addColorStop(0, pal.body[0]);                    // 背部受光（浅）
+    bg.addColorStop(0.4, pal.body[1]);                  // 中
+    bg.addColorStop(0.75, pal.body[2]);                 // 侧背
+    bg.addColorStop(1, pal.body[3]);                    // 边缘暗部
     ctx.fillStyle = bg;
     bodyPath(); ctx.fill();
 
     // ---- 底部环境光遮蔽（暖棕暗部）+ 腹侧白毛（俯视时两侧露出的白色胸腹）+ 吻部白毛 ----
     ctx.save();
     bodyPath(); ctx.clip();
+    // 深色鼠（炭胆/烟尾）back 亮度低 → 白带少画、AO 减弱，让深灰占主导（保花色差异）
+    const backLum = (c => (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]))(_hex2rgb(v.back)) / 255;
+    const bellyA = backLum > 0.55 ? 0.62 : backLum > 0.38 ? 0.38 : 0.16;   // 亮鼠白带明显，深鼠弱化（阈值上调：炭胆 .32/烟尾 .36 归深色档，暖棕鼠 老仓 .42/花栗 .47 归亮档）
+    const aoA = backLum > 0.45 ? 0.4 : 0.22;                              // 深鼠 AO 减弱
     const ao = ctx.createRadialGradient(64, 84, 8, 62, 84, 50);
-    ao.addColorStop(0, "rgba(126,84,52,.40)");
+    ao.addColorStop(0, "rgba(126,84,52," + aoA.toFixed(2) + ")");
     ao.addColorStop(1, "rgba(126,84,52,0)");
     ctx.fillStyle = ao;
     ctx.fillRect(20, 46, 84, 60);
-    // 左右腹侧白毛（沿体侧边缘的一带白，模拟参考图的白色胸腹）
-    const bl = ctx.createLinearGradient(41, 0, 62, 0);
-    bl.addColorStop(0, "rgba(255,252,246,.62)");
-    bl.addColorStop(1, "rgba(255,252,246,0)");
+    // 左右腹侧白带（沿体侧边缘，模拟白色胸腹；底色取变体 belly，霜尖=纯白；宽度随收窄后的体型）
+    const bl = ctx.createLinearGradient(44, 0, 58, 0);
+    bl.addColorStop(0, _hexA(pal.bellyBand, bellyA));
+    bl.addColorStop(1, _hexA(pal.bellyBand, 0));
     ctx.fillStyle = bl;
-    ctx.beginPath(); ctx.ellipse(46, 66, 9, 30, 0.05, 0, Math.PI * 2); ctx.fill();
-    const br = ctx.createLinearGradient(79, 0, 58, 0);
-    br.addColorStop(0, "rgba(255,252,246,.62)");
-    br.addColorStop(1, "rgba(255,252,246,0)");
+    ctx.beginPath(); ctx.ellipse(49, 65, 7, 28, 0.06, 0, Math.PI * 2); ctx.fill();
+    const br = ctx.createLinearGradient(76, 0, 62, 0);
+    br.addColorStop(0, _hexA(pal.bellyBand, bellyA));
+    br.addColorStop(1, _hexA(pal.bellyBand, 0));
     ctx.fillStyle = br;
-    ctx.beginPath(); ctx.ellipse(74, 66, 9, 30, -0.05, 0, Math.PI * 2); ctx.fill();
-    // 吻部/下巴白毛
+    ctx.beginPath(); ctx.ellipse(71, 65, 7, 28, -0.06, 0, Math.PI * 2); ctx.fill();
+    // 吻部/下巴白带（深毛色鼠弱化，避免整体偏浅）
     const mw = ctx.createRadialGradient(60, 16, 1, 60, 16, 15);
-    mw.addColorStop(0, "rgba(255,252,248,.98)");
-    mw.addColorStop(0.6, "rgba(255,248,240,.6)");
-    mw.addColorStop(1, "rgba(255,248,240,0)");
+    mw.addColorStop(0, _hexA(pal.bellyBand, Math.min(1, bellyA * 1.35)));
+    mw.addColorStop(0.6, _hexA(pal.bellyBand, bellyA * 0.85));
+    mw.addColorStop(1, _hexA(pal.bellyBand, 0));
     ctx.fillStyle = mw;
     ctx.beginPath(); ctx.ellipse(60, 16, 12, 10, 0, 0, Math.PI * 2); ctx.fill();
     // 右侧暗部（球面转折）
@@ -1011,16 +1081,18 @@ module.exports = function (G) {
     side.addColorStop(1, "rgba(120,82,48,.28)");
     ctx.fillStyle = side;
     ctx.fillRect(20, 0, 84, 100);
-    // ---- 左上大面积柔光高光 ----
+    // ---- 左上大面积柔光高光（暖色、低强度：原白色 .95 会把炭胆/烟尾等深色鼠打白，抹掉花色）----
+    // 深毛色鼠进一步削弱高光（backLum 低 → 高光弱），保留深色花色
+    const hlI = backLum > 0.55 ? 1 : backLum > 0.38 ? 0.55 : 0.28;
     const hl = ctx.createRadialGradient(50, 30, 2, 52, 32, 38);
-    hl.addColorStop(0, "rgba(255,255,255,.95)");
-    hl.addColorStop(0.5, "rgba(255,255,255,.35)");
-    hl.addColorStop(1, "rgba(255,255,255,0)");
+    hl.addColorStop(0, "rgba(255,244,224," + (0.42 * hlI).toFixed(3) + ")");
+    hl.addColorStop(0.5, "rgba(255,244,224," + (0.12 * hlI).toFixed(3) + ")");
+    hl.addColorStop(1, "rgba(255,244,224,0)");
     ctx.fillStyle = hl;
     ctx.beginPath(); ctx.ellipse(50, 31, 20, 21, -0.16, 0, Math.PI * 2); ctx.fill();
-    // ---- 头部小高光（湿润感）----
+    // ---- 头部小高光（湿润感，同样暖色弱化，深鼠更弱）----
     const hl2 = ctx.createRadialGradient(55, 10, 1, 56, 11, 12);
-    hl2.addColorStop(0, "rgba(255,255,255,.85)");
+    hl2.addColorStop(0, "rgba(255,244,224," + (0.5 * hlI).toFixed(3) + ")");
     hl2.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = hl2;
     ctx.beginPath(); ctx.ellipse(56, 11, 8, 6, -0.3, 0, Math.PI * 2); ctx.fill();
@@ -1031,13 +1103,18 @@ module.exports = function (G) {
     ctx.strokeStyle = "rgba(226,234,243,.5)"; ctx.lineWidth = 1.3; ctx.stroke();
 
     // ---- 背脊高光（背面视角的纵向亮带，强调"看到的是鼠背"）----
+    // 配饰 · spine：花栗的脊纹用更浅更明显的米色带（其余鼠保持柔光高光）
+    // 深毛色鼠削弱背脊高光，避免把深色背打白
+    const spineI = v.accessory === "spine" ? 1 : (backLum > 0.55 ? 1 : backLum > 0.38 ? 0.5 : 0.25);
+    const spineCol = v.accessory === "spine" ? "rgba(248,242,226,.85)" : "rgba(255,255,255," + (0.42 * spineI).toFixed(3) + ")";
+    const spineMid = v.accessory === "spine" ? "rgba(248,242,226,.5)" : "rgba(255,255,255," + (0.14 * spineI).toFixed(3) + ")";
     const spine = ctx.createLinearGradient(0, 10, 0, 94);
     spine.addColorStop(0, "rgba(255,255,255,0)");
-    spine.addColorStop(0.32, "rgba(255,255,255,.42)");
-    spine.addColorStop(0.72, "rgba(255,255,255,.14)");
+    spine.addColorStop(0.32, spineCol);
+    spine.addColorStop(0.72, spineMid);
     spine.addColorStop(1, "rgba(255,255,255,0)");
     ctx.fillStyle = spine;
-    ctx.beginPath(); ctx.ellipse(60, 52, 8, 34, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(60, 54, 7, 32, 0, 0, Math.PI * 2); ctx.fill();
 
     // ---- 细白胡须（俯视：从吻端向前（屏幕上方）散开，不再左右平伸）----
     ctx.strokeStyle = "rgba(255,255,255,.58)"; ctx.lineWidth = 0.9; ctx.lineCap = "round";
@@ -1050,23 +1127,64 @@ module.exports = function (G) {
     ctx.moveTo(62, 12); ctx.quadraticCurveTo(70, 11, 78, 10);
     ctx.stroke();
 
-    // ---- 小黑亮眼（俯视：位于头部两侧偏前，珠子更小 + 一点高光）----
+    // ---- 发光眼（俯视：头部两侧偏前。暖琥珀色 + screen 光晕，暗底上持续发亮、清晰可见）----
+    // 霜尖红眼：眼珠用变体红 eye，光晕改暖红；其余保持暖琥珀
+    const eyeBall = isRedEye ? v.eye : "#ffc27a";
+    const eyeHalo = isRedEye
+      ? ["rgba(255,120,110,", "rgba(240,90,80,", "rgba(220,70,60,0)"]
+      : ["rgba(255,214,140,", "rgba(255,196,110,", "rgba(255,180,90,0)"];
     const eye = (ex, ey) => {
-      ctx.fillStyle = "#20242c";
-      ctx.beginPath(); ctx.arc(ex, ey, 2.9, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,.95)";
-      ctx.beginPath(); ctx.arc(ex + 1, ey - 1.1, 1.1, 0, Math.PI * 2); ctx.fill();
+      // 光晕（screen 叠加，随呼吸极轻起伏，暗处也能"亮起来"）
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      const pulse = 0.78 + 0.22 * Math.sin(t * 3.2 + (p.phase || 0));
+      const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, 9.5);
+      halo.addColorStop(0, eyeHalo[0] + (0.85 * pulse).toFixed(3) + ")");
+      halo.addColorStop(0.4, eyeHalo[1] + (0.4 * pulse).toFixed(3) + ")");
+      halo.addColorStop(1, eyeHalo[2]);
+      ctx.fillStyle = halo;
+      ctx.beginPath(); ctx.arc(ex, ey, 9.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      // 眼珠 + 白色高光
+      ctx.fillStyle = eyeBall;
+      ctx.beginPath(); ctx.arc(ex, ey, 3.1, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.98)";
+      ctx.beginPath(); ctx.arc(ex + 0.9, ey - 1, 1.2, 0, Math.PI * 2); ctx.fill();
     };
     eye(50, 21); eye(70, 21);
 
-    // ---- 粉鼻（俯视：吻尖最前端的小圆点）----
-    ctx.fillStyle = "#e98da4";
+    // ---- 鼻子（俯视：吻尖最前端的小圆点，色取变体 nose）----
+    ctx.fillStyle = pal.nose;
     ctx.beginPath(); ctx.ellipse(60, 5.2, 2.4, 1.9, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,214,224,.9)";
+    ctx.fillStyle = "rgba(255,236,240,.85)";
     ctx.beginPath(); ctx.ellipse(59.3, 4.6, 0.85, 0.55, -0.3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(168,80,102,.38)";
+    ctx.fillStyle = "rgba(90,50,60,.32)";
     ctx.beginPath(); ctx.arc(59.2, 5.8, 0.5, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(60.8, 5.8, 0.5, 0, Math.PI * 2); ctx.fill();
+
+    // ---- 配饰 · topknot：头顶一小撮翘毛（老仓）+ collar：颈圈旧皮绳（设计稿：群头记忆点）----
+    if (v.accessory === "topknot" || v.accessory === "collar") {
+      if (v.accessory === "collar") {
+        // 旧皮绳：头颈交界处一道深褐环带 + 结扣
+        ctx.strokeStyle = "rgba(82,56,34,.95)"; ctx.lineWidth = 3.4; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(47.5, 32); ctx.quadraticCurveTo(60, 38.5, 72.5, 32); ctx.stroke();
+        ctx.strokeStyle = "rgba(122,86,52,.8)"; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(48.5, 30.6); ctx.quadraticCurveTo(60, 36.6, 71.5, 30.6); ctx.stroke();
+        ctx.fillStyle = "rgba(112,78,46,.95)";
+        ctx.beginPath(); ctx.arc(60, 36.2, 2.4, 0, Math.PI * 2); ctx.fill();
+      }
+      if (v.accessory === "topknot") {
+        ctx.strokeStyle = _hexA(v.back, 0.92); ctx.lineWidth = 2.2; ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(57, 9); ctx.quadraticCurveTo(55, 4, 52, 1);
+        ctx.moveTo(60, 8); ctx.quadraticCurveTo(60, 3, 60, -1);
+        ctx.moveTo(63, 9); ctx.quadraticCurveTo(65, 4, 68, 1);
+        ctx.stroke();
+        // 一小撮毛根部的浅色
+        ctx.fillStyle = _hexA(v.mid, 0.85);
+        ctx.beginPath(); ctx.ellipse(60, 8, 4, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    }
     ctx.restore();                                     // 结束 bob 位移
   };
 
@@ -1412,7 +1530,7 @@ module.exports = function (G) {
       const fake = { state: "hold", sc: 1 };
       D.laser(ctx, fake, 0.6);
     } else if (type === "pool") {
-      // 首页「萤火虫」卡：浅底 + 与游戏内完全相同的那只发光萤火虫（参考图为黄绿发光小虫）
+      // 首页「暗夜荧光」卡：浅底 + 与游戏内完全相同的那只发光暗夜荧光（参考图为黄绿发光小虫）
       // 图标设计框约 115×115，整体收在 ±47 内
       const glow = ctx.createRadialGradient(0, 6, 0, 0, 6, 48);
       glow.addColorStop(0, "rgba(238,246,176,.55)");

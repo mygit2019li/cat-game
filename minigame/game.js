@@ -148,7 +148,7 @@ initDebug();
    配上猫咪反应测评图（5:4），而不是游戏截图或"我得了 X 分"。
    量词随玩法走：鱼论「条」、光点论「个」，其余论「只」——统一写「只」在捕鱼/激光局会不通顺。 */
 const HIT_UNIT = { fish: "条", butterfly: "只", mouse: "只", laser: "个", pool: "只", tadpole: "只" };
-const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "萤光虫", tadpole: "小蝌蚪" };
+const HIT_NOUN = { fish: "小鱼", butterfly: "蝴蝶", mouse: "老鼠", laser: "光点", pool: "荧光虫", tadpole: "小蝌蚪" };
 /* 兔子场所命中碎屑主色（黄色本体） */
 const POOL_SPARK = { firefly: "#ffe479" };
 G.shareResult = () => {
@@ -224,7 +224,7 @@ G.shareModule = (src) => {
 };
 
 G.platform.initShare(() => ({
-  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、萤光虫轮着来，看它能抓到几个",
+  title: "给你家猫开个捕猎场：小鱼、蝴蝶、老鼠、光点、荧光虫轮着来，看它能抓到几个",
   query: "from=menu"
 }));
 
@@ -280,7 +280,8 @@ function beginPlay() {
   G.session.counting = false;
   G.session.running = true;
   G.session.lastTs = performance.now();
-  G.playGo();
+  if (G.playCountdownGo) G.playCountdownGo();
+  else G.playGo();
   G.screen = "playing"; // Use direct assignment to avoid repeated calls during transition
   G.nextScreen = null;
   G.transitionT = 0;
@@ -291,7 +292,7 @@ function beginPlay() {
    每张卡对应一套布景+运动规则+猎物种类；只有 1 套的玩法照旧直接开始，不额外打扰。
    卡片按「一屏约 1.5 张」布局：CW = W*0.64 + 间距，滑动时露出半张下一张。 */
 G.requestStart = () => {
-  /* 青蛙/萤火虫/蝴蝶/激光都有二级玩法卡：先选卡，再进场景或直接开局。 */
+  /* 青蛙/暗夜荧光/蝴蝶/激光都有二级玩法卡：先选卡，再进场景或直接开局。 */
   const group = G.groupForType && G.groupForType(G.config.targetType);
   if (group) { G.openModePick(G.groupKeyForType(G.config.targetType)); return; }
   const arr = G.bgsFor(G.config.targetType);
@@ -666,7 +667,7 @@ function onHit(x, y, prey) {
       G.playFlutter();
     }
   } else if (isPool) {
-    // 萤光小虫被拍散：一小把暖金色碎光 + 两点冷色，配一声低频 pop + 高频 shimmer 的星爆音。
+    // 荧光小虫被拍散：一小把暖金色碎光 + 两点冷色，配一声低频 pop + 高频 shimmer 的星爆音。
     G.lightPop(prey.x, prey.y, holding || S.combo >= 5, prey.species);
     if (G.playFireflyHit) G.playFireflyHit(prey.species);
   } else if (isLaser) {
@@ -935,6 +936,7 @@ G.platform.onTouchEnd = (e) => {
 };
 
 /* ================= 画面绘制 ================= */
+let _lastDt = 0.016;   // 最近一帧 dt（供局部照明等需要帧率无关平滑的地方读取）
 function drawGameFrame(t) {
   ctx.save();
   if (G.shake > 0.1) {
@@ -943,6 +945,8 @@ function drawGameFrame(t) {
     ctx.translate(sx, sy);
   }
   G.drawScene(ctx, t);
+  // 群鼠乱窜 · 局部照明：顶灯跟着鼠群走，鼠处被照亮、其余压暗（在地板之后、老鼠之前）
+  if (G.scene && G.scene.type === "mouse" && G.scene.mouseBg === "swarm") G.drawSwarmLight(ctx, t, _lastDt);
   // 激光暗室：先压暗背景，让激光光点与拖尾"穿透"黑暗，对比更醒目
   if (G.scene && G.scene.dark) {
     ctx.fillStyle = "rgba(0,0,0,.72)";
@@ -971,6 +975,7 @@ function loop() {
   const now = performance.now();
   const dt = Math.max(0, Math.min((now - lastTs) / 1000, 0.05));
   lastTs = now;
+  if (dt > 0) _lastDt = dt;
   const S = G.session;
   const t = S.time;
 
@@ -987,7 +992,8 @@ function loop() {
     const ci = Math.ceil(countT);
     if (ci !== lastInt && ci > 0) {
       lastInt = ci;
-      if (!(G.quietMouseRoom && G.quietMouseRoom())) G.playTick();   // 室内捕鼠局：倒计时也不出声
+      if (G.playCountdownTick) G.playCountdownTick(ci);
+      else if (!(G.quietMouseRoom && G.quietMouseRoom())) G.playTick();   // 室内捕鼠局：倒计时也不出声
     }
     if (countT <= 0) beginPlay();
   } else if (G.screen === "playing" && S.running && !S.paused) {

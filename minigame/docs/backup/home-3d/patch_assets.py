@@ -36,7 +36,7 @@ rep('js/ui.js', '''  /* ================= 首页 =================''',
     mouse: "assets/home/icon-mouse.png", firefly: "assets/home/icon-firefly.png",
     butterfly: "assets/home/icon-butterfly.png", ladybug: "assets/home/icon-ladybug.png"
   };
-  /* 首页卡片 key → 素材 key（暗夜萤光用「萤火虫」，激光暗室用「瓢虫/昆虫乐园」） */
+  /* 首页卡片 key → 素材 key（暗夜荧光用「暗夜荧光」，激光暗室用「瓢虫/昆虫乐园」） */
   const HOME_ICON_KEY = { pool: "firefly", laser: "ladybug" };
   ui.initHomeImages = () => {
     if (HOME_IMG.tried) return;
