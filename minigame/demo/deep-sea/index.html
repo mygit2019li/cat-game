@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#02080c">
+<title>深海 · 鱼群巡游</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{width:100%;height:100%;overflow:hidden;background:#01070b;}
+  body{
+    -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",-apple-system,system-ui,sans-serif;
+    color:rgba(196,236,246,.82);
+    cursor:none;
+  }
+  #stage{display:block;position:fixed;inset:0;width:100%;height:100%;}
+  /* ---------- HUD：细描边 + 宽字距，不使用粗体 ---------- */
+  .hud{position:fixed;inset:0;pointer-events:none;z-index:5;}
+  .brand{
+    position:absolute;top:clamp(18px,4vh,40px);left:clamp(20px,4vw,48px);
+    opacity:0;animation:fadeUp 1.6s .5s cubic-bezier(.2,.7,.2,1) forwards;
+  }
+  .brand h1{
+    font-size:clamp(13px,1.5vw,17px);font-weight:400;letter-spacing:.42em;
+    color:rgba(214,248,255,.9);text-shadow:0 0 18px rgba(90,220,255,.45);
+  }
+  .brand p{
+    margin-top:9px;font-size:10px;letter-spacing:.34em;font-weight:300;
+    color:rgba(140,205,225,.5);
+  }
+  .stat{
+    position:absolute;top:clamp(20px,4.2vh,44px);right:clamp(78px,7vw,104px);
+    font-size:11px;letter-spacing:.2em;font-weight:300;color:rgba(150,210,230,.55);
+    opacity:0;animation:fadeUp 1.6s .9s cubic-bezier(.2,.7,.2,1) forwards;
+    text-align:right;
+  }
+  .stat em{font-style:normal;font-size:16px;letter-spacing:.06em;color:rgba(206,246,255,.88);margin-left:4px;}
+  #mute{
+    position:absolute;top:clamp(16px,3.6vh,38px);right:clamp(20px,3.4vw,44px);
+    pointer-events:auto;cursor:pointer;
+    background:transparent;border:1px solid rgba(120,200,225,.22);border-radius:999px;
+    color:rgba(170,225,242,.68);font-size:10px;letter-spacing:.22em;font-weight:300;
+    padding:7px 13px 7px 15px;font-family:inherit;
+    transition:border-color .3s,color .3s,background .3s;
+    opacity:0;animation:fadeUp 1.6s 1.1s cubic-bezier(.2,.7,.2,1) forwards;
+  }
+  #mute:hover{border-color:rgba(150,225,245,.45);color:rgba(210,250,255,.95);background:rgba(70,180,210,.08);}
+  #mute.off{color:rgba(120,150,165,.45);border-color:rgba(90,120,135,.18);}
+  .tip{
+    position:absolute;left:50%;bottom:clamp(26px,6vh,64px);transform:translateX(-50%);
+    font-size:11px;letter-spacing:.34em;font-weight:300;white-space:nowrap;
+    color:rgba(160,220,240,.5);
+    opacity:0;animation:tipIn 1.4s 1.8s ease forwards, tipBreath 4.2s 3.4s ease-in-out infinite;
+    transition:opacity .9s ease;
+  }
+  .tip.gone{opacity:0 !important;animation:none;}
+  .tip i{
+    display:inline-block;width:5px;height:5px;border-radius:50%;
+    background:rgba(150,240,255,.85);box-shadow:0 0 10px rgba(120,230,255,.9);
+    margin:0 12px 3px;vertical-align:middle;
+  }
+  @keyframes fadeUp{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  @keyframes tipIn{from{opacity:0}to{opacity:1}}
+  @keyframes tipBreath{0%,100%{opacity:.5}50%{opacity:.92}}
+  @media (max-width:520px){
+    .brand h1{letter-spacing:.3em}
+    .brand p{display:none}
+    .stat{right:74px}
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+
+<div class="hud">
+  <div class="brand">
+    <h1>深 海 鱼 群</h1>
+    <p>DEEP SEA · SCHOOL OF LIGHT</p>
+  </div>
+  <div class="stat">驱散<em id="count">0</em></div>
+  <button id="mute" type="button">声 · 开</button>
+  <div class="tip" id="tip"><i></i>轻触海面，驱散鱼群<i></i></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =========================================================================
+     深海鱼群巡游 —— 单文件 Canvas 2D 互动场景
+     -------------------------------------------------------------------------
+     结构：
+       0 工具 / 画布           1 背景缓存（水色 + 光柱 + 礁影）
+       2 海雪粒子              3 鱼群队形与游动（boid 变体：领航 + 弹簧跟随 + 分离）
+       4 命中判定（光束扫掠 + 端点吸附）
+       5 受击散开（爆散 → 阻尼漂移 → 归队）
+       6 特效层（闪光 / 冲击环 / 光丝 / 火花 / 气泡 / 波纹）
+       7 音频（WebAudio 合成：环境垫音 + 钟琴 + 冲击音）
+       8 输入与主循环
+     ========================================================================= */
+
+  const TAU = Math.PI * 2;
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const rndi = (a, b) => Math.floor(rnd(a, b + 1));
+  const damp = (dt, lambda) => 1 - Math.exp(-lambda * dt);   // 帧率无关的平滑系数
+  const shortestAng = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
+
+  /* ------------------------------------------------------------------ 0. 画布 */
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const V = { w: 0, h: 0, dpr: 1 };
+  const quality = { level: 1 };        // 1 = 满配；0.6 = 降级（掉帧时自动切换）
+
+  function resize() {
+    V.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    V.w = window.innerWidth;
+    V.h = window.innerHeight;
+    canvas.width = Math.round(V.w * V.dpr);
+    canvas.height = Math.round(V.h * V.dpr);
+    canvas.style.width = V.w + 'px';
+    canvas.style.height = V.h + 'px';
+    ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+    buildBackground();
+    buildSnow();
+    buildFormation();
+    resetSchool();
+  }
+
+  /* ------------------------------------------------------- 1. 背景（离屏缓存） */
+  let bgCanvas = null, vignetteCanvas = null, grainCanvas = null;
+
+  function buildBackground() {
+    const c = document.createElement('canvas');
+    c.width = Math.round(V.w * V.dpr);
+    c.height = Math.round(V.h * V.dpr);
+    const g = c.getContext('2d');
+    g.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+
+    // 水体：上浅下深的墨青，越深处越接近黑
+    const grd = g.createLinearGradient(0, 0, 0, V.h);
+    grd.addColorStop(0, '#082634');
+    grd.addColorStop(0.22, '#051b26');
+    grd.addColorStop(0.55, '#03121a');
+    grd.addColorStop(0.82, '#020b11');
+    grd.addColorStop(1, '#010609');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, V.w, V.h);
+
+    // 表层透下来的光团
+    const sg = g.createRadialGradient(V.w * 0.5, -V.h * 0.35, 0, V.w * 0.5, -V.h * 0.35, V.h * 1.15);
+    sg.addColorStop(0, 'rgba(130,240,255,0.30)');
+    sg.addColorStop(0.42, 'rgba(60,175,210,0.10)');
+    sg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = sg;
+    g.fillRect(0, 0, V.w, V.h);
+
+    // 远处水体的暗色纵深（两侧压暗，中间留出通道）
+    const vg = g.createLinearGradient(0, 0, V.w, 0);
+    vg.addColorStop(0, 'rgba(0,4,8,0.55)');
+    vg.addColorStop(0.18, 'rgba(0,4,8,0.10)');
+    vg.addColorStop(0.5, 'rgba(0,0,0,0)');
+    vg.addColorStop(0.82, 'rgba(0,4,8,0.10)');
+    vg.addColorStop(1, 'rgba(0,4,8,0.55)');
+    g.fillStyle = vg;
+    g.fillRect(0, 0, V.w, V.h);
+
+    buildRocks(g);      // 海床礁影
+    bgCanvas = c;
+
+    // 暗角（覆盖在鱼之上，制造"探照灯"式聚焦）
+    const v = document.createElement('canvas');
+    v.width = c.width; v.height = c.height;
+    const vc = v.getContext('2d');
+    vc.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+    const rv = vc.createRadialGradient(V.w * 0.5, V.h * 0.48, Math.min(V.w, V.h) * 0.18,
+                                       V.w * 0.5, V.h * 0.5, Math.max(V.w, V.h) * 0.78);
+    rv.addColorStop(0, 'rgba(0,3,6,0)');
+    rv.addColorStop(0.62, 'rgba(0,3,6,0.28)');
+    rv.addColorStop(1, 'rgba(0,2,5,0.88)');
+    vc.fillStyle = rv;
+    vc.fillRect(0, 0, V.w, V.h);
+    vignetteCanvas = v;
+
+    // 极淡的颗粒（深海悬浮物的呼吸感，一次性生成后平铺）
+    const n = document.createElement('canvas');
+    n.width = 180; n.height = 180;
+    const nc = n.getContext('2d');
+    const img = nc.createImageData(180, 180);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const val = Math.random() * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = 200;
+      img.data[i + 3] = val > 246 ? 46 : 0;
+    }
+    nc.putImageData(img, 0, 0);
+    grainCanvas = n;
+  }
+
+  function buildRocks(g) {
+    const layers = [
+      { base: V.h * 0.93, amp: V.h * 0.17, step: Math.max(70, V.w / 14), col: 'rgba(4,15,22,0.72)', rim: 'rgba(70,165,190,0.10)' },
+      { base: V.h * 1.02, amp: V.h * 0.24, step: Math.max(48, V.w / 22), col: 'rgba(2,8,12,0.9)', rim: 'rgba(50,130,155,0.07)' }
+    ];
+    for (const L of layers) {
+      const pts = [];
+      for (let x = -50; x <= V.w + 50; x += L.step) {
+        const wave = Math.abs(Math.sin(x * 0.0037 + L.step * 0.01));
+        pts.push([x, L.base - rnd(0.12, 1) * L.amp * (0.28 + 0.72 * wave)]);
+      }
+      g.beginPath();
+      g.moveTo(pts[0][0], V.h + 20);
+      g.lineTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        g.quadraticCurveTo((x0 + x1) / 2, (y0 + y1) / 2 - rnd(0, 16), x1, y1);
+      }
+      g.lineTo(V.w + 50, V.h + 20);
+      g.closePath();
+      g.fillStyle = L.col;
+      g.fill();
+      g.strokeStyle = L.rim;
+      g.lineWidth = 1.2;
+      g.stroke();
+    }
+  }
+
+  /* --------------------------------------------------------- 1b. 水面光柱 */
+  const shafts = [];
+  function buildShafts() {
+    shafts.length = 0;
+    const n = V.w < 700 ? 4 : 6;
+    for (let i = 0; i < n; i++) {
+      shafts.push({
+        x: (i + 0.5) / n * V.w + rnd(-V.w * 0.05, V.w * 0.05),
+        w: rnd(V.w * 0.035, V.w * 0.10),
+        a: rnd(-0.17, 0.10),
+        ph: rnd(0, TAU),
+        sp: rnd(0.11, 0.26),
+        al: rnd(0.045, 0.115)
+      });
+    }
+  }
+
+  function drawShafts(t) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of shafts) {
+      const sw = Math.sin(t * s.sp + s.ph);
+      const a = s.al * (0.55 + 0.45 * Math.sin(t * 0.33 + s.ph));
+      ctx.save();
+      ctx.translate(s.x + sw * 28, -30);
+      ctx.rotate(s.a + sw * 0.03);
+      const grd = ctx.createLinearGradient(0, 0, 0, V.h * 0.92);
+      grd.addColorStop(0, 'rgba(150,240,255,' + a.toFixed(3) + ')');
+      grd.addColorStop(0.4, 'rgba(110,210,240,' + (a * 0.42).toFixed(3) + ')');
+      grd.addColorStop(1, 'rgba(70,170,210,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.moveTo(-s.w * 0.3, 0);
+      ctx.lineTo(s.w * 0.3, 0);
+      ctx.lineTo(s.w * 1.25, V.h * 0.95);
+      ctx.lineTo(-s.w * 1.25, V.h * 0.95);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------------------- 2. 海雪 */
+  let snow = [];
+  function buildSnow() {
+    const n = Math.round(clamp(V.w * V.h / 11500, 50, 170));
+    snow = [];
+    for (let i = 0; i < n; i++) {
+      snow.push({
+        x: Math.random() * V.w,
+        y: Math.random() * V.h,
+        r: rnd(0.5, 2.1),
+        vy: rnd(3, 16),
+        sway: rnd(4, 18),
+        ph: rnd(0, TAU),
+        a: rnd(0.10, 0.52),
+        glow: Math.random() < 0.16,
+        pulse: rnd(0.5, 1.6)
+      });
+    }
+  }
+
+  function updateSnow(dt, t) {
+    for (const p of snow) {
+      p.y += p.vy * dt * (0.6 + p.r * 0.5);
+      p.x += Math.sin(t * 0.5 + p.ph) * p.sway * dt;
+      if (p.y > V.h + 6) { p.y = -6; p.x = Math.random() * V.w; }
+      if (p.x < -8) p.x = V.w + 8;
+      if (p.x > V.w + 8) p.x = -8;
+    }
+  }
+
+  function drawSnow(t) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of snow) {
+      if (p.glow) {
+        const a = p.a * (0.55 + 0.45 * Math.sin(t * p.pulse + p.ph));
+        drawGlow(SHINE, p.x, p.y, p.r * 9, a * 0.7);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r * 0.62, 0, TAU);
+        ctx.fillStyle = 'rgba(178,236,250,' + (p.a * 0.5).toFixed(3) + ')';
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------- 3. 鱼形与发光贴图（缓存） */
+  const SS = 3;                    // 贴图超采样倍数
+  const SPR_L = 24;                // 贴图基准鱼长（CSS px）
+  const FRAMES = 6;
+
+  const PALETTE = [
+    { core: '#e8ffff', mid: '#8ff3ff', edge: '#1e8fb8', weight: 0.44, glow: '110,240,255' },
+    { core: '#eafff8', mid: '#79f0d6', edge: '#12908c', weight: 0.28, glow: '100,255,224' },
+    { core: '#f6efff', mid: '#b6a6ff', edge: '#5b45bb', weight: 0.20, glow: '176,150,255' },
+    { core: '#fff8e6', mid: '#ffd48a', edge: '#b87a22', weight: 0.08, glow: '255,208,132' }
+  ];
+
+  const fishSprites = [];         // [ci][frame]
+  let SHINE = null;               // 通用白色辉光
+  const glowCache = {};           // 颜色 -> 辉光贴图
+
+  function makeCanvas(w, h) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(w * SS));
+    c.height = Math.max(1, Math.round(h * SS));
+    return c;
+  }
+
+  function fontOfSprite(c) {
+    const g = c.getContext('2d');
+    g.setTransform(SS, 0, 0, SS, 0, 0);
+    return g;
+  }
+
+  function buildShine() {
+    const R = 48;
+    const c = makeCanvas(R * 2, R * 2);
+    const g = fontOfSprite(c);
+    const grd = g.createRadialGradient(R, R, 0, R, R, R);
+    grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grd.addColorStop(0.18, 'rgba(200,250,255,0.55)');
+    grd.addColorStop(0.45, 'rgba(120,225,255,0.18)');
+    grd.addColorStop(1, 'rgba(90,200,255,0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(R, R, R, 0, TAU);
+    g.fill();
+    SHINE = { c: c, r: R };
+  }
+
+  function glowOf(rgb) {
+    if (glowCache[rgb]) return glowCache[rgb];
+    const R = 48;
+    const c = makeCanvas(R * 2, R * 2);
+    const g = fontOfSprite(c);
+    const grd = g.createRadialGradient(R, R, 0, R, R, R);
+    grd.addColorStop(0, 'rgba(' + rgb + ',0.85)');
+    grd.addColorStop(0.22, 'rgba(' + rgb + ',0.34)');
+    grd.addColorStop(0.55, 'rgba(' + rgb + ',0.09)');
+    grd.addColorStop(1, 'rgba(' + rgb + ',0)');
+    g.fillStyle = grd;
+    g.beginPath();
+    g.arc(R, R, R, 0, TAU);
+    g.fill();
+    const o = { c: c, r: R };
+    glowCache[rgb] = o;
+    return o;
+  }
+
+  // 单帧鱼形：朝 +x，尾鳍按相位摆动
+  function drawFishShape(g, L, phase, pal) {
+    const HH = L * 0.29;
+    const wag = Math.sin(phase * TAU);
+    const wag2 = Math.sin(phase * TAU - 1.1) * 0.55;
+
+    // 尾鳍（半透明扇形，尾尖最透）
+    const tg = g.createLinearGradient(-L * 0.30, 0, -L * 0.66, 0);
+    tg.addColorStop(0, pal.mid);
+    tg.addColorStop(1, 'rgba(120,235,255,0.10)');
+    g.beginPath();
+    g.moveTo(-L * 0.29, 0);
+    g.quadraticCurveTo(-L * 0.46, -HH * 1.05 + wag2 * HH, -L * 0.64, -HH * 1.72 + wag * HH * 1.1);
+    g.quadraticCurveTo(-L * 0.50, wag2 * HH * 0.8, -L * 0.64, HH * 1.72 + wag * HH * 1.1);
+    g.quadraticCurveTo(-L * 0.46, HH * 1.05 + wag2 * HH, -L * 0.29, 0);
+    g.closePath();
+    g.fillStyle = tg;
+    g.globalAlpha = 0.85;
+    g.fill();
+    g.globalAlpha = 1;
+
+    // 背鳍
+    g.beginPath();
+    g.moveTo(L * 0.08, -HH * 0.92);
+    g.quadraticCurveTo(-L * 0.02, -HH * 1.55, -L * 0.20, -HH * 0.62);
+    g.closePath();
+    g.fillStyle = 'rgba(150,240,255,0.32)';
+    g.fill();
+
+    // 身体
+    const bg = g.createLinearGradient(L * 0.52, 0, -L * 0.34, 0);
+    bg.addColorStop(0, pal.core);
+    bg.addColorStop(0.42, pal.mid);
+    bg.addColorStop(1, pal.edge);
+    g.beginPath();
+    g.moveTo(L * 0.54, 0);
+    g.bezierCurveTo(L * 0.32, -HH * 0.98, -L * 0.04, -HH * 1.14, -L * 0.31, -HH * 0.36);
+    g.quadraticCurveTo(-L * 0.36, 0, -L * 0.31, HH * 0.36);
+    g.bezierCurveTo(-L * 0.04, HH * 1.14, L * 0.32, HH * 0.98, L * 0.54, 0);
+    g.closePath();
+    g.fillStyle = bg;
+    g.fill();
+    g.strokeStyle = 'rgba(236,255,255,0.5)';
+    g.lineWidth = L * 0.028;
+    g.stroke();
+
+    // 胸鳍
+    g.beginPath();
+    g.moveTo(L * 0.16, HH * 0.10);
+    g.quadraticCurveTo(L * 0.02, HH * 1.05, -L * 0.10, HH * 0.55);
+    g.closePath();
+    g.fillStyle = 'rgba(200,255,255,0.26)';
+    g.fill();
+
+    // 发光器（腹部一排光点）
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = 'rgba(210,255,255,0.85)';
+    for (let i = 0; i < 4; i++) {
+      const u = 0.32 - i * 0.16;
+      g.beginPath();
+      g.arc(L * u, HH * (0.34 + Math.sin(i * 1.7) * 0.12), L * 0.035, 0, TAU);
+      g.fill();
+    }
+    // 眼部高光
+    g.beginPath();
+    g.arc(L * 0.31, -HH * 0.20, L * 0.055, 0, TAU);
+    g.fillStyle = 'rgba(255,255,255,0.96)';
+    g.fill();
+    g.restore();
+  }
+
+  function buildFishSprites() {
+    fishSprites.length = 0;
+    for (let ci = 0; ci < PALETTE.length; ci++) {
+      const row = [];
+      for (let f = 0; f < FRAMES; f++) {
+        const c = makeCanvas(SPR_L * 1.9, SPR_L * 1.1);
+        const g = fontOfSprite(c);
+        g.translate(SPR_L * 0.95, SPR_L * 0.55);
+        drawFishShape(g, SPR_L, f / FRAMES, PALETTE[ci]);
+        row.push(c);
+      }
+      fishSprites.push(row);
+    }
+  }
+
+  function drawGlow(sprite, x, y, r, alpha) {
+    if (alpha <= 0.002) return;
+    ctx.globalAlpha = alpha > 1 ? 1 : alpha;
+    const d = r * 2 * (sprite.r / 48);
+    ctx.drawImage(sprite.c, x - d / 2, y - d / 2, d, d);
+    ctx.globalAlpha = 1;
+  }
+
+  /* --------------------------------------------- 3b. 队形（紧凑的纺锤群形） */
+  let slots = [];
+  let fish = [];
+  let fishLen = 16;
+  let school = {
+    x: 0, y: 0, ang: 0, speed: 0, baseSpeed: 150,
+    boostT: 2.4, boost: 0, flee: 0, count: 0
+  };
+
+  function buildFormation() {
+    fishLen = clamp(Math.min(V.w, V.h) / 32, 9, 20);
+    const N = clamp(Math.round(V.w * V.h / 7000), 46, 112);
+
+    const stepX = fishLen * 0.90;
+    const stepY = fishLen * 0.80;
+    const maxLen = Math.min(V.w * 0.36, fishLen * 15);
+    const maxHalf = clamp(Math.min(V.w, V.h) * 0.17, 34, 92);
+
+    // 反复加行，直到槽位够用；再均匀抽稀，保持完整群形
+    let rows = 5, raw = [];
+    for (let guard = 0; guard < 30; guard++) {
+      raw = [];
+      for (let r = 0; r < rows; r++) {
+        const u = rows > 1 ? r / (rows - 1) : 0;
+        const half = maxHalf * Math.pow(Math.sin(Math.PI * (0.10 + 0.80 * u)), 0.62);
+        const n = Math.max(1, Math.round((half * 2) / stepY) + 1);
+        const x = -u * maxLen;
+        for (let i = 0; i < n; i++) {
+          const y = n === 1 ? 0 : -half + (i / (n - 1)) * half * 2;
+          raw.push({ x: x, y: y });
+        }
+      }
+      if (raw.length >= N || rows > 26) break;
+      rows++;
+    }
+    raw.sort((a, b) => b.x - a.x || a.y - b.y);
+
+    slots = [];
+    for (let i = 0; i < N; i++) {
+      const idx = N === 1 ? 0 : Math.round(i * (raw.length - 1) / (N - 1));
+      const s = raw[idx];
+      slots.push({
+        x: s.x + rnd(-fishLen * 0.18, fishLen * 0.18),
+        y: s.y + rnd(-fishLen * 0.18, fishLen * 0.18)
+      });
+    }
+
+    // 建立鱼群实体
+    fish = [];
+    for (let i = 0; i < N; i++) {
+      const ci = pickPalette();
+      fish.push({
+        i: i,
+        slot: slots[i],
+        x: 0, y: 0, vx: 0, vy: 0,
+        ang: 0, angV: 0,
+        phase: Math.random() * FRAMES,
+        scale: rnd(0.82, 1.12),
+        pal: ci,
+        state: 'swim',          // swim | burst | return
+        burstT: 0,
+        delay: 0,
+        flash: 0,
+        alpha: rnd(0.76, 1),
+        ph: rnd(0, TAU),
+        spd: 1
+      });
+    }
+    school.count = N;
+  }
+
+  function pickPalette() {
+    let r = Math.random();
+    for (let i = 0; i < PALETTE.length; i++) {
+      r -= PALETTE[i].weight;
+      if (r <= 0) return i;
+    }
+    return 0;
+  }
+
+  function resetSchool() {
+    school.x = V.w * 0.5;
+    school.y = V.h * 0.45;
+    school.ang = rnd(-0.5, 0.5) + (Math.random() < 0.5 ? Math.PI : 0);
+    school.baseSpeed = clamp(Math.min(V.w, V.h) * 0.24, 105, 215);
+    school.speed = school.baseSpeed;
+    for (const f of fish) {
+      // 初始时直接铺在队形槽位上，避免开场从中心炸开
+      const tx = school.x + Math.cos(school.ang) * f.slot.x - Math.sin(school.ang) * f.slot.y;
+      const ty = school.y + Math.sin(school.ang) * f.slot.x + Math.cos(school.ang) * f.slot.y;
+      f.x = tx; f.y = ty; f.vx = 0; f.vy = 0;
+      f.ang = school.ang;
+      f.state = 'swim'; f.flash = 0;
+    }
+  }
+
+  /* ----------------------------------------- 3c. 鱼群游动（领航 + 弹簧跟随） */
+  const TMP = { x: 0, y: 0 };
+
+  function slotWorld(f, out) {
+    const c = Math.cos(school.ang), s = Math.sin(school.ang);
+    out.x = school.x + f.slot.x * c - f.slot.y * s;
+    out.y = school.y + f.slot.x * s + f.slot.y * c;
+  }
+
+  function updateSchool(dt, t) {
+    // 1) 巡游方向：三层不同频率的正弦叠加 → 自然的绕行/穿插，不会出现规律圆圈
+    let steer = Math.sin(t * 0.37) * 0.62
+              + Math.sin(t * 0.71 + 1.3) * 0.36
+              + Math.sin(t * 1.13 + 4.2) * 0.17;
+
+    // 2) 边界回避：用"前方预测点"判断，提前转弯而不是撞墙后才掉头
+    const marginX = Math.min(V.w * 0.20, 260);
+    const marginY = Math.min(V.h * 0.20, 220);
+    const look = school.speed * 0.75 + 90;
+    const px = school.x + Math.cos(school.ang) * look;
+    const py = school.y + Math.sin(school.ang) * look;
+    let ax = 0, ay = 0;
+    if (px < marginX) ax += (marginX - px);
+    if (px > V.w - marginX) ax -= (px - (V.w - marginX));
+    if (py < marginY) ay += (marginY - py);
+    if (py > V.h - marginY) ay -= (py - (V.h - marginY));
+    if (ax !== 0 || ay !== 0) {
+      const ta = Math.atan2(ay, ax);
+      steer += shortestAng(school.ang, ta) * 2.2;
+    }
+
+    // 3) 冲刺：每隔一段时间来一次短促加速，形成"忽快忽慢"的活物感
+    school.boostT -= dt;
+    if (school.boostT <= 0) {
+      school.boostT = rnd(2.4, 5.4);
+      school.boost = 1;
+    }
+    school.boost = Math.max(0, school.boost - dt * 1.5);
+    school.flee = Math.max(0, school.flee - dt * 1.1);
+
+    const targetSpeed = school.baseSpeed * (1 + school.boost * 0.5 + school.flee * 0.9);
+    school.speed = lerp(school.speed, targetSpeed, damp(dt, 3.2));
+
+    // 4) 转向（受惊时转向略快）
+    const turnRate = steer * (0.95 + school.flee * 0.5);
+    school.ang += turnRate * dt;
+
+    school.x += Math.cos(school.ang) * school.speed * dt;
+    school.y += Math.sin(school.ang) * school.speed * dt;
+
+    // 兜底：头部永不离开可视区
+    const pad = fishLen * 2;
+    school.x = clamp(school.x, pad, V.w - pad);
+    school.y = clamp(school.y, pad, V.h - pad);
+  }
+
+  function updateFish(f, dt, t) {
+    const N = fish.length;
+
+    if (f.state === 'burst') {
+      f.burstT += dt;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+      const k = Math.exp(-2.05 * dt);           // 水的阻力：快速爆开，迅速钝化
+      f.vx *= k;
+      f.vy *= k;
+      f.vy -= 9 * dt;                            // 微弱上浮
+      // 软边界：允许冲出画面一点点，但会往回兜
+      const m = fishLen * 3;
+      if (f.x < -m) { f.x = -m; f.vx = Math.abs(f.vx) * 0.4; }
+      if (f.x > V.w + m) { f.x = V.w + m; f.vx = -Math.abs(f.vx) * 0.4; }
+      if (f.y < -m) { f.y = -m; f.vy = Math.abs(f.vy) * 0.4; }
+      if (f.y > V.h + m) { f.y = V.h + m; f.vy = -Math.abs(f.vy) * 0.4; }
+      if (f.burstT >= f.delay) {
+        f.state = 'return';
+        f.burstT = 0;
+      }
+    } else {
+      // swim / return 都回归队形，只是弹簧刚度不同（归队更"急"）
+      slotWorld(f, TMP);
+      const isReturn = f.state === 'return';
+      const k = isReturn ? 34 : 68;
+      const dv = isReturn ? 9.5 : 12.5;
+
+      f.vx += ((TMP.x - f.x) * k - f.vx * dv) * dt;
+      f.vy += ((TMP.y - f.y) * k - f.vy * dv) * dt;
+
+      // 每条鱼自己的微小摆动，让群体不是刚体
+      f.vx += Math.sin(t * 3.1 + f.ph) * 11 * dt;
+      f.vy += Math.cos(t * 2.4 + f.ph * 1.3) * 11 * dt;
+
+      // 分离力：只采样队形序号相邻的个体（空间上彼此邻近，开销 O(6N)）
+      const sep = fishLen * 0.86;
+      const sep2 = sep * sep;
+      for (let k2 = 0; k2 < 6; k2++) {
+        const off = KOFF[k2];
+        const j = (f.i + off + N) % N;
+        const o = fish[j];
+        if (o === f) continue;
+        const dx = f.x - o.x, dy = f.y - o.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > sep2 || d2 < 0.0001) continue;
+        const d = Math.sqrt(d2);
+        const push = (1 - d / sep) * 620;
+        f.vx += (dx / d) * push * dt;
+        f.vy += (dy / d) * push * dt;
+      }
+
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
+
+      if (isReturn) {
+        const dx = TMP.x - f.x, dy = TMP.y - f.y;
+        if (dx * dx + dy * dy < (fishLen * 0.55) * (fishLen * 0.55)) {
+          f.state = 'swim';
+        }
+      }
+    }
+
+    // 朝向：跟随速度方向做平滑（速度过低时保持上一朝向，避免抖动）
+    const sp = Math.hypot(f.vx, f.vy);
+    if (sp > 26) {
+      const want = Math.atan2(f.vy, f.vx);
+      f.ang += shortestAng(f.ang, want) * damp(dt, f.state === 'burst' ? 16 : 9);
+    }
+
+    // 尾摆：速度越快摆得越快
+    f.phase += (4.5 + sp * 0.055) * dt;
+    if (f.phase > FRAMES) f.phase -= FRAMES;
+
+    // 受击闪白衰减
+    if (f.flash > 0) f.flash = Math.max(0, f.flash - dt * 2.2);
+  }
+
+  const KOFF = [1, -1, 3, -3, 7, -7];
+
+  /* ------------------------------------------------------- 3d. 鱼群渲染 */
+  function drawSchool(dt, t) {
+    // 群体辉光：一团随呼吸明暗的冷光云，把鱼群"托"出来
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const breath = 0.55 + 0.45 * Math.sin(t * 0.9);
+    drawGlow(glowOf('96,220,255'), school.x, school.y, Math.min(V.w, V.h) * 0.34, 0.10 + breath * 0.05);
+    ctx.restore();
+
+    // 第一遍：辉光（叠加）
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const f of fish) {
+      const sp = Math.hypot(f.vx, f.vy);
+      const a = f.alpha * (0.30 + Math.min(sp / 260, 0.5)) * (1 + (f.state === 'burst' ? 1.5 : 0));
+      const r = fishLen * f.scale * (3.0 + (f.state === 'burst' ? 1.1 : 0));
+      drawGlow(glowOf(PALETTE[f.pal].glow), f.x, f.y, r, a * 0.9);
+      if (f.flash > 0.01) drawGlow(SHINE, f.x, f.y, r * 0.8, f.flash * 0.55);
+    }
+    ctx.restore();
+
+    // 第二遍：鱼体（正常混合，保证有实体感与遮挡关系）
+    ctx.save();
+    const sprW = fishLen * 1.9, sprH = fishLen * 1.1;
+    for (const f of fish) {
+      const fr = Math.floor(f.phase) % FRAMES;
+      const spr = fishSprites[f.pal][fr];
+      const w = sprW * f.scale, h = sprH * f.scale;
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.rotate(f.ang);
+      ctx.globalAlpha = f.alpha;
+      ctx.drawImage(spr, -w / 2, -h / 2, w, h);
+      ctx.restore();
+
+      // 爆散时拖一条光尾，强化"炸开"的速度感
+      if (f.state === 'burst') {
+        const sp = Math.hypot(f.vx, f.vy);
+        if (sp > 90) {
+          const dx = f.vx / sp, dy = f.vy / sp;
+          const len = Math.min(sp * 0.075, fishLen * 2.6);
+          const g = ctx.createLinearGradient(f.x, f.y, f.x - dx * len, f.y - dy * len);
+          g.addColorStop(0, 'rgba(' + PALETTE[f.pal].glow + ',0.55)');
+          g.addColorStop(1, 'rgba(' + PALETTE[f.pal].glow + ',0)');
+          ctx.strokeStyle = g;
+          ctx.lineWidth = fishLen * 0.30;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(f.x, f.y);
+          ctx.lineTo(f.x - dx * len, f.y - dy * len);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------------- 4. 光束与命中判定 */
+  const beams = [];
+  let lastShot = -9;
+
+  function shoot(tx, ty) {
+    const now = performance.now() / 1000;
+    if (now - lastShot < 0.10) return;
+    lastShot = now;
+
+    // 从画面下方中央射出：玩家是"潜水器的探照灯"
+    const ox = V.w * 0.5, oy = V.h + 18;
+    const speed = Math.max(V.w, V.h) * 2.4;
+
+    // 预瞄：落点附近有鱼时，瞄向"它飞行这段时间之后会在的位置"，避免快速巡游时总是打提前量
+    let aimX = tx, aimY = ty;
+    const near = nearestFish(tx, ty, 130);
+    if (near) {
+      const travel = Math.hypot(tx - ox, ty - oy) / speed;
+      aimX = clamp(near.x + near.vx * travel * 0.85, 0, V.w);
+      aimY = clamp(near.y + near.vy * travel * 0.85, 0, V.h);
+    }
+
+    const ang = Math.atan2(aimY - oy, aimX - ox);
+    beams.push({
+      x: ox, y: oy,
+      vx: Math.cos(ang) * speed,
+      vy: Math.sin(ang) * speed,
+      tx: aimX, ty: aimY,
+      total: Math.hypot(aimX - ox, aimY - oy),
+      travel: 0,
+      life: 0
+    });
+    Audio.launch(ox, oy);
+    hideTip();
+  }
+
+  function fishAtPoint(px, py, expand) {
+    const ex = expand || 0;
+    let best = null, bestD = 1e9;
+    for (const f of fish) {
+      const dx = f.x - px, dy = f.y - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > 6400) continue;                        // 80px 外直接跳过
+      const c = Math.cos(f.ang), s = Math.sin(f.ang);
+      const lx = dx * c + dy * s;                      // 转到鱼的局部朝向
+      const ly = -dx * s + dy * c;
+      const rx = fishLen * f.scale * 0.62 + ex;
+      const ry = fishLen * f.scale * 0.30 + ex;
+      if ((lx * lx) / (rx * rx) + (ly * ly) / (ry * ry) <= 1) {
+        if (d2 < bestD) { bestD = d2; best = f; }
+      }
+    }
+    return best;
+  }
+
+  function nearestFish(px, py, maxR) {
+    let best = null, bestD = maxR * maxR;
+    for (const f of fish) {
+      const dx = f.x - px, dy = f.y - py;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestD) { bestD = d2; best = f; }
+    }
+    return best;
+  }
+
+  function updateBeams(dt) {
+    for (let i = beams.length - 1; i >= 0; i--) {
+      const b = beams[i];
+      b.life += dt;
+      const sp = Math.hypot(b.vx, b.vy);
+      const stepLen = sp * dt;
+      const steps = clamp(Math.ceil(stepLen / (fishLen * 0.55)), 1, 8);
+
+      let hit = null;
+      for (let s = 0; s < steps; s++) {
+        b.x += b.vx * dt / steps;
+        b.y += b.vy * dt / steps;
+        b.travel += stepLen / steps;
+        hit = fishAtPoint(b.x, b.y, fishLen * 0.18);
+        if (hit) break;
+      }
+
+      if (hit) {
+        impact(hit.x, hit.y, 1, hit);
+        beams.splice(i, 1);
+        continue;
+      }
+
+      // 走完全程仍未命中：做一次"端点吸附"（落点 52px 内最近的一条鱼算命中）
+      if (b.travel >= b.total) {
+        const f2 = nearestFish(b.tx, b.ty, 58);
+        if (f2) {
+          impact(f2.x, f2.y, 0.92, f2);
+        } else {
+          fizzle(b.tx, b.ty);
+        }
+        beams.splice(i, 1);
+        continue;
+      }
+      if (b.life > 3) beams.splice(i, 1);
+    }
+  }
+
+  function drawBeams() {
+    if (!beams.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of beams) {
+      const sp = Math.hypot(b.vx, b.vy) || 1;
+      const dx = b.vx / sp, dy = b.vy / sp;
+      const tail = Math.min(46, b.travel);
+      const tx = b.x - dx * tail, ty = b.y - dy * tail;
+      const g = ctx.createLinearGradient(tx, ty, b.x, b.y);
+      g.addColorStop(0, 'rgba(110,215,255,0)');
+      g.addColorStop(0.55, 'rgba(165,240,255,0.5)');
+      g.addColorStop(1, 'rgba(240,255,255,0.95)');
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      drawGlow(glowOf('120,235,255'), b.x, b.y, 26, 0.6);
+      drawGlow(SHINE, b.x, b.y, 7, 1);
+    }
+    ctx.restore();
+  }
+
+  /* ------------------------------------------------------- 5. 受击：鱼群散开 */
+  const burstRadius = () => clamp(Math.min(V.w, V.h) * 0.20, 96, 190);
+
+  function impact(x, y, power, hitFish) {
+    const R = burstRadius();
+
+    // --- 视觉特效 ---
+    addFlash(x, y, R * 0.55);
+    addRings(x, y, R);
+    addSparks(x, y, power, R);
+    addBubbles(x, y, R);
+    addRays(x, y, R);
+    shake(1);
+
+    // --- 鱼群反应 ---
+    let n = 0;
+    for (const f of fish) {
+      const dx = f.x - x, dy = f.y - y;
+      const d = Math.hypot(dx, dy);
+      if (d > R * 1.35) continue;
+      const fall = Math.pow(clamp(1 - d / R, 0, 1), 0.72);   // 越靠近爆点，飞得越远
+      if (fall <= 0.02 && f !== hitFish) continue;
+
+      // 被直接命中的鱼给满力
+      const pw = f === hitFish ? 1 : fall;
+      const a = Math.atan2(dy, dx) + rnd(-0.30, 0.30) + (d < 1 ? rnd(0, TAU) : 0);
+      const sp = (120 + 560 * pw) * power;
+
+      f.state = 'burst';
+      f.burstT = 0;
+      f.delay = 0.34 + (1 - pw) * 1.15 + rnd(0, 0.4);   // 边缘的鱼更早归队
+      f.vx = Math.cos(a) * sp + f.vx * 0.32;
+      f.vy = Math.sin(a) * sp + f.vy * 0.32;
+      f.flash = 1;
+      f.angV = rnd(-4, 4);
+      n++;
+    }
+
+    // 整群受惊：短暂加速 + 轻微偏移，随后重新聚拢
+    school.flee = Math.min(1, school.flee + 0.7 * power);
+    const dh = Math.hypot(school.x - x, school.y - y);
+    if (dh < R * 0.9) {
+      const away = Math.atan2(school.y - y, school.x - x);
+      school.ang += shortestAng(school.ang, away) * 0.16;
+    }
+
+    // --- 音效 ---
+    Audio.burst(x, power, n);
+
+    state.count++;
+    countEl.textContent = state.count;
+    hideTip();
+  }
+
+  /* --------------------------------------------------------- 6. 特效层实现 */
+  const fx = { rings: [], sparks: [], bubbles: [], rays: [], flashes: [] };
+  let shakeAmt = 0;
+
+  function shake(v) { shakeAmt = Math.min(6, shakeAmt + v * 3.2); }
+
+  function addFlash(x, y, r) {
+    fx.flashes.push({ x: x, y: y, r: r, life: 0, dur: 0.42 });
+  }
+
+  function addRings(x, y, R) {
+    fx.rings.push({ x: x, y: y, r0: R * 0.10, r1: R * 1.55, w: 3.4, life: 0, dur: 0.62, squash: 0.72, col: '170,250,255', delay: 0 });
+    fx.rings.push({ x: x, y: y, r0: R * 0.18, r1: R * 2.35, w: 2.0, life: 0, dur: 0.95, squash: 0.72, col: '120,215,255', delay: 0.06 });
+    fx.rings.push({ x: x, y: y, r0: R * 0.30, r1: R * 1.05, w: 4.6, life: 0, dur: 0.36, squash: 0.72, col: '235,255,255', delay: 0.0 });
+  }
+
+  function addSparks(x, y, power, R) {
+    const n = Math.round(clamp(R * 0.34, 22, 54) * quality.level);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU;
+      const sp = rnd(60, 420) * power;
+      const col = Math.random() < 0.55 ? '150,245,255' : (Math.random() < 0.5 ? '225,255,255' : '185,160,255');
+      fx.sparks.push({
+        x: x, y: y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: 0, dur: rnd(0.45, 1.25),
+        r: rnd(1.0, 3.0),
+        col: col
+      });
+    }
+  }
+
+  function addBubbles(x, y, R) {
+    const n = Math.round(clamp(R * 0.10, 6, 16) * quality.level);
+    for (let i = 0; i < n; i++) {
+      const a = rnd(-Math.PI, 0);
+      fx.bubbles.push({
+        x: x + rnd(-R * 0.16, R * 0.16),
+        y: y + rnd(-R * 0.12, R * 0.12),
+        vx: Math.cos(a) * rnd(10, 70),
+        vy: Math.sin(a) * rnd(30, 120),
+        r: rnd(1.4, 4.4),
+        life: 0, dur: rnd(1.0, 2.2),
+        ph: rnd(0, TAU)
+      });
+    }
+  }
+
+  function addRays(x, y, R) {
+    const n = 12;
+    const off = Math.random() * TAU;
+    for (let i = 0; i < n; i++) {
+      fx.rays.push({
+        x: x, y: y,
+        a: off + (i / n) * TAU + rnd(-0.12, 0.12),
+        len: R * rnd(0.7, 1.5),
+        life: 0, dur: rnd(0.28, 0.5)
+      });
+    }
+  }
+
+  function fizzle(x, y) {
+    fx.rings.push({ x: x, y: y, r0: 2, r1: 46, w: 1.4, life: 0, dur: 0.7, squash: 0.72, col: '120,200,225', delay: 0 });
+    for (let i = 0; i < 6; i++) {
+      fx.sparks.push({
+        x: x, y: y,
+        vx: rnd(-50, 50), vy: rnd(-50, 50),
+        life: 0, dur: rnd(0.3, 0.6), r: rnd(0.8, 1.8), col: '120,200,230'
+      });
+    }
+    Audio.miss(x);
+  }
+
+  function updateFx(dt, t) {
+    for (let i = fx.sparks.length - 1; i >= 0; i--) {
+      const p = fx.sparks[i];
+      p.life += dt;
+      if (p.life >= p.dur) { fx.sparks.splice(i, 1); continue; }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      const k = Math.exp(-1.55 * dt);
+      p.vx *= k; p.vy *= k;
+      p.vy -= 16 * dt;
+    }
+    for (let i = fx.bubbles.length - 1; i >= 0; i--) {
+      const b = fx.bubbles[i];
+      b.life += dt;
+      if (b.life >= b.dur) { fx.bubbles.splice(i, 1); continue; }
+      b.x += (b.vx + Math.sin(t * 3 + b.ph) * 10) * dt;
+      b.y += b.vy * dt;
+      b.vx *= Math.exp(-1.2 * dt);
+      b.vy = lerp(b.vy, -26, damp(dt, 1.6));
+    }
+    for (let i = fx.rays.length - 1; i >= 0; i--) {
+      const r = fx.rays[i];
+      r.life += dt;
+      if (r.life >= r.dur) fx.rays.splice(i, 1);
+    }
+    for (let i = fx.rings.length - 1; i >= 0; i--) {
+      const r = fx.rings[i];
+      r.life += dt;
+      if (r.life >= r.dur + r.delay) fx.rings.splice(i, 1);
+    }
+    for (let i = fx.flashes.length - 1; i >= 0; i--) {
+      const f = fx.flashes[i];
+      f.life += dt;
+      if (f.life >= f.dur) fx.flashes.splice(i, 1);
+    }
+    shakeAmt *= Math.exp(-6.5 * dt);
+  }
+
+  function drawFx(t) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 爆点闪光
+    for (const f of fx.flashes) {
+      const p = f.life / f.dur;
+      const a = Math.pow(1 - p, 2.2);
+      const r = f.r * (0.55 + p * 1.1);
+      drawGlow(SHINE, f.x, f.y, r, a * 0.9);
+    }
+
+    // 冲击环（压扁成椭圆，模拟俯视纵深）
+    for (const r of fx.rings) {
+      const lt = r.life - r.delay;
+      if (lt < 0) continue;
+      const p = clamp(lt / r.dur, 0, 1);
+      const rad = lerp(r.r0, r.r1, 1 - Math.pow(1 - p, 2.1));
+      const a = Math.pow(1 - p, 1.6);
+      ctx.strokeStyle = 'rgba(' + r.col + ',' + (a * 0.8).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.4, r.w * (1 - p * 0.9));
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, rad, rad * r.squash, 0, 0, TAU);
+      ctx.stroke();
+      // 环顶高光，让环有体积
+      ctx.strokeStyle = 'rgba(255,255,255,' + (a * 0.35).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.3, r.w * 0.5 * (1 - p));
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, rad, rad * r.squash, 0, Math.PI * 1.12, Math.PI * 1.88);
+      ctx.stroke();
+    }
+
+    // 放射光丝
+    for (const r of fx.rays) {
+      const p = r.life / r.dur;
+      const a = Math.pow(1 - p, 2);
+      const inner = r.len * (0.10 + p * 0.55);
+      const outer = r.len * (0.22 + p);
+      ctx.strokeStyle = 'rgba(210,250,255,' + (a * 0.45).toFixed(3) + ')';
+      ctx.lineWidth = Math.max(0.5, 2.0 * (1 - p));
+      ctx.beginPath();
+      ctx.moveTo(r.x + Math.cos(r.a) * inner, r.y + Math.sin(r.a) * inner);
+      ctx.lineTo(r.x + Math.cos(r.a) * outer, r.y + Math.sin(r.a) * outer);
+      ctx.stroke();
+    }
+
+    // 火花
+    for (const p of fx.sparks) {
+      const k = p.life / p.dur;
+      const a = Math.pow(1 - k, 1.8);
+      drawGlow(glowOf(p.col), p.x, p.y, p.r * 7, a * 0.55);
+      ctx.fillStyle = 'rgba(240,255,255,' + (a * 0.85).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 0.55, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // 气泡（正常混合 + 描边）
+    for (const b of fx.bubbles) {
+      const k = b.life / b.dur;
+      const a = (1 - Math.pow(k, 3)) * 0.55;
+      ctx.strokeStyle = 'rgba(200,245,255,' + a.toFixed(3) + ')';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, TAU);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(220,255,255,' + (a * 0.25).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.3, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /* ------------------------------------------------------------ 7. 音频 */
+  const Audio = {
+    ctx: null, master: null, revIn: null, noiseBuf: null,
+    on: true, ready: false, nextNote: 0, timer: null,
+
+    init() {
+      if (this.ctx) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      const c = new AC();
+      this.ctx = c;
+
+      const master = c.createGain();
+      master.gain.value = 0;
+      const comp = c.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.knee.value = 22;
+      comp.ratio.value = 3;
+      comp.attack.value = 0.008;
+      comp.release.value = 0.3;
+      master.connect(comp);
+      comp.connect(c.destination);
+      this.master = master;
+
+      // 混响：一段指数衰减噪声当作脉冲响应，模拟海水的长尾
+      const rev = c.createConvolver();
+      rev.buffer = this.makeIR(3.0, 2.7);
+      const revOut = c.createGain();
+      revOut.gain.value = 0.62;
+      const revIn = c.createGain();
+      revIn.gain.value = 1;
+      revIn.connect(rev);
+      rev.connect(revOut);
+      revOut.connect(master);
+      this.revIn = revIn;
+
+      // 噪声源（水流 + 冲击共用）
+      const len = Math.floor(c.sampleRate * 2);
+      const buf = c.createBuffer(1, len, c.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.noiseBuf = buf;
+
+      this.buildDrone();
+      this.buildCurrent();
+      this.nextNote = c.currentTime + 1.2;
+      this.timer = setInterval(() => this.schedule(), 420);
+      this.ready = true;
+
+      master.gain.setTargetAtTime(this.on ? 0.82 : 0, c.currentTime, 1.4);
+    },
+
+    resume() {
+      if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+    },
+
+    makeIR(dur, decay) {
+      const c = this.ctx;
+      const len = Math.floor(c.sampleRate * dur);
+      const buf = c.createBuffer(2, len, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        for (let i = 0; i < len; i++) {
+          const t = i / len;
+          d[i] = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+        }
+      }
+      return buf;
+    },
+
+    // 环境垫音：A1 低频 + 五度 + 八度，经慢速低通扫频
+    buildDrone() {
+      const c = this.ctx;
+      const g = c.createGain();
+      g.gain.value = 0.15;
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 340;
+      lp.Q.value = 0.9;
+      lp.connect(g);
+      g.connect(this.master);
+      const send = c.createGain();
+      send.gain.value = 0.30;
+      g.connect(send);
+      send.connect(this.revIn);
+
+      const freqs = [55, 82.41, 110, 164.81];
+      for (let i = 0; i < freqs.length; i++) {
+        const o = c.createOscillator();
+        o.type = i % 2 === 0 ? 'triangle' : 'sine';
+        o.frequency.value = freqs[i] * (i === 3 ? 1.0016 : 1);
+        const og = c.createGain();
+        og.gain.value = i === 0 ? 0.5 : (i === 3 ? 0.10 : 0.26);
+        o.connect(og);
+        og.connect(lp);
+        o.start();
+      }
+      const lfo = c.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = 0.042;
+      const lg = c.createGain();
+      lg.gain.value = 150;
+      lfo.connect(lg);
+      lg.connect(lp.frequency);
+      lfo.start();
+
+      const lfo2 = c.createOscillator();
+      lfo2.type = 'sine';
+      lfo2.frequency.value = 0.068;
+      const lg2 = c.createGain();
+      lg2.gain.value = 0.045;
+      lfo2.connect(lg2);
+      lg2.connect(g.gain);
+      lfo2.start();
+      this.droneGain = g;
+    },
+
+    // 水流底噪
+    buildCurrent() {
+      const c = this.ctx;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 520;
+      bp.Q.value = 0.75;
+      const g = c.createGain();
+      g.gain.value = 0.045;
+      src.connect(bp);
+      bp.connect(g);
+      g.connect(this.master);
+      src.start();
+      const lfo = c.createOscillator();
+      lfo.frequency.value = 0.031;
+      const lg = c.createGain();
+      lg.gain.value = 240;
+      lfo.connect(lg);
+      lg.connect(bp.frequency);
+      lfo.start();
+    },
+
+    // 钟琴循环：五声音阶随机取音，间隔 0.9–2.2s，永不重复也永不停止
+    schedule() {
+      const c = this.ctx;
+      if (!c) return;
+      const now = c.currentTime;
+      while (this.nextNote < now + 1.4) {
+        const at = this.nextNote;
+        if (Math.random() < 0.86) this.bell(at);
+        if (Math.random() < 0.10) this.whale(at);
+        this.nextNote += rnd(0.9, 2.2);
+      }
+    },
+
+    bell(at) {
+      const c = this.ctx;
+      const scale = [0, 3, 5, 7, 10, 12, 15, 19];
+      const semi = scale[rndi(0, scale.length - 1)];
+      const f = 220 * Math.pow(2, semi / 12);
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const o2 = c.createOscillator();
+      o2.type = 'sine';
+      o2.frequency.value = f * 2.005;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(0.05, at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 2.8);
+      const g2 = c.createGain();
+      g2.gain.value = 0.22;
+      o.connect(g);
+      o2.connect(g2);
+      g2.connect(g);
+      g.connect(this.master);
+      const s = c.createGain();
+      s.gain.value = 0.7;
+      g.connect(s);
+      s.connect(this.revIn);
+      o.start(at); o.stop(at + 3.0);
+      o2.start(at); o2.stop(at + 3.0);
+    },
+
+    whale(at) {
+      const c = this.ctx;
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(72, at);
+      o.frequency.exponentialRampToValueAtTime(108, at + 3.4);
+      o.frequency.exponentialRampToValueAtTime(66, at + 7.5);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.linearRampToValueAtTime(0.055, at + 2.0);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 7.8);
+      o.connect(g);
+      g.connect(this.master);
+      const s = c.createGain();
+      s.gain.value = 1.0;
+      g.connect(s);
+      s.connect(this.revIn);
+      o.start(at); o.stop(at + 8);
+    },
+
+    panFor(x) {
+      const c = this.ctx;
+      if (!c.createStereoPanner) return null;
+      const p = c.createStereoPanner();
+      p.pan.value = clamp((x / V.w - 0.5) * 1.5, -1, 1);
+      p.connect(this.master);
+      return p;
+    },
+
+    launch(x) {
+      if (!this.ctx || !this.on) return;
+      const c = this.ctx, t = c.currentTime;
+      const out = this.panFor(x) || this.master;
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(1500, t);
+      o.frequency.exponentialRampToValueAtTime(760, t + 0.09);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+      o.connect(g); g.connect(out);
+      o.start(t); o.stop(t + 0.16);
+    },
+
+    // 命中三件套：水流爆开 + 低频冲击 + 气泡上浮
+    burst(x, power, n) {
+      if (!this.ctx || !this.on) return;
+      const c = this.ctx, t = c.currentTime;
+      const out = this.panFor(x) || this.master;
+
+      // 1) 带通噪声：1800Hz 扫到 180Hz，像一团水被炸开
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.playbackRate.value = rnd(0.9, 1.15);
+      const bp = c.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.Q.value = 1.0;
+      bp.frequency.setValueAtTime(1900, t);
+      bp.frequency.exponentialRampToValueAtTime(170, t + 0.42);
+      const ng = c.createGain();
+      ng.gain.setValueAtTime(0.0001, t);
+      ng.gain.linearRampToValueAtTime(0.30 * power, t + 0.015);
+      ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.52);
+      src.connect(bp);
+      bp.connect(ng);
+      ng.connect(out);
+      src.start(t);
+      src.stop(t + 0.56);
+
+      // 2) 低频冲击：给"打击感"一个身体层面的落点
+      const th = c.createOscillator();
+      th.type = 'sine';
+      th.frequency.setValueAtTime(150, t);
+      th.frequency.exponentialRampToValueAtTime(52, t + 0.3);
+      const tg = c.createGain();
+      tg.gain.setValueAtTime(0.0001, t);
+      tg.gain.linearRampToValueAtTime(0.26 * power, t + 0.012);
+      tg.gain.exponentialRampToValueAtTime(0.0001, t + 0.34);
+      th.connect(tg);
+      tg.connect(out);
+      th.start(t);
+      th.stop(t + 0.36);
+
+      // 3) 高音"叮"，带混响
+      const ping = c.createOscillator();
+      ping.type = 'sine';
+      ping.frequency.setValueAtTime(rnd(980, 1180), t);
+      ping.frequency.exponentialRampToValueAtTime(520, t + 0.22);
+      const pg = c.createGain();
+      pg.gain.setValueAtTime(0.0001, t);
+      pg.gain.linearRampToValueAtTime(0.12 * power, t + 0.01);
+      pg.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      ping.connect(pg);
+      pg.connect(out);
+      const ps = c.createGain();
+      ps.gain.value = 0.9;
+      pg.connect(ps);
+      ps.connect(this.revIn);
+      ping.start(t);
+      ping.stop(t + 0.62);
+
+      // 4) 气泡：几个短促的上滑音，颗数与受影响的鱼数挂钩
+      const m = clamp(Math.round(n * 0.35), 3, 9);
+      for (let i = 0; i < m; i++) {
+        const at = t + rnd(0.02, 0.34);
+        const o = c.createOscillator();
+        o.type = 'sine';
+        const f0 = rnd(360, 780);
+        o.frequency.setValueAtTime(f0, at);
+        o.frequency.exponentialRampToValueAtTime(f0 * 2.1, at + 0.1);
+        const gg = c.createGain();
+        gg.gain.setValueAtTime(0.0001, at);
+        gg.gain.linearRampToValueAtTime(0.03, at + 0.008);
+        gg.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+        o.connect(gg);
+        gg.connect(out);
+        o.start(at);
+        o.stop(at + 0.16);
+      }
+    },
+
+    miss(x) {
+      if (!this.ctx || !this.on) return;
+      const c = this.ctx, t = c.currentTime;
+      const out = this.panFor(x) || this.master;
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(300, t);
+      o.frequency.exponentialRampToValueAtTime(160, t + 0.16);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+      o.connect(g); g.connect(out);
+      o.start(t); o.stop(t + 0.24);
+    },
+
+    setOn(v) {
+      this.on = v;
+      if (!this.ctx) return;
+      this.master.gain.setTargetAtTime(v ? 0.82 : 0, this.ctx.currentTime, 0.25);
+    }
+  };
+
+  /* ------------------------------------------------------- 8. 输入 / 主循环 */
+  const state = { t: 0, count: 0 };
+  const pointer = { x: -999, y: -999, inside: false, isTouch: false, hideAt: 0 };
+  const countEl = document.getElementById('count');
+  const tipEl = document.getElementById('tip');
+  const muteEl = document.getElementById('mute');
+  let tipGone = false;
+
+  function hideTip() {
+    if (tipGone) return;
+    tipGone = true;
+    tipEl.classList.add('gone');
+  }
+
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    Audio.init();
+    Audio.resume();
+    const p = pos(e);
+    pointer.isTouch = e.pointerType !== 'mouse';
+    pointer.x = p.x;
+    pointer.y = p.y;
+    pointer.inside = !pointer.isTouch;
+    shoot(p.x, p.y);
+  }, { passive: false });
+
+  canvas.addEventListener('pointermove', function (e) {
+    const p = pos(e);
+    pointer.x = p.x;
+    pointer.y = p.y;
+    pointer.inside = true;
+    pointer.isTouch = e.pointerType !== 'mouse';
+  });
+
+  canvas.addEventListener('pointerleave', function () {
+    pointer.inside = false;
+  });
+
+  canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  muteEl.addEventListener('click', function () {
+    Audio.init();
+    Audio.resume();
+    Audio.setOn(!Audio.on);
+    muteEl.textContent = Audio.on ? '声 · 开' : '声 · 关';
+    muteEl.classList.toggle('off', !Audio.on);
+  });
+
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'm' || e.key === 'M') {
+      Audio.init();
+      Audio.setOn(!Audio.on);
+      muteEl.textContent = Audio.on ? '声 · 开' : '声 · 关';
+      muteEl.classList.toggle('off', !Audio.on);
+    }
+  });
+
+  function drawReticle(t) {
+    if (!pointer.inside || pointer.x < -100) return;
+    const near = nearestFish(pointer.x, pointer.y, 70);
+    const base = near ? 0.62 : 0.26;
+    const pulse = 0.82 + 0.18 * Math.sin(t * 3.4);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(pointer.x, pointer.y);
+    ctx.strokeStyle = 'rgba(175,245,255,' + (base * pulse).toFixed(3) + ')';
+    ctx.lineWidth = 1;
+    const rad = near ? 11 : 14;
+    ctx.beginPath();
+    ctx.arc(0, 0, rad, -0.62, 1.06);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, rad, Math.PI - 0.62, Math.PI + 1.06);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 1.9, 0, TAU);
+    ctx.fillStyle = 'rgba(225,255,255,' + (base * 1.3).toFixed(3) + ')';
+    ctx.fill();
+    if (near) {
+      ctx.strokeStyle = 'rgba(150,235,255,0.16)';
+      ctx.beginPath();
+      ctx.arc(0, 0, rad + 6, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawGrain(t) {
+    if (!grainCanvas) return;
+    ctx.save();
+    ctx.globalAlpha = 0.32;
+    ctx.globalCompositeOperation = 'lighter';
+    const ox = (t * 7) % 180, oy = (t * 11) % 180;
+    for (let x = -180; x < V.w + 180; x += 180) {
+      for (let y = -180; y < V.h + 180; y += 180) {
+        ctx.drawImage(grainCanvas, x + ox, y + oy);
+      }
+    }
+    ctx.restore();
+  }
+
+  /* ---- 主循环 ---- */
+  let last = 0, raf = 0;
+  const fpsState = { acc: 0, n: 0, checked: 0 };
+
+  function frame(now) {
+    raf = requestAnimationFrame(frame);
+    if (!last) last = now;
+    let dt = (now - last) / 1000;
+    last = now;
+    dt = clamp(dt, 0.001, 0.05);
+    state.t += dt;
+    const t = state.t;
+
+    // 掉帧时自动降级（只降一次，避免来回抖动）
+    fpsState.acc += dt; fpsState.n++;
+    if (fpsState.acc > 2.4) {
+      const fps = fpsState.n / fpsState.acc;
+      if (fps < 42 && quality.level > 0.62 && state.t > 3) {
+        quality.level = 0.62;
+        buildSnow();
+      }
+      fpsState.acc = 0; fpsState.n = 0;
+    }
+
+    updateSchool(dt, t);
+    for (const f of fish) updateFish(f, dt, t);
+    updateBeams(dt);
+    updateFx(dt, t);
+    updateSnow(dt, t);
+
+    ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+
+    // 轻微镜头震动（受击反馈）
+    let sx = 0, sy = 0;
+    if (shakeAmt > 0.05) {
+      sx = rnd(-shakeAmt, shakeAmt);
+      sy = rnd(-shakeAmt, shakeAmt);
+      ctx.translate(sx, sy);
+    }
+
+    if (bgCanvas) ctx.drawImage(bgCanvas, 0, 0, V.w, V.h);
+    drawShafts(t);
+    drawSnow(t);
+    drawSchool(dt, t);
+    drawFx(t);
+    drawBeams();
+    drawReticle(t);
+
+    ctx.setTransform(V.dpr, 0, 0, V.dpr, 0, 0);
+    if (vignetteCanvas) ctx.drawImage(vignetteCanvas, 0, 0, V.w, V.h);
+    drawGrain(t);
+  }
+
+  /* ---- 启动 ---- */
+  function boot() {
+    resize();
+    buildShafts();
+    buildShine();
+    buildFishSprites();
+    // resize 里会重建队形，但贴图要在队形前就绪，所以再跑一次初始化
+    buildFormation();
+    resetSchool();
+    raf = requestAnimationFrame(frame);
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+        if (Audio.ctx) Audio.ctx.suspend();
+      } else if (!raf) {
+        last = 0;
+        raf = requestAnimationFrame(frame);
+        if (Audio.ctx) Audio.ctx.resume();
+      }
+    });
+  }
+
+  window.addEventListener('resize', function () {
+    resize();
+    buildShafts();
+  });
+
+  // 调试 / 自检钩子
+  window.__deep = {
+    get school() { return school; },
+    get fish() { return fish; },
+    get fx() { return fx; },
+    get count() { return state.count; },
+    impact: function (x, y) { impact(x, y, 1, null); },
+    fishLen: function () { return fishLen; },
+    audio: Audio
+  };
+
+  boot();
+})();
+</script>
+</body>
+</html>

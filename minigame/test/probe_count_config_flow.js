@@ -161,16 +161,24 @@ setConfig({ targetType: "mouse", preyCount: 3 });
 const mouseRoomMulti = countAfterTopUp("mouse");
 ok(mouseRoomMulti === 4, "室内房间 stage2：preyCount=3 → topUp 后被阶段/洞口数限制为 4 只", String(mouseRoomMulti));
 
-/* 9. frog：preyCount 完全不生效，数量由阶段与荷叶数硬规则决定。 */
+/* 9. frog：数量跟「猎物数量」设置走（单只 1 / 多只 3），不再随阶段递增；仍受荷叶数封顶。 */
 setFrogScene(1);
 setConfig({ targetType: "frog", preyCount: 1 });
-ok(G.stageTargetCount() === 0, "青蛙 stage1：preyCount=1 → stageTargetCount 被单只分支压为 0（潜在问题）", String(G.stageTargetCount()));
+ok(G.stageTargetCount() === 1, "青蛙 stage1：preyCount=1 → 同屏 1 只", String(G.stageTargetCount()));
 setFrogScene(2);
 setConfig({ targetType: "frog", preyCount: 3 });
-ok(G.stageTargetCount() === 4, "青蛙 stage2：preyCount=3 → stageTargetCount 仍为 4 只", String(G.stageTargetCount()));
+ok(G.stageTargetCount() === 3, "青蛙 stage2：preyCount=3 → 仍是 3 只（不随阶段加量）", String(G.stageTargetCount()));
 setFrogScene(3);
 setConfig({ targetType: "frog", preyCount: 3 });
-ok(G.stageTargetCount() === 4, "青蛙 stage3：preyCount=3 → 被漂浮荷叶数限制为 4 只", String(G.stageTargetCount()));
+ok(G.stageTargetCount() === 3, "青蛙 stage3：preyCount=3 → 仍是 3 只", String(G.stageTargetCount()));
+/* 该桩只有 5 片浮叶 → 封顶 4；preyCount=5 在这里应被荷叶数压到 4（真实场景 6 片浮叶时是 5） */
+const frogFloatN = G.scene.pads.filter(p => (p.sinkState || "float") === "float").length;
+setConfig({ targetType: "frog", preyCount: 5 });
+ok(G.stageTargetCount() === Math.min(5, Math.max(1, frogFloatN - 1)),
+  "青蛙：preyCount=5 → 受荷叶数封顶（浮叶 " + frogFloatN + " 片）", String(G.stageTargetCount()));
+setConfig({ targetType: "frog", preyCount: 7 });
+ok(G.stageTargetCount() === Math.min(7, Math.max(1, G.scene.pads.filter(p => (p.sinkState || "float") === "float").length - 1)),
+  "青蛙：preyCount=7 → 被荷叶数封顶（不超 pads-1）", String(G.stageTargetCount()));
 
 /* 10. tadpole：buildPreys 当前按 preyCount 生成；topUp 后被 session.tadCount/stage 覆盖。 */
 resetScene(); resetSession(1, { tadCount: 1 });

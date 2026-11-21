@@ -4,10 +4,10 @@ module.exports = function (G) {
   const rand = G.rand, clamp = G.clamp;
   let preys = [];
   G.preys = preys;
-  /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
   /* 第一版荧光只有一只荧光小虫；保留函数签名给构造/重生调用。 */
   const pickFfToy = () => (G.FF_TOYS && G.FF_TOYS[0]) || { key: "firefly", size: 1 };
-  /* 泳池模式判定：捕鱼 + 当前海域为泳池追鱼（鱼不出屏，区别于水草模式的边界渐隐玩法） */
+  /* 小河模式判定（历史 key 仍叫 pool）：捕鱼 + 当前海域为小河戏鱼
+     （鱼不出屏，区别于水草模式的边界渐隐玩法） */
   const inPoolMode = () => !!(G.session && G.session.sea && G.session.sea.key === "pool");
   /* 鱼群信息：其他鱼的平均位置（聚拢目标），无同伴时返回 null */
   const schoolInfo = (self) => {
@@ -153,7 +153,7 @@ module.exports = function (G) {
       this.spawn();
     }
     /* 抽取鱼品种（forced 指定品种用于开局去重；复活/补点时重抽保证一局内种类丰富）
-       泳池追鱼由 fishSpeciesList 返回专属鱼种（与深海完全区分），其余海域取全表 */
+       小河戏鱼由 fishSpeciesList 返回专属河鱼（与深海完全区分），其余海域取全表 */
     pickFishSpecies(forced) {
       const list = (G.fishSpeciesList && G.fishSpeciesList()) || G.FISH_SPECIES;
       this.species = forced || list[Math.floor(rand(0, list.length))];
@@ -632,21 +632,36 @@ module.exports = function (G) {
       if (this.type === "butterfly") { this.butterflyEnter(); return; }
       const b = G.bounds(), m = 110, FD = 120;
       const top = b.y + this.def.yMin * b.h, bot = b.y + this.def.yMax * b.h;
-      // 泳池模式：直接在屏内随机点入场（淡入），不从屏外游入
+      /* 小河/泳池（鱼不出屏）：从河岸边缘游入——贴着某条边落位、航向朝河内，
+         再由 introT 做一小段淡入。原先是在屏内随机点凭空出现，浅水视角下那一下很像"瞬移"，
+         改成贴边入场后，读起来就是"又有一条鱼从岸边游进来了"。 */
       if (this.type === "fish" && inPoolMode()) {
-        for (let attempt = 0; attempt < 6; attempt++) {
-          this.x = b.x + rand(0.08, 0.92) * b.w;
-          this.y = b.y + rand(this.def.yMin, this.def.yMax) * b.h;
-          if (!preys.some(q => q !== this && Math.hypot(q.x - this.x, q.y - this.y) < 90)) break;
+        const pad = 16 * Math.pow(G.platform.S || 1, 0.5);
+        const others = preys.filter(q => q !== this && q.type === "fish" && q.vanishT <= 0);
+        let best = null, bestD = -1;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const side = Math.floor(rand(0, 4));
+          let x, y, ang;
+          if (side === 0)      { x = b.x + pad;                    y = b.y + rand(0.15, 0.85) * b.h; ang = rand(-1.1, 1.1); }
+          else if (side === 1) { x = b.x + b.w - pad;              y = b.y + rand(0.15, 0.85) * b.h; ang = Math.PI + rand(-1.1, 1.1); }
+          else if (side === 2) { x = b.x + rand(0.15, 0.85) * b.w; y = b.y + pad;                    ang = Math.PI / 2 + rand(-1.1, 1.1); }
+          else                 { x = b.x + rand(0.15, 0.85) * b.w; y = b.y + b.h - pad;               ang = -Math.PI / 2 + rand(-1.1, 1.1); }
+          let dmin = 9999;
+          for (let i = 0; i < others.length; i++) dmin = Math.min(dmin, Math.hypot(others[i].x - x, others[i].y - y));
+          if (dmin > bestD) { bestD = dmin; best = { x, y, ang }; }
+          if (dmin > 200) break;                 // 离同伴够远就收
         }
-        this.swimAng = rand(0, Math.PI * 2);          // 入场即带随机航向
-        this._visAng = this.swimAng;
-        this.dirX = Math.cos(this.swimAng) >= 0 ? 1 : -1;
+        this.x = best.x; this.y = best.y;
+        this.swimAng = best.ang; this._visAng = best.ang;
+        this.dirX = Math.cos(best.ang) >= 0 ? 1 : -1;
         this.faceDir = this.dirX;
         this.baseY = this.y;
+        this.swimTurnCd = rand(1.6, 2.8);         // 入场后先直线游一段，别刚出现就拐弯
         if (this.stage === 2) this.midY = clamp(this.y, top + this.vAmp, bot - this.vAmp);
         this.newWaypoint();
-        this.fade = 1;
+        this.introT = 0.5;                        // 淡入 0.5s（update 里递减）
+        this.fade = 0.05;
+        if (G.ripple) { try { G.ripple(this.x, this.y, false); } catch (e) {} }
         return;
       }
       // 鱼群模式：第一条随机落位，后续贴着同伴入群（出生即在群里）
@@ -963,7 +978,10 @@ module.exports = function (G) {
         this.steerFish(dt, MS, b, sp, this.x + this.dirX * 320, laneY);
       }
       // 边界：位置已在 steerFish 内夹在屏内，鱼不会游出屏幕淡出消失
-      this.fade = 1;
+      if (this.introT > 0) {                    // 小河模式：从岸边游入的一小段淡入
+        this.introT = Math.max(0, this.introT - dt);
+        this.fade = clamp(1 - this.introT / 0.5, 0.05, 1);
+      } else this.fade = 1;
     }
 
     /* ============ 老鼠：peek → dart → hole ============ */
@@ -2164,14 +2182,31 @@ module.exports = function (G) {
         /* D.tadpole 用绝对坐标画尾链；这里不能再 translate，否则会被平移两次画到屏外。 */
         G.draw.tadpole(ctx, this, t);
       } else {
-        // 泳池模式：鱼身柔光（泳池玩具截图里的发光小鱼）；鱼群模式：银白小鱼光
+        /* 小河模式：浅水里的两层"环境"——鱼身下方一团柔影（光源在左上，影子朝右下偏）
+           + 鱼身外两圈淡淡的水面涟漪（参考图里每条鱼周围都有一圈圈水纹）。
+           原来这里是泳池的金色柔光，换成青绿水色后会被读成"发光"，所以整块替掉。 */
         if (this.type === "fish" && inPoolMode()) {
-          const gr = ctx.createRadialGradient(this.x, this.y - (this.hopOff || 0), 0, this.x, this.y - (this.hopOff || 0), 62 * (this.sc || 1));
-          gr.addColorStop(0, "rgba(255,236,150,.30)");
-          gr.addColorStop(0.55, "rgba(255,210,110,.12)");
-          gr.addColorStop(1, "rgba(255,210,110,0)");
-          ctx.fillStyle = gr;
-          ctx.beginPath(); ctx.arc(this.x, this.y - (this.hopOff || 0), 62 * (this.sc || 1), 0, Math.PI * 2); ctx.fill();
+          const sc0 = this.sc || 1, cy2 = this.y - (this.hopOff || 0);
+          ctx.save();
+          const sx = this.x + 12 * sc0, sy = cy2 + 17 * sc0;
+          const sg2 = ctx.createRadialGradient(sx, sy, 0, sx, sy, 55 * sc0);
+          sg2.addColorStop(0, "rgba(12,38,28,.34)");
+          sg2.addColorStop(0.55, "rgba(12,38,28,.16)");
+          sg2.addColorStop(1, "rgba(14,42,32,0)");
+          ctx.fillStyle = sg2;
+          ctx.beginPath(); ctx.ellipse(sx, sy, 55 * sc0, 27 * sc0, 0, 0, Math.PI * 2); ctx.fill();
+          const rr0 = Math.max(this.baseW, this.baseH) * sc0 * 0.42;
+          const ph0 = this.phase || 0;
+          for (let i = 0; i < 1; i++) {
+            const kk = 0.94 + i * 0.40 + 0.05 * Math.sin(t * 1.7 + ph0 + i * 1.6);
+            ctx.globalAlpha = clamp(alpha * (0.30 - i * 0.09), 0, 1);
+            ctx.strokeStyle = "rgba(242,255,238,.95)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.ellipse(this.x, cy2 + 7 * sc0, rr0 * kk, rr0 * kk * 0.42, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.restore();
         } else if (this.type === "fish" && inSchoolMode()) {
           const gr = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, 26 * (this.sc || 1));
           gr.addColorStop(0, "rgba(225,246,255,.42)");
@@ -2198,7 +2233,11 @@ module.exports = function (G) {
           ctx.restore();
         }
         ctx.translate(this.x, this.y - (this.hopOff || 0));
-        const s = this.sc * vs * (this.speciesScale || 1);
+        /* 海域主题的「视觉」缩放：只缩画出来的鱼，命中盒仍按 this.sc 算（与青蛙那套做法一致，
+           猫拍起来手感不变）。水草森林的海草占了画面大半，同尺寸的鱼在窄屏上显得偏大，
+           该海域 fishVis=0.9；其它海域没有这个字段 → 1，渲染与原来完全一致。 */
+        const fishVisK = this.type === "fish" ? ((G.seaThemeNow && G.seaThemeNow().fishVis) || 1) : 1;
+        const s = this.sc * vs * (this.speciesScale || 1) * fishVisK;
         if (this.type === "fish" && (inPoolMode() || inSchoolMode()) && this._visAng != null) {
           // 泳池/鱼群：鱼头朝实际航向旋转；向左游时沿航向轴翻肚回正（背鳍始终朝上）
           // 翻面加死区：航向接近垂直时不再每帧正/反来回切（修复贴边时鱼尾闪动）
@@ -2250,6 +2289,13 @@ module.exports = function (G) {
       for (let i = 0; i < n; i++) preys.push(new Prey("mouse", swarmVariant()));
       return;
     }
+    /* 青蛙跳：开局数量跟「猎物数量」设置走（1–5，受荷叶数封顶），与 stageTargetCount 同源；
+       场景此时已建好（pads 就位），所以能算出真实上限。 */
+    if (G.config.targetType === "frog") {
+      const n = G.stageTargetCount();
+      for (let i = 0; i < n; i++) preys.push(new Prey("frog"));
+      return;
+    }
     // 暗夜荧光：数量由二级页面增减（默认 1，最多 7）；其余玩法仍按单只/多只两档。
     const n = G.config.targetType === "pool"
       ? Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)))
@@ -2285,6 +2331,16 @@ module.exports = function (G) {
     }
     // 暗夜荧光：整局保持二级页面设定的数量（默认 1，最多 7）。
     if (G.config.targetType === "pool") return Math.max(1, Math.min(7, Math.round(Number(G.config.ffCount) || 1)));
+    /* 青蛙跳：同屏数量直接跟「猎物数量」设置走（单只 1 / 多只 3，二级页还能 ± 到 5），
+       不再按阶段自动 3→4→5；仍受荷叶数封顶（留 1 片空叶供轮换，漂着/正沉的叶不计）。
+       必须放在下面的 `preyCount===1 → 0` 之前，否则单只设置下会被判成"不补点"。 */
+    if (G.config.targetType === "frog") {
+      const want = Math.max(1, Math.min(7, Math.round(Number(G.config.preyCount) || 1)));
+      const pads = (G.scene && G.scene.pads) || [];
+      const padN = pads.length || 6;
+      const floatN = pads.filter(p => (p.sinkState || "float") === "float").length || padN;
+      return Math.min(want, Math.max(1, floatN - 1));
+    }
     // 蝌蚪快跑：同屏 1→2→3，阶段决定基线，命中表现好可在上限内多加 1 只。
     if (G.config.targetType === "tadpole") {
       const base = Math.min(3, Math.max(1, G.session.stage || 1));
@@ -2295,13 +2351,6 @@ module.exports = function (G) {
     if (G.config.targetType === "mouse") {
       const holeN = (G.scene && G.scene.holes ? G.scene.holes.length : 8);
       return Math.min(base, Math.max(1, holeN - 1));
-    }
-    // 青蛙跳：荷叶数 6，按阶段封顶（3/4/5），留 1 片空叶供轮换；漂着/正沉的叶不计
-    if (G.config.targetType === "frog") {
-      const pads = (G.scene && G.scene.pads) || [];
-      const padN = pads.length || 6;
-      const floatN = pads.filter(p => (p.sinkState || "float") === "float").length || padN;
-      return Math.min(({ 1: 3, 2: 4, 3: 5, 4: 5 })[G.session.stage] || 3, Math.max(1, floatN - 1));
     }
     return base;
   };

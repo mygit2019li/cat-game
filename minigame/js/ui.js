@@ -935,20 +935,28 @@ module.exports = function (G) {
     const gx = Math.max(safe.left + 10, edgeL - gs - 12);
     const gy = safe.top + 8;
     const bottomH = 60, bottomY = H - safe.bottom - bottomH - 14;
-    const modesTop = land ? safe.top + Math.max(50, availH * .22) : safe.top + 72;
-    const modesBottom = land ? bottomY - Math.max(10, availH * .06) : Math.min(bottomY - 14, modesTop + availH * .52);
-    const panelX = land ? edgeL + availW * (tablet ? .38 : .49) + (tablet ? 14 : 0) : edgeL;
+    /* 右侧玩法面板的取景：横向收窄一档、纵向上下各放开一点。
+       面板从「扁宽」变成更接近竖向矩形——三列卡变窄后整块不再顶到安全区右缘，
+       省出的高度分给两行卡片，卡片能长高（横屏下 ch 一直是高度受限，不是宽度受限）。
+       竖屏（面板横铺整屏）不改，仍用原来的两条边距。 */
+    /* 广告不参与版式：这里不再给广告留横带——面板、猫图、「开始捕猎」的位置与尺寸
+       完全不随广告变化。广告作为浮卡盖在猫图区下半（见文件末尾 G.homeAdRect）。 */
+    const modesTopBase = land ? safe.top + Math.max(46, availH * .17) : safe.top + 72;
+    const modesBottom = land ? bottomY - Math.max(6, availH * .03) : Math.min(bottomY - 14, modesTopBase + availH * .52);
+    const modesTop = modesTopBase;
+    const panelX = land ? edgeL + availW * (tablet ? .405 : .525) + (tablet ? 14 : 0) : edgeL;
     const panelW = land ? edgeR - panelX : availW;
     const panelY = modesTop, panelH = modesBottom - modesTop;
     const headH = land ? 48 : 40, pad = land ? 20 : 14, gridGap = land ? 16 : 12;
     const cols = 3, rows = 2;
     const cw = (panelW - pad * 2 - gridGap * (cols - 1)) / cols;
     let ch = (panelH - headH - pad - gridGap * (rows - 1)) / rows;
-    // 卡片高度：横屏用「卡宽 × 系数」做方形上限，多出的面板空间由 gridY 垂直居中吸收，不会溢出。
+    // 卡片高度：横屏用「卡宽 × 系数」做上限，多出的面板空间由 gridY 垂直居中吸收，不会溢出。
     // 系数决定卡片「偏方」还是「偏方高」——调大提升格子垂直空间与可读性：
-    //   平板 1.14：比近方形略高，给图标带与 desc 副标题更舒展的垂直空间；
-    //   手机横屏 1.22：面板窄、ch 本就受 panelH 限制，略高一点提升名称可读性与点击面积。
-    if (land) ch = Math.min(ch, cw * (tablet ? 1.14 : 1.22));
+    //   平板 1.24：面板收窄后 cw 变小，若仍按 1.14 封顶，平板上的卡片反而会比改版前矮一截；
+    //              抬到 1.24 后 ch 跟着变高的面板一起长，格子仍贴着面板上下内边距；
+    //   手机横屏 1.22：面板窄、ch 本就受 panelH 限制（高度受限），这个上限基本不生效。
+    if (land) ch = Math.min(ch, cw * (tablet ? 1.24 : 1.22));
     // 卡片高度 +3%：等比微增，宽度/内边距/圆角/内部布局全部不变，
     // gridY 垂直居中公式自动吸收多出的空间，不会溢出。
     ch *= 1.03;
@@ -1167,7 +1175,7 @@ module.exports = function (G) {
       top: "#ffffff", bottom: "#fdf9f2", line: "rgba(158,136,108,.20)", lineW: 1.4
     });
     pawMarkAt(panelX + 26, panelY + headH / 2, F(20), "#2fb18c");
-    text("选择玩法", panelX + 47, panelY + headH / 2,
+    text("选择猎物", panelX + 47, panelY + headH / 2,
       Math.min(F(18), headH * .48) + "px sans-serif", C.ink, "left");
     MODES.forEach((item, i) => {
       const r = Math.floor(i / cols), c = i % cols;
@@ -1195,14 +1203,19 @@ module.exports = function (G) {
          现在图标尺寸/位置随 ch 走，名称字号同时受「卡宽」与「卡高」双重约束。
          平板卡片更高，多出的空间给 desc 副标题（新手能直接看懂玩法差异）。 */
       /* 图标区与名称区按卡高分区。图标尺寸用「卡宽 × 卡高」双约束的响应式比例，
-         随容器等比缩放：iconBoxW = 卡宽 70%（旧 94% → 图标过大），iconH = 卡高 48%/52%。
+         随容器等比缩放：iconBoxW = 卡宽 70%（旧 94% → 图标过大），iconH = 卡高 45%（两行）/52%（一行）。
          图标实际尺寸 = min(iconBoxW, iconH, 按宽高比换算)，任何分辨率下都等比、不变形、不溢出。 */
-      // 图标带：上部 55% 卡高给图标，iconCY 取该带「垂直中心」——卡片变高后图标在带内仍居中。
-      const iconH = ch * (tablet ? .48 : .52), iconCY = y + ch * .275;
+      /* 平板卡片高度够（ch≥96）时多排一行 desc；不够就与手机一致只留名称，
+         强行塞两行会和名称挤在一起（1080×608 这类档 ch≈90）。 */
+      const showDesc = tablet && ch >= 96;
+      // 图标带：上部约 53% 卡高给图标，iconCY 取该带「垂直中心」——卡片变高后图标在带内仍居中。
+      // 要排两行的卡片图标带略收（.48→.45），把省下的高度让给「名称 + desc」。
+      const iconH = ch * (showDesc ? .45 : .52), iconCY = y + ch * (showDesc ? .265 : .275);
       const iconBoxW = cw * .70;                 // 图标宽上限：占卡宽 70%（响应式，随 cw 缩放）
-      const nameFs = fitFont(item.name, Math.min(F(tablet ? 18 : 17), ch * .21), cw - 12, "normal");
-      // 名称：取「图标带下缘 → 卡底」这段剩余空间的「垂直中心」，卡片变高后名称随之居中、可读性更好。
-      const nameY = y + (ch * .55 + ch) / 2;
+      const nameFs = fitFont(item.name, Math.min(F(17), ch * (showDesc ? .19 : .21)), cw - 12, "normal");
+      /* 名称：只有一行时取「图标带下缘 → 卡底」的垂直中心（.775ch）；
+         要带 desc 时上提到 .70ch，desc 落在 .91ch，两行之间留出约 4px 净空。 */
+      const nameY = y + (showDesc ? ch * .70 : (ch * .55 + ch) / 2);
       const iconS = Math.max(.36, Math.min(iconBoxW, iconH) / 115 * .86);
       const iconPic = homeImg(HOME_ICON_KEY[item.key] || item.key);
       const bobY = Math.sin(t * 1.4 + i) * 1.2;
@@ -1232,12 +1245,16 @@ module.exports = function (G) {
         }
         ctx.restore();
       }
-      // 手机只留名称；平板卡片更高，补一行 desc 说明玩法差异
+      // 名称：手机只留这一行
       text(item.name, x + cw / 2, nameY, nameFs + "px sans-serif", sel ? "#0f8064" : "#243430");
-      if (tablet) {
-        const descFs = fitFont(item.desc, Math.min(F(11), ch * .12), cw - 14, "normal");
-        // desc 取「名称下方 → 卡底」这段的垂直中心，随卡片高度自适应，不会贴底也不会与名称挤在一起
-        const descY = y + (nameY + ch * .08 + ch) / 2;
+      /* 平板补一行 desc 说明玩法差异（见上方 showDesc 的卡高门槛） */
+      if (showDesc) {
+        const descFs = fitFont(item.desc, Math.min(F(10), ch * .11), cw - 14, "normal");
+        /* desc 固定落在卡高 91% 处（名称在 70%），与名称同一套「按卡高定比例」的定位方式，
+           卡片变高时两行一起往下舒展，不会因绝对坐标算错而飘出卡片。
+           历史上这里写成 (nameY + ch*.08 + ch)/2 —— nameY 已是绝对坐标，又叠了一次 ch，
+           结果这行 desc 被算到卡片下方、甚至跑到面板与底栏之外。 */
+        const descY = y + ch * .91;
         text(item.desc, x + cw / 2, descY, descFs + "px sans-serif",
           sel ? "rgba(15,128,100,.72)" : "rgba(96,104,96,.62)");
       }
@@ -1268,14 +1285,14 @@ module.exports = function (G) {
     const startY = land ? Math.max(heroBottom, bottomY - startH - 22) : Math.min(bottomY - startH - 14, modesBottom + 190);
     const pillCY = Math.min(startY + startH / 2, bottomY - startH / 2 - 8);
     ui.drawStartPill(heroCenterX - startW / 2, pillCY - startH / 2, startW, startH,
-      "开始玩耍", () => G.requestStart());
+      "开始捕猎", () => G.requestStart());
 
     // Four familiar quick links in the reference's floating bottom bar.
     const rowBtns = [
       { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
       { label: "电子猫粮", icon: "bowl", cb: () => G.feederEnter() },
       { label: "猫咪状态", icon: "heart", key: "home-sound", cb: () => G.openSound() },
-      { label: "玩耍记录", icon: "chart", cb: () => G.openModal("records") }
+      { label: "捕猎记录", icon: "chart", cb: () => G.openModal("records") }
     ];
     const rowX = edgeL + (land ? availW * .11 : 0), rowW = land ? availW * .78 : availW;
     /* 底栏：落在照片底上的半透明白胶囊（带柔和投影，不用描边青绿） */
@@ -1299,23 +1316,61 @@ module.exports = function (G) {
     });
   };
 
-  /* 原生模板广告位（由 ad.js 读取）：只落在首页竖屏的"玩法卡与底栏之间"空白带上。
-     横屏不出——那条带被 hero 猫图/场景图与「开始玩耍」键占据，硬塞会盖猫或盖按钮。
-     返回 null 时 ad.enter 静默跳过（宁可空着，也不盖核心操作）。 */
+  /* ================= 首页原生模板广告（浮卡） =================
+     只遮挡、不挤压：面板 / 卡片 / 猫图 / 「开始捕猎」/ 底栏的位置与尺寸完全不因广告改变。
+     落点都在猫图区顶部、收窄到猫图宽度的 ~42%：
+       竖屏：贴玩法面板下缘、靠右（猫头在左，窄卡盖窗光/蝴蝶，不压猫脸）
+       横屏：贴品牌行下缘、靠左（紧贴猫图区/安全区左缘，避开面板与底栏）
+     位置算完交给 G.ad.fit 统一夹进安全区、避开微信右上角胶囊与下面声明的禁区；
+     放不下（矮屏 + 大图模板）就返回 null，这条广告不出，也不去动页面。
+     高度用实测值（onResize 回传），未回报时按 96 估。 */
+  const HOME_AD_W = 160;        // 竖屏期望宽度：窄卡，靠右不压猫脸
+  const HOME_AD_W_LAND = 200;   // 横屏同上（猫图更宽，可用 200）
+  const HOME_AD_W_RATIO = .42;  // 再按猫图宽度收敛
+  const HOME_AD_H = 96;         // 实测高度回来之前的估算（只用于判定能否放下）
   G.homeAdRect = () => {
-    const { W, H, land, safe } = layout();
-    if (land) return null;                       // 横屏：猫图 + 开始键占了这条带，不展示
-    const bottomH = 60, bottomY = H - safe.bottom - bottomH - 14;
+    if (!G.ad || !G.ad.fit) return null;
+    const { W, H, land, safe, menu, S } = layout();
+    const availH = H - safe.top - safe.bottom;
+    const bottomH = 60, bottomY = H - safe.bottom - bottomH - 14;   // 与 drawHome 同式，改动必须同步
+    const h = Number(G.homeAdMeasuredH) || HOME_AD_H;
+
+    if (land) {
+      /* 横屏：紧贴顶部、靠右的窄卡。
+         上缘贴安全区顶部；右缘止于微信胶囊左侧——这样广告与胶囊水平不相交，
+         ad.fit 就不会因撞胶囊把卡自动挪到胶囊下方（那会表现为广告往下移）。
+         广告是浮层：浮在玩法面板白卡上沿之上，但不碰胶囊与底部开始键/底栏。 */
+      const startH = 44;
+      const startY = bottomY - startH - 22;      // 开始键上沿（底部禁区）
+      const top = Math.round(safe.top + 8);      // 紧贴顶部，留 8px 呼吸
+      const menuL = menu ? menu.left : W - safe.right;
+      const rightLimit = Math.floor(menuL - 8);  // 右缘贴胶囊左侧，避免撞胶囊被 fit 下移
+      const width = Math.max(120, Math.round(W * 0.173));  // 窄卡 ≈146@844宽；保底120，避免窄虚拟宽(如683)时卡在门槛下不出
+      const left = rightLimit - width;
+      if (width < 120 || left < safe.left || top + h > startY) return null;
+      return G.ad.fit([{ left: left, top: top, width: width, height: h }], {
+        pad: 8,
+        avoid: [{ left: 0, top: startY, width: W, height: H - startY }]  // 开始键 + 底栏
+      });
+    }
+
     const modesTop = safe.top + 72;
-    const modesBottom = Math.min(bottomY - 14, modesTop + (H - safe.top - safe.bottom) * .52);
-    const left = 24;
-    const top = modesBottom + 14;
-    const bandBottom = bottomY - 8;              // 距底栏留 8，不贴边
-    const width = Math.min(W - left - safe.right - 24, 340);
-    const height = bandBottom - top;
-    /* 留白带净高不足（矮屏 / 面板被拉高挤占）时不出，避免广告比留白还高 */
-    if (width < 160 || height < 88) return null;
-    return { left, top: Math.round(top), width: Math.floor(width) };
+    const modesBottom = Math.min(bottomY - 14, modesTop + availH * .52);
+    const startH = 42;
+    /* 与 drawHome 里的 startY / heroBottom 同式——猫图区上缘即广告的垂直参考线 */
+    const startY = Math.min(bottomY - startH - 14, modesBottom + 190);
+    const heroBottom = Math.min(bottomY - startH - 12, modesBottom + 190) - 8;
+    const width = Math.min(HOME_AD_W, Math.round(W * HOME_AD_W_RATIO), W - safe.left - safe.right - 32);
+    if (width < 120) return null;
+    const top = modesBottom + 8;               // 贴猫图区上缘
+    if (top + h > heroBottom) return null;     // 猫图区装不下这么高的模板：不出，也不压猫
+    return G.ad.fit([{ left: W - safe.right - 16 - width, top: top, width: width, height: h }], {
+      pad: 10,
+      avoid: [
+        { left: 0, top: 0, width: W, height: modesBottom },        // 品牌 + 玩法面板：整块不许盖
+        { left: 0, top: startY, width: W, height: H - startY }     // 开始捕猎 + 底栏：整块不许盖
+      ]
+    });
   };
 
   /* ================= 设置 ================= */
@@ -1621,44 +1676,58 @@ module.exports = function (G) {
         });
       }
     } else if (key === "pool") {
-      // 泳池追鱼：与游戏内 pool 主题同色 + 同款焦散 + 真实的泳池金鱼
-      const th = (G.SEA_THEMES || []).find(t => t.key === "pool") || { bg: ["#2aa4e0", "#1565b5", "#0e4a9e"] };
-      const pg = c.createRadialGradient(x + w / 2, y, 0, x + w / 2, y, Math.max(w, h) * 1.1);
-      pg.addColorStop(0, th.bg[0]); pg.addColorStop(0.52, th.bg[1]); pg.addColorStop(1, th.bg[2]);
+      /* 小河戏鱼：与游戏内同一套配色的小幅缩略图——青绿水 + 卵石河床 + 岸边草丛/河石 +
+         水面涟漪，再放两条河鱼（红金鱼 + 乌白云锦鲤），与实机布景对得上 */
+      const th = (G.SEA_THEMES || []).find(t => t.key === "pool") || { bg: ["#5f9573", "#356b52", "#1e4736"] };
+      // 缩略图整体比实机亮一档（小图+白底卡片里，深色水会糊成一块）
+      const pg = c.createLinearGradient(0, y, 0, y + h);
+      pg.addColorStop(0, "#8cc19b"); pg.addColorStop(0.55, "#579874"); pg.addColorStop(1, "#37735a");
       c.fillStyle = pg; c.fillRect(x, y, w, h);
-      // 阳光辉光
-      const sgp = c.createRadialGradient(x + w * 0.5, y - h * 0.3, 0, x + w * 0.5, y - h * 0.3, h * 1.6);
-      sgp.addColorStop(0, "rgba(255,255,255,.3)"); sgp.addColorStop(1, "rgba(255,255,255,0)");
-      c.fillStyle = sgp; c.fillRect(x, y, w, h);
-      // 网状焦散（静态示意：抖动格点连网，两层线）
-      const hh = (i, j, k) => { const s2 = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453; return s2 - Math.floor(s2); };
-      const cs2 = Math.max(22, Math.round(w / 7));
-      const cols2 = Math.ceil(w / cs2), rows2 = Math.ceil(h / cs2);
-      const px = (i, j) => x + i * cs2 + (hh(i, j, 1) - 0.5) * cs2 * 0.55;
-      const py = (i, j) => y + j * cs2 + (hh(i, j, 2) - 0.5) * cs2 * 0.55;
-      c.save(); c.globalCompositeOperation = "lighter"; c.lineCap = "round";
-      for (let pass = 0; pass < 2; pass++) {
-        c.strokeStyle = pass ? "rgba(200,245,255,.4)" : "rgba(120,210,255,.16)";
-        c.lineWidth = pass ? 1 : 2.2;
-        for (let i = 0; i <= cols2; i++) for (let j = 0; j <= rows2; j++) {
-          if (i < cols2) { c.beginPath(); c.moveTo(px(i, j), py(i, j)); c.lineTo(px(i + 1, j), py(i + 1, j)); c.stroke(); }
-          if (j < rows2) { c.beginPath(); c.moveTo(px(i, j), py(i, j)); c.lineTo(px(i, j + 1), py(i, j + 1)); c.stroke(); }
-        }
+      // 卵石河床（沙砾底 + 一把碎石）
+      c.fillStyle = "rgba(146,156,116,.6)";
+      c.fillRect(x, y + h * 0.26, w, h * 0.74);
+      const tone = ["#8d9078", "#7c8069", "#9aa088", "#6f745c", "#a8a992"];
+      for (let i = 0; i < 26; i++) {
+        const hh2 = Math.sin(i * 78.233) * 43758.5453; const r1 = hh2 - Math.floor(hh2);
+        const hh3 = Math.sin(i * 12.9898) * 43758.5453; const r2 = hh3 - Math.floor(hh3);
+        const px2 = x + r1 * w, py2 = y + h * (0.30 + r2 * 0.68), pr = 2 + r2 * 5;
+        c.fillStyle = tone[i % tone.length];
+        c.globalAlpha = 0.75;
+        c.beginPath(); c.ellipse(px2, py2, pr, pr * 0.72, 0, 0, Math.PI * 2); c.fill();
       }
-      // 星芒两枚（四角十字星）
-      [[0.24, 0.3, 7], [0.74, 0.62, 5]].forEach(sd => {
-        const sx = x + w * sd[0], sy = y + h * sd[1], sr = sd[2];
-        c.fillStyle = "rgba(240,252,255,.85)";
-        [[sr, sr * 0.18], [sr * 0.18, sr]].forEach(dd => {
-          c.beginPath();
-          c.moveTo(sx - dd[0], sy); c.lineTo(sx, sy - dd[1]); c.lineTo(sx + dd[0], sy); c.lineTo(sx, sy + dd[1]);
-          c.closePath(); c.fill();
+      c.globalAlpha = 1;
+      // 岸边草丛（顶边两丛）
+      [[0.16, 0.02], [0.78, 0.01]].forEach(gp => {
+        const gx = x + w * gp[0], gy = y + h * gp[1];
+        ["#a6d45f", "#8fc051", "#6f9f3f", "#c3dd7c"].forEach((gc, i2) => {
+          const hh4 = 12 + i2 * 4, lx = (i2 - 1.5) * 5;
+          c.strokeStyle = gc; c.lineWidth = 2; c.lineCap = "round";
+          c.beginPath(); c.moveTo(gx + lx * 0.4, gy + 6);
+          c.quadraticCurveTo(gx + lx * 1.1, gy - hh4 * 0.6, gx + lx * 1.5, gy - hh4);
+          c.stroke();
         });
       });
-      c.restore();
-      // 真实的泳池金鱼（游戏内 POOL_FISH_SPECIES 造型）
-      const spG = (G.POOL_FISH_SPECIES || [])[0];
-      if (spG) drawRealFish(c, spG, spG.variants[0], x + w * 0.5, y + h * 0.46, 0.62, 0.6);
+      // 河石（右下角一块，带苔藓帽）
+      const rkx = x + w * 0.87, rky = y + h * 0.90, rkr = Math.min(w, h) * 0.16;
+      c.fillStyle = "#7c8079";
+      c.beginPath(); c.ellipse(rkx, rky, rkr, rkr * 0.72, -0.2, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "#a2a598";
+      c.beginPath(); c.ellipse(rkx - rkr * 0.1, rky - rkr * 0.22, rkr * 0.78, rkr * 0.46, -0.2, 0, Math.PI * 2); c.fill();
+      c.fillStyle = "rgba(84,132,56,.55)";
+      c.beginPath(); c.ellipse(rkx - rkr * 0.1, rky - rkr * 0.46, rkr * 0.56, rkr * 0.2, 0.1, 0, Math.PI * 2); c.fill();
+      // 水面涟漪（两圈，椭圆压扁）
+      c.strokeStyle = "rgba(240,255,238,.6)"; c.lineWidth = 1.2;
+      [0.42, 0.62].forEach((k2, i2) => {
+        c.globalAlpha = 0.7 - i2 * 0.22;
+        c.beginPath(); c.ellipse(x + w * 0.44, y + h * 0.56, Math.min(w, h) * k2 * 0.5, Math.min(w, h) * k2 * 0.21, 0, 0, Math.PI * 2); c.stroke();
+      });
+      c.globalAlpha = 1;
+      // 河鱼：红金鱼（大）+ 乌白云锦鲤（小）
+      const spR = (G.POOL_FISH_SPECIES || [])[0];
+      const spK = (G.POOL_FISH_SPECIES || [])[2] || spR;
+      const fk2 = Math.min(w / 430, h / 250);
+      if (spR) drawRealFish(c, spR, spR.variants[0], x + w * 0.45, y + h * 0.44, fk2 * 0.86, 0.6);
+      if (spK) drawRealFish(c, spK, spK.variants[0], x + w * 0.68, y + h * 0.72, fk2 * 0.60, 2.4);
     } else if (key === "room" || key === "plaid") {
       // 室内房间：墙 + 窗体 + 木地板 + 一排老鼠洞 + 一只探头的鼠（与游戏内布局一致）
       c.fillStyle = "#554b40"; c.fillRect(x, y, w, h * 0.40);
@@ -1727,7 +1796,7 @@ module.exports = function (G) {
 
   const BG_TAGLINE = {
     kelp: "清新水下世界，和小鱼一起玩耍吧~",
-    pool: "明亮泳池里，追着光斑游呀游~",
+    pool: "清清小河里，和鱼儿一起玩水吧~",
     school: "跟着鱼群，一起巡游深海吧~",
     room: "暖暖的房间里，小鼠探出头来~",
     swarm: "好多小鼠乱窜，看你能拍中几只~",
@@ -1964,16 +2033,15 @@ module.exports = function (G) {
     // 可增减的玩法各自读数量键（默认 preyCount；暗夜荧光走 ffCount）。
     const countKey = (group && group.countKey) || "preyCount";
     /* 不支持手动增减数量的模式：显示只读说明徽章，隐藏 ± 按钮（界面与规则一致）。
-       - group.count === "auto"：青蛙跳跳——同屏数量由阶段按荷叶数封顶自动决定（3→4→5），
-         用户调 preyCount 不生效，故不展示可增减控件。
-       - tadpole：蝌蚪快跑——同屏数量由阶段基线 + 命中能力动态调节（1–3），同样不展示控件。
+       - tadpole：蝌蚪快跑——同屏数量由阶段基线 + 命中能力动态调节（1–3），不展示控件。
        - mouse + swarm：群鼠乱窜——同屏数量由阶段固定为 4/5/6，preyCount 不生效，不展示控件。
        - group.count === "fixed"：固定 1 只（历史口径，保留）。
-       其余模式（蝴蝶/激光/暗夜荧光/室内房间捕鼠）保留 ± 增减入口。 */
+       其余模式（青蛙/蝴蝶/激光/暗夜荧光/室内房间捕鼠）都真读数量键，保留 ± 增减入口。
+       青蛙跳跳过去是「按阶段自动 3→4→5」，现已改为受「猎物数量」设置控制，所以不再出只读徽章。 */
     const countNote = (group && group.count === "fixed") ? "固定 1 只"
       : (G.config.targetType === "tadpole") ? "自动 1–3 只"
       : (G.config.targetType === "mouse" && G.currentBg && G.currentBg() === "swarm") ? "自动 4–6 只"
-      : (group && group.count === "auto") ? "自动 3–5 只" : null;
+      : null;
     text(countNote ? "猎物数量" : term.prey + "数量", colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const os = F(24), oy = settingsTop + F(24);
     if (countNote) {
@@ -1986,6 +2054,11 @@ module.exports = function (G) {
       text(t, colX[1] + F(4) + bw / 2, oy + os / 2, F(13) + "px sans-serif", C.tealDeep);
     } else {
       const minusX = colX[1] + F(4), plusX = colX[1] + colW - os - F(6);
+      /* 上限按玩法收口：青蛙受荷叶数限制最多 5 只（MODE_GROUPS.frog.countMax），其余按 7。
+         显示值也走同一条钳制：preyCount 是全局设置，可能在别的玩法里被调到 6/7，
+         切到青蛙卡时界面要显示"实际会出现的只数"，不能显示 7 却只有 5 只。 */
+      const countMax = (group && group.countMax) || 7;
+      const countNow = () => Math.max(1, Math.min(countMax, Math.round(Number(G.config[countKey]) || 1)));
       [[minusX, -1], [plusX, 1]].forEach(pb => {
         ctx.fillStyle = "#ffffff";
         G.rr(ctx, pb[0], oy, os, os, F(7)); ctx.fill();
@@ -1996,11 +2069,11 @@ module.exports = function (G) {
         if (pb[1] > 0) { ctx.moveTo(pb[0] + os / 2, oy + os * .30); ctx.lineTo(pb[0] + os / 2, oy + os * .70); }
         ctx.stroke(); ctx.lineCap = "butt";
         btn(pb[0], oy, os, os, () => {
-          G.config[countKey] = Math.max(1, Math.min(7, (G.config[countKey] || 1) + pb[1]));
+          G.config[countKey] = Math.max(1, Math.min(countMax, countNow() + pb[1]));
           G.saveConfig(); G.playTick();
         });
       });
-      text((G.config[countKey] || 1) + " " + term.unit, (minusX + plusX + os) / 2, oy + os / 2,
+      text(countNow() + " " + term.unit, (minusX + plusX + os) / 2, oy + os / 2,
         F(15) + "px sans-serif", C.ink);
     }
 
@@ -2275,10 +2348,9 @@ module.exports = function (G) {
     if (open) {
       btn(xcx - xr - 4, xcy - xr - 4, (xr + 4) * 2, (xr + 4) * 2, () => G.closeSettings());
     }
-    // 关闭动画播完：回到打开抽屉前的页面（首页 / 结算页），面板此时已完全滑出屏幕
+    // 关闭动画播完：回到首页（设置抽屉只从首页进入），面板此时已完全滑出屏幕
     if (closing && k >= 1) {
-      const back = (G.settings && G.settings.back) || "home";
-      G.settings = null; G.screen = back;
+      G.settings = null; G.screen = "home";
     }
   };
 
@@ -3466,6 +3538,16 @@ module.exports = function (G) {
     c2.restore();
   }
 
+  /* 声音页（首页「猫咪状态」入口）版式：绘制层与广告位（G.soundAdRect）共用同一份计算。
+     共享的只有顶部这几条线——tab 行与卡片网格上沿；网格内部怎么排（几列几行）
+     由卡片数决定，广告只需要知道"网格从哪一行开始"。全部是虚拟手机坐标。 */
+  function soundLayout() {
+    const { W, H, land, safe, menu } = layout();
+    const tabW = Math.min(240, Math.max(184, W * 0.30));
+    const tabH = 36, tabX = (W - tabW) / 2, tabY = safe.top + 48;
+    return { W, H, land, safe, menu, tabW, tabH, tabX, tabY, gridTop: tabY + tabH + 13 };
+  }
+
   ui.drawSound = () => {
     const { W, H, safe } = layout();
     const now = performance.now();
@@ -3500,8 +3582,8 @@ module.exports = function (G) {
     text("动物情绪", W / 2, safe.top + 28, "21px sans-serif", C.ink);
 
     // 猫 / 狗 分段 tab
-    const tabW = Math.min(240, Math.max(184, W * 0.30));
-    const tabH = 36, tabX = (W - tabW) / 2, tabY = safe.top + 48;
+    const SL = soundLayout();
+    const { tabW, tabH, tabX, tabY } = SL;
     ctx.fillStyle = DK.track; G.rr(ctx, tabX, tabY, tabW, tabH, tabH / 2);
     ctx.fillStyle = "transparent"; ctx.strokeStyle = DK.trackLine; ctx.lineWidth = 1;
     rrPath(tabX, tabY, tabW, tabH, tabH / 2); ctx.stroke();
@@ -3538,7 +3620,7 @@ module.exports = function (G) {
     }
 
     // 网格：三套候选布局里取单格最大，横屏手机自然落到 6×2
-    const gridTop = tabY + tabH + 13;
+    const gridTop = SL.gridTop;
     const gridBottom = H - safe.bottom - 32;
     const gridW = W - safe.left - safe.right - 28;
     const gridH = Math.max(80, gridBottom - gridTop);
@@ -3653,12 +3735,36 @@ module.exports = function (G) {
     else if (active) foot = "正在播放：" + (packs.find(p => p.key === playingPack) || pack).name + " · " + (sp.name || "");
     else foot = pack.desc + " · 点一下卡片就能听";
     text(foot, W / 2, H - safe.bottom - 13, "12px sans-serif", active ? C.tealDeep : C.ink3);
+    /* 广告层只在横屏出现：每帧渲染完打个点，供它判定"主内容已完成布局"后再 show */
+    if (G.ad && G.ad.pageFrame) G.ad.pageFrame("sound");
     // 正在淡出到别的页面：本帧不再接收点击，避免"返回后又被点响一条"
     if (G.nextScreen && G.nextScreen !== "sound") ui.buttons.length = 0;
   };
 
-  ui.drawSummon = () => {
+  /* 召唤页卡牌区版式：绘制层与广告位（G.summonAdRect）共用同一份计算，
+     避免两处公式各算一遍然后漂移。所有长度都是虚拟手机坐标，外层由 S 统一放大。 */
+  function summonLayout() {
     const { W, H, land, m, safe } = layout();
+    const bh = 56;                                     // 底部按钮高度
+    const bMargin = 20;                                // 底部间距
+    const titleH = safe.top + 60;                      // 标题区占用高度
+    const footerH = safe.bottom + bh + bMargin + 10;   // 底部按钮占用高度（指示点已删）
+    const availH = Math.max(0, H - titleH - footerH);  // 卡牌区可用总高度
+    // 动态调整卡牌尺寸：加高卡身吃满可用空间（不压底部按钮）
+    const CWbase = Math.min(W * 0.68, 280);
+    const CH = Math.min(Math.round(CWbase * 1.3), Math.max(0, availH - 8));   // 高度优先吃满可用空间
+    const CW = Math.min(Math.round(CWbase), Math.max(0, Math.round(CH / 1.3)));
+    const gap = 20;
+    return {
+      W, H, land, m, safe, titleH, availH, CW, CH, gap,
+      step: CW + gap,
+      cx0: W / 2,                                      // 水平中心
+      cy0: titleH + availH / 2                         // 垂直中心：在可用区域内平分空间
+    };
+  }
+
+  ui.drawSummon = () => {
+    const { W, H, safe, CW, CH, step, cx0, cy0 } = summonLayout();
     const kinds = G.summonKinds ? G.summonKinds() : (G.CAT_KINDS || []);
     const P = G.summonPick || { idx: 0, off: 0, t0: performance.now() };
     if (!G.summonPick) G.summonPick = P;
@@ -3701,20 +3807,7 @@ module.exports = function (G) {
 
     text("召唤猫咪", W / 2, safe.top + 34, "22px sans-serif", C.ink);
 
-    // 卡牌滑动切换逻辑：优化尺寸计算，确保在不同高度屏幕下均不被遮挡
-    const bh = 56;                                     // 底部按钮高度
-    const bMargin = 20;                                // 底部间距
-    const titleH = safe.top + 60;                      // 标题区占用高度
-    const footerH = safe.bottom + bh + bMargin + 10;   // 底部按钮占用高度（指示点已删）
-    const availH = H - titleH - footerH;               // 卡牌区可用总高度
-    
-    // 动态调整卡牌尺寸：加高卡身吃满可用空间（不压底部按钮）
-    const CWbase = Math.min(W * 0.68, 280);
-    const CH = Math.min(Math.round(CWbase * 1.3), availH - 8);   // 高度优先吃满可用空间
-    const CW = Math.min(Math.round(CWbase), Math.round(CH / 1.3));
-    const gap = 20, step = CW + gap;
-    // 垂直中心点：在可用区域内平分空间
-    const cx0 = W / 2, cy0 = titleH + availH / 2;
+    // 卡牌滑动切换逻辑：尺寸与中心点全部来自 summonLayout（与广告位共用同一份计算）
     
     // 位移量：拖动中跟手，松手后按回弹动画衰减（不能回落到残留的拖动位移，否则会跳位）
     let off = 0;
@@ -3855,6 +3948,9 @@ module.exports = function (G) {
 
     // 自定义录入弹窗画在卡牌之上（命中区也后 push，优先于背面卡牌）
     if (ui.summonEdit) drawSummonEdit({ W, H, safe });
+
+    /* 广告层只在召唤页出现：每帧渲染完打个点，供它判定"主内容已完成布局"后再 show */
+    if (G.ad && G.ad.pageFrame) G.ad.pageFrame("summon");
   };
 
   /* ================= 游戏内 HUD =================
@@ -3993,6 +4089,25 @@ module.exports = function (G) {
     if (sea) text("本局海域 · " + sea.name, W / 2, H * 0.42 + 138, "14px sans-serif", "rgba(255,255,255,.62)");
   };
 
+  /* 原生模板广告位（由 ad.js 读取）：仅横屏倒计时页。
+     倒计时是全屏蒙版 + 中央大数字，顶部右侧（胶囊左侧）是干净留白——广告贴顶靠右浮在那里，
+     不压数字与「准备……」文案。竖屏顶部太窄、蒙版上数字占比大 → 不出。 */
+  G.countdownAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
+    const { W, H, land, safe, menu } = layout();
+    if (!land) return null;
+    const menuL = menu ? menu.left : W - safe.right;
+    const rightLimit = Math.floor(menuL - 8);
+    const width = Math.max(120, Math.min(160, Math.round(W * 0.19)));
+    const left = rightLimit - width;
+    const top = Math.round(safe.top + 8);
+    if (width < 120 || left < safe.left || top + 96 > H * 0.42 - 48) return null;
+    return G.ad.fit([{ left, top, width, height: 96 }], {
+      pad: 8,
+      avoid: []
+    });
+  };
+
   /* ================= 暂停 ================= */
   ui.drawPause = () => {
     const { W, H, land } = layout();
@@ -4070,16 +4185,32 @@ module.exports = function (G) {
       ["触碰次数", R.touches || 0], ["总捕获", R.hits || 0],
       ["命中率", (R.acc || 0) + "%"], ["最高连击", R.maxCombo || 0]
     ];
-    /* 左上角设置入口：结算页也能直接改设置。横竖屏共用，不挤占底部四个主按钮；
-       关闭抽屉后回到本页而不是跳回首页（见 G.openSettings(back)）。 */
+    /* 左上角返回入口：回到二级菜单的选项卡页（玩法卡 / 场景卡），不再开设置抽屉。
+       胶囊尺寸、位置、底色描边与原来的设置键完全一致，只把图标与文案换成返回语义；
+       图标沿用二级页胶囊返回键(backPill)的 ‹ 箭头画法，保证同一套视觉语言。
+       内部分组（箭头 + 间距 + 文字）按实测文字宽整体居中——齿轮换成细线箭头后视觉重量变轻，
+       左对齐会显得内容贴边、右侧空出一大块。 */
     {
       const sw = 76, sh = 34, sx = safe.left + 12, sy = safe.top + 10;
       ctx.fillStyle = "rgba(255,255,255,.94)";
       ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
       G.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill(); ctx.stroke();
-      drawVecIcon("gear", sx + 17, sy + sh / 2, 12, C.tealDeep);
-      text("设置", sx + 46, sy + sh / 2 + 1, "13px sans-serif", C.tealDeep);
-      btn(sx, sy, sw, sh, () => G.openSettings("result"));
+      ctx.font = "13px sans-serif";
+      const lab = "返回", tw = ctx.measureText(lab).width;
+      const arrowW = 6, gap = 7, group = arrowW + gap + tw;
+      const gx = sx + (sw - group) / 2, acy = sy + sh / 2, acx = gx + arrowW / 2;
+      // ‹ 箭头：线宽/端点与 backPill 一致（同样两笔折线，不做填充）
+      ctx.save();
+      ctx.strokeStyle = C.tealDeep; ctx.lineWidth = 2;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(acx + 2.8, acy - 4.4);
+      ctx.lineTo(acx - 2.8, acy);
+      ctx.lineTo(acx + 2.8, acy + 4.4);
+      ctx.stroke();
+      ctx.restore();
+      text(lab, gx + arrowW + gap + tw / 2, acy + 1, "13px sans-serif", C.tealDeep);
+      btn(sx, sy, sw, sh, () => G.backToPick());
     }
     if (land) {
       const edgeL = safe.left + 24, edgeR = W - safe.right - 24;
@@ -4228,21 +4359,159 @@ module.exports = function (G) {
     }
   };
 
+  /* 原生模板广告位（由 ad.js 读取）：横屏「标题右侧」那块空白。
+     标题与 tab 行都是居中的，右侧从 tab 右缘（播放中还会多一颗「停止」）一直到微信胶囊之间
+     是整片空背景，广告就落在这里：右缘贴胶囊左侧、下缘贴网格上沿——不碰标题/停止键，也不压卡片。
+     竖屏不出：网格几乎顶到 tab 行，右侧只剩一条缝，硬塞会盖住最右一列卡片。 */
+  G.soundAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
+    const L = soundLayout();
+    if (!L.land) return null;
+    const pad = 8;
+    /* 所有边界都取整再算：ad.fit 里 R.right 是 left + Math.floor(w)，
+       边界留小数会让"贴边"变成"差 0.02px 相交"，整条被 avoid 判掉。
+       左边界 = tab 右缘 + 停止键预留（10 间距 + 46 宽 + 余量）。
+       【窄屏保底】虚拟宽较小的档（如 1024×768 → 662），tab 居中后右侧整片留白只有
+       ~100px，标准 58 预留会把广告压到 <MIN_WIDTH(120) 直接不出。这里按右缘可达宽度
+       反推 leftLimit，确保留白至少 120；代价是广告可能盖住停止键最右一小段——浮卡
+       本就允许遮挡，宁可轻微遮挡也要出得来（与高度截断同一原则）。 */
+    const navRight = L.menu ? L.menu.left : L.W - L.safe.right;
+    const leftLimit = Math.min(
+      Math.ceil(L.tabX + L.tabW + 58),
+      Math.floor(navRight - pad - 120)
+    );  // 停止键预留（10间距+46宽+2呼吸）；大屏窄虚拟宽下多留 6px 给广告过 MIN_WIDTH
+    /* 右边界：微信胶囊左缘（横屏胶囊就钉在右上角，广告不许钻到它下面去） */
+    const rightLimit = Math.floor((L.menu ? L.menu.left : L.W - L.safe.right) - pad);
+    const gridTop = Math.round(L.gridTop);
+    const bandW = rightLimit - leftLimit;
+    const bandH = gridTop - 6 - (Math.ceil(L.safe.top) + pad);
+    if (bandW < 120 || bandH < 60) return null;   // 空白带太窄：这条广告不出
+    const measured = Number(G.soundAdMeasuredH) || 0;
+    const cands = [];
+    /* 模板高度随宽度等比走：从最宽往窄试。没实测值时按 0.6×宽 估（原生模板 左图右文 /
+       上图下文 之间的中间值）。
+       【关键】实测高度只用来定 top（让下缘贴齐网格上沿），绝不再拿它做淘汰判定——
+       真机素材回传的真实高度可能比这条右上窄带还高（bandH≈81，素材常 100+），
+       旧的 if(h>bandH) continue 会把所有候选跳过 → 返回 null → ad.realign
+       立刻 leave 把已 show 的广告销毁，表现就是测试正常、真机不出。
+       改成 Math.min 截断到带高：浮卡本就允许遮挡，宁可素材略溢出压到网格上沿一点，
+       也要保证广告出得来（与 result 横屏的截断做法一致）。 */
+    for (let w = Math.min(200, bandW); w >= 120; w -= 10) {
+      const rawH = measured || Math.round(w * 0.6);
+      const h = Math.min(rawH, bandH);
+      cands.push({ left: rightLimit - w, top: gridTop - 6 - h, width: w, height: h });
+    }
+    if (!cands.length) return null;
+    return G.ad.fit(cands, {
+      pad: pad,
+      avoid: [
+        { left: 0, top: 0, width: leftLimit, height: gridTop },              // 返回/分享/标题/tab/停止
+        { left: 0, top: gridTop, width: L.W, height: L.H - gridTop }         // 卡片网格
+      ]
+    });
+  };
+
+  /* 原生模板广告位（由 ad.js 读取）：只落在横屏「卡牌左侧」那半屏留白里。
+     竖屏卡片自身就吃掉 68% 屏宽，左右只剩一条缝 → 返回 null，不硬塞。
+     右边界贴住当前卡左缘（留 14px 呼吸），宽度上限 260——不按"左侧那张缩小半透明卡"
+     再往里收：那样在 765 / 667 宽的横屏上只剩 100 出头，宁可窄成一条缝不如不出，
+     而一旦收窄就变成"大屏窄、小屏宽"的怪比例。代价是滑到中间时广告会浮在
+     左侧那张半透明卡上方（原生广告层本就在 canvas 之上），这是刻意的取舍。
+     top 与当前卡顶对齐，视觉上与卡片平齐；高度由广告模板自己决定。 */
+  G.summonAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
+    const L = summonLayout();
+    if (!L.land) return null;
+    const left = L.safe.left + 14;
+    const right = L.cx0 - L.CW / 2 - 14;          // 当前卡左缘 − 呼吸
+    const width = Math.min(260, Math.floor(right - left));
+    if (width < 120) return null;                 // 留白太窄：这条广告不出，宁可空着
+    return G.ad.fit([{ left: left, top: L.cy0 - L.CH / 2, width: width, height: 110 }], {
+      pad: 8,
+      /* 只避当前卡：左侧那张半透明卡是刻意的遮挡（见上），不进 avoid */
+      avoid: [{ left: L.cx0 - L.CW / 2, top: L.cy0 - L.CH / 2, width: L.CW, height: L.CH }]
+    });
+  };
+
+  /* 原生模板广告位（由 ad.js 读取）：选场景页横屏「场景卡左侧」那条空白竖带
+     （用户标注的落点）。几何与 drawBgPick 的 land 分支同式，改绘制时必须同步这里。
+     左缘贴安全区，右缘止于当前主卡左边界——不压卡、不压底部设置面板；
+     竖屏主卡几乎占满屏宽、两侧无干净留白 → 返回 null 不出。 */
+  G.bgpickAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
+    const { W, H, land, safe } = layout();
+    if (!land) return null;
+    const k = Math.max(.78, Math.min(1.12, Math.min(H / 431, W / 765)));
+    const F = n => Math.max(1, Math.round(n * k));
+    const edgeL = safe.left + 14, edgeR = W - safe.right - 14;
+    const cx0 = safe.left + (W - safe.left - safe.right) / 2;
+    const top = safe.top + F(10), navS = F(40);
+    const topEnd = top + navS + F(12);
+    const panelH = F(94), panelY = H - safe.bottom - F(10) - panelH;
+    const dotY = panelY - F(18), cardBottom = dotY - F(12);
+    const zoneH = cardBottom - topEnd;
+    const CH = Math.max(150, Math.min(Math.round(zoneH * .94), Math.round((edgeR - edgeL) * .29)));
+    const CW = Math.min(Math.round(CH * 1.78), Math.round(edgeR - edgeL - F(10)));
+    const cardY = topEnd + Math.max(0, (zoneH - CH) / 2);
+    const cardLeft = cx0 - CW / 2;
+    /* 广告放到返回按钮正下方：左缘与返回键对齐(edgeL)，顶边紧挨返回键下缘(top+navS+6)。
+       宽度向右展开但止于主卡左缘——不压主卡；这是用户指定的二级页落点。 */
+    const left = Math.ceil(edgeL);
+    const adTop = Math.round(top + navS + 6);
+    const right = Math.floor(cardLeft - 8);
+    const width = right - left;
+    const h = Number(G.bgpickAdMeasuredH) || 110;
+    /* 返回键下方竖向空间很小（主卡从 cardY 就开始），广告放在这里必然压到主卡上部——
+       浮卡本就允许遮挡，用户明确要贴着返回键，故不把主卡列入 avoid。
+       只避顶部返回键/标题行与底部设置面板。 */
+    if (width < 120 || adTop + h > panelY - 6) return null;
+    return G.ad.fit([{ left: left, top: adTop, width: width, height: h }], {
+      pad: 8,
+      avoid: [
+        { left: 0, top: 0, width: W, height: top + navS + 4 },  // 顶部返回键 + 标题行
+        { left: 0, top: panelY, width: W, height: H - panelY }  // 底部设置面板
+      ]
+    });
+  };
+
   /* 原生模板广告位（由 ad.js 读取）：只落在结算页竖屏的"标题 ↔ 数据卡"窄带里，
      整条位于四按钮（2×2 网格，by1/by4）与数据卡上方，不压任何按钮与数据。
-     横屏不出——设置键 + 模式标签药丸把标题带占满，没有干净留白。
      带子太窄（卡片被推得靠上、留白不足）时返回 null，静默跳过。 */
   G.resultAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
     const { W, H, land, safe } = layout();
-    if (land) return null;                       // 横屏标题区被设置键 + 模式标签占满，不展示
     const innerH = H - safe.top - safe.bottom;
+    const h = Number(G.resultAdMeasuredH) || 96;   // 实测高度回传前的估算
+    if (land) {
+      /* 横屏：左上角留白——返回键下方、居中标题左侧、数据卡上方那块空地（用户标注的落点）。
+         标题与模式标签都居中（centerX），不占左缘；数据卡整行在 cardY 以下，广告下缘留 8px。 */
+      const navBottom = safe.top + 10 + 34 + 8;            // 返回胶囊下沿 + 呼吸
+      const titleTop = safe.top + Math.max(60, Math.min(78, innerH * 0.10));
+      const cardY = titleTop + 88 + Math.max(16, (H - safe.bottom - 64 - 18 - (titleTop + 88) - 78) / 2);
+      const left = Math.ceil(safe.left + 12);
+      const top = Math.ceil(navBottom);
+      const width = Math.min(200, Math.round(W * 0.25));
+      const maxH = cardY - top - 8;
+      if (width < 120 || maxH < 60) return null;
+      const height = Math.min(h, maxH);
+      return G.ad.fit([{ left: left, top: top, width: width, height: height }], {
+        pad: 8,
+        avoid: [
+          { left: 0, top: 0, width: W, height: navBottom - 4 },    // 返回键 + 顶部
+          { left: 0, top: cardY, width: W, height: H - cardY }     // 数据卡 + 按钮整块
+        ]
+      });
+    }
     const left = 24;
     const top = safe.top + innerH * 0.15 + 52;   // 描述行（标题 +38，约 14px）之下
     const width = Math.min(W - left - safe.right - 24, 320);
     const bh2 = 54;
     const btnTop = H - safe.bottom - 26 - 2 * (bh2 + 14);   // 2×2 网格上沿
-    const height = btnTop - top - 8;           // 距按钮留 8
-    if (width < 160 || height < 84) return null;  // 留白太窄不出
-    return { left, top: Math.round(top), width: Math.floor(width) };
+    const height = btnTop - top - 8;             // 距按钮留 8
+    if (width < 160 || height < 84) return null; // 留白太窄不出
+    return G.ad.fit([{ left: left, top: top, width: width, height: height }], {
+      pad: 10,
+      avoid: [{ left: 0, top: btnTop, width: W, height: H - btnTop }]   // 2×2 按钮网格
+    });
   };
 };

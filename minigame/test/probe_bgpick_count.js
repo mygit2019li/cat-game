@@ -134,7 +134,8 @@ function runCase(groupKey, targetType, expectPlusMinus, expectNote, extraConfig)
   G.ui.drawBgPick();
   const hits = countChangingButtons();
   const expectedCountKey = groupKey && groupKey === "pool" ? "ffCount" : "preyCount";
-  const displayText = __textLog.find(t => /^(\d+)\s*(只|条)/.test(String(t)));
+  // 量词跟 PLAY_TERM 一致：鱼=条、激光=个、其余=只（旧版只认只/条，激光那条一直抓不到）
+  const displayText = __textLog.find(t => /^(\d+)\s*(只|条|个)/.test(String(t)));
   return {
     groupKey,
     targetType,
@@ -142,7 +143,7 @@ function runCase(groupKey, targetType, expectPlusMinus, expectNote, extraConfig)
     notes: G.ui.buttons.length,
     expectedCountKey,
     displayText,
-    expectedDisplayText: G.config[expectedCountKey] + (targetType === "fish" ? " 条" : " 只")
+    expectedDisplayText: G.config[expectedCountKey] + " " + ({ fish: "条", laser: "个" }[targetType] || "只")
   };
 }
 
@@ -155,7 +156,7 @@ const ok = (c, m, e) => {
 
 const cases = [
   // [groupKey, targetType, 期望±回调数, 说明]
-  ["frog", "frog", 0, "青蛙跳跳 —— 数量由阶段按荷叶数自动 3→4→5，调 preyCount 无效"],
+  ["frog", "frog", 2, "青蛙跳跳 —— 数量跟「猎物数量」设置走（1–5，受荷叶数封顶），可手调"],
   ["frog", "tadpole", 0, "蝌蚪快跑 —— 阶段基线 + 命中能力动态 1–3，不可手调"],
   ["pool", "pool", 2, "暗夜荧光 —— ffCount 1–7 真可调"],
   ["butterfly", "butterfly", 2, "蝴蝶花园 —— preyCount 可调"],
@@ -177,7 +178,7 @@ for (const [gk, tt, expect, desc, extraConfig] of cases) {
   }
 }
 
-/* ---- 补充：徽章文案抽查（青蛙应显示只读文案而非「N 只」） ---- */
+/* ---- 补充：徽章文案抽查（蝌蚪仍应显示只读文案；青蛙已改为可调，应显示「N 只」） ---- */
 function captureTexts(groupKey, targetType) {
   G.config = Object.assign({}, G.config, { targetType, preyCount: 3, ffCount: 3 });
   G.bgPick = {
@@ -193,8 +194,9 @@ function captureTexts(groupKey, targetType) {
 
 try {
   const frogTexts = captureTexts("frog", "frog");
-  ok(frogTexts.some(t => t.includes("自动")), "青蛙卡显示「自动 x–y 只」只读徽章", frogTexts.filter(t => t.includes("自动")).join(" | ") || "(未捕获)");
-  ok(frogTexts.some(t => t === "猎物数量"), "青蛙卡标题改用中性「猎物数量」", frogTexts.includes("猎物数量") ? "ok" : "(未出现)");
+  ok(!frogTexts.some(t => t.includes("自动")), "青蛙卡不再显示「自动 x–y 只」只读徽章", frogTexts.filter(t => t.includes("自动")).join(" | ") || "(无自动徽章)");
+  ok(frogTexts.some(t => t === "青蛙数量"), "青蛙卡标题为「青蛙数量」", frogTexts.includes("青蛙数量") ? "ok" : "(未出现)");
+  ok(frogTexts.some(t => /\d+\s*只/.test(t)), "青蛙卡显示可调数值（N 只）", frogTexts.filter(t => /\d+\s*只/.test(t)).join(" | ") || "(未捕获)");
   const tadTexts = captureTexts("frog", "tadpole");
   ok(tadTexts.some(t => t.includes("自动 1")), "蝌蚪卡仍显示「自动 1–3 只」", tadTexts.filter(t => t.includes("自动")).join(" | ") || "(未捕获)");
   const bflyTexts = captureTexts("butterfly", "butterfly");

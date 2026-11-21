@@ -18,7 +18,7 @@ module.exports = function (G) {
     vibrate: true,           // 震动默认开
     adaptive: true,          // 自适应辅助默认开（猫更容易抓到）
     bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
-    bg_fish: "kelp",         // 捕鱼可选海域（水草森林 / 泳池追鱼）
+    bg_fish: "kelp",         // 捕鱼可选海域（小河戏鱼 / 水草森林 / 鱼群巡游）
     bg_tadpole: "paper",     // 蝌蚪快跑：纯白纸面（唯一场景，不再做场景选择）
     tadStyle: "ink",         // 蝌蚪造型：ink 墨影 / line 线条 / brush 水墨 / dash 一笔
     frogMode: "frog",        // 青蛙卡内的玩法切换：frog=青蛙跳跳 / tadpole=蝌蚪快跑
@@ -152,10 +152,11 @@ module.exports = function (G) {
       { key: "room",  name: "室内房间", desc: "木地板 · 窗光 · 地毯" },
       { key: "swarm", name: "群鼠乱窜", desc: "俯视群鼠 · 满屏乱窜" }
     ],
-    /* 三个场景即游戏内真实海域（与 SEA_THEMES 一致）：泳池追鱼 / 水草森林 / 鱼群巡游。
-       顺序让默认的 kelp 居中；key 与跨局记忆都不变。 */
+    /* 三个场景即游戏内真实海域（与 SEA_THEMES 一致）：小河戏鱼 / 水草森林 / 鱼群巡游。
+       顺序让默认的 kelp 居中；key 与跨局记忆都不变（pool 这个 key 从「泳池追鱼」沿用下来，
+       换成小河布景后仍然是「鱼不出屏」的那一套玩法，存档里的 bg_fish=pool 照旧生效）。 */
     fish: [
-      { key: "pool",  name: "泳池追鱼", desc: "亮蓝池水 · 焦散光网" },
+      { key: "pool",  name: "小河戏鱼", desc: "清澈溪流 · 卵石水草" },
       { key: "kelp",  name: "水草森林", desc: "蓝色海水 · 绿水草丛" },
       { key: "school", name: "鱼群巡游", desc: "深海鱼群 · 结群游动" }
     ],
@@ -184,11 +185,13 @@ module.exports = function (G) {
     { key: "dash",  name: "一笔", desc: "极简逗号 · 一个笔触" }
   ];
   /* 首页六张卡不变；青蛙/暗夜荧光/蝴蝶/激光各有自己的二级玩法卡。
-     卡片不只换文字，分别落到 configKey 指定的真实玩法参数。 */
+     卡片不只换文字，分别落到 configKey 指定的真实玩法参数。
+     countMax = 该玩法手动可调数量的上限（不填按 7）：青蛙跳跳受荷叶数封顶——常态 6 片叶要留
+     1 片空叶供轮换，最多同屏 5 只，所以把二级页的「+」收在 5，避免选了 6/7 却只出现 5 只。 */
   G.MODE_GROUPS = {
     frog: {
       title: "青蛙玩法", sub: "先选猎物，再开始", step: "01 选玩法  /  02 开始",
-      configKey: "frogMode", count: "auto", cards: G.FROG_MODES,
+      configKey: "frogMode", countMax: 5, cards: G.FROG_MODES,
       targetByKey: { frog: "frog", tadpole: "tadpole" }
     },
     pool: {
@@ -627,8 +630,11 @@ module.exports = function (G) {
      那时需要在这里填入企业 ID corpId（url 为客服链接，可选）。 */
   G.SUPPORT = { corpId: "", url: "" };
   /* 微信原生模板广告位 ID（流量主后台 → 广告位管理 → 新建「原生模板广告」）。
-     只用于「电子猫粮机」这一非游戏页面；留空时广告层自动跳过、不报错。 */
-  G.AD_UNIT_ID = "";
+     用于首页 / 结算页 / 选场景 / 动物情绪 / 召唤 / 电子猫粮机六个非对局页面；留空时广告层自动跳过、不报错。 */
+  G.AD_UNIT_ID = "adunit-11387560cd72b333";
+  /* 插屏广告位 ID（流量主后台 → 广告位管理 → 新建「插屏广告」）。
+     打开「本周记录」弹窗时触发一次；留空或环境不支持 wx.createInterstitialAd 时静默跳过。 */
+  G.INTERSTITIAL_AD_UNIT_ID = "adunit-347047dcdea0cdfa";
   /* 猎物基础定义 */
   G.PREY_DEF = {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
@@ -724,7 +730,10 @@ module.exports = function (G) {
 
   /* 鱼玩法海域主题：每局自动轮换（换背景 + 专属环境/命中特效 + 轻微节奏差异）。
      speed 只乘游速（不碰命中盒，鱼 w/h 已校准勿动）；
-     decor=装饰类型（buildScene/drawSea 分支）；amb=环境粒子类型（fx.update 分支）。 */
+     decor=装饰类型（buildScene/drawSea 分支）；amb=环境粒子类型（fx.update 分支）；
+     fishVis=鱼类「视觉」缩放（只缩 draw 出来的尺寸，命中盒仍按原大小，手感不变）。
+     默认 1，只有水草森林收到 0.8：那片海草占掉大半屏宽，同尺寸的鱼在窄屏（小屏手机）上
+     显得又满又大，收两档（0.9 → 0.8）后鱼与草丛的比例才舒服。 */
   G.SEA_THEMES = [
     { key: "reef",  name: "珊瑚海",   speed: 1,    spark: "#ffd76a", ripple: "rgba(255,255,255,.85)",
       bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e", decor: "coral",  amb: "bubble" },
@@ -733,26 +742,48 @@ module.exports = function (G) {
     { key: "ice",   name: "冰海浮冰", speed: 1.08, spark: "#eaf6ff", ripple: "rgba(214,238,255,.85)",
       bg: ["#5c9cc0", "#3a76a0", "#22557c"], sand: "#8fb4c9", decor: "ice",    amb: "snow" },
     { key: "kelp",  name: "水草森林", speed: 1,    spark: "#ffd76a", ripple: "rgba(255,255,255,.85)",
-      bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e", decor: "kelp",   amb: "bubble" },
+      bg: ["#1b7f8f", "#10556a", "#0b3a4c"], sand: "#43635e", decor: "kelp",   amb: "bubble", fishVis: 0.8 },
     { key: "school", name: "鱼群巡游", speed: 1.3, spark: "#ffe9a8", ripple: "rgba(255,255,255,.9)",
       bg: ["#12406b", "#0c2e50", "#071e38"], sand: "#22405c", decor: "school", amb: "bubble" },
-    { key: "pool",  name: "泳池追鱼", speed: 1.12, spark: "#fff3b0", ripple: "rgba(255,255,255,.9)",
-      bg: ["#2aa4e0", "#1565b5", "#0e4a9e"], sand: "#2c6f9b", decor: "pool",   amb: "bubble" }
+    /* 小河戏鱼：浅溪俯视（对齐参考图的青绿溪水 + 透出的卵石河床 + 岸边草石）。
+       沙床/石头/水草不再走通用底床绘制，整屏由 drawCreekSea 接管，这里只留色板给 HUD、
+       结算卡与场景卡预览取色（bg = 远→近三档水色，sand = 河床卵石主色） */
+    { key: "pool",  name: "小河戏鱼", speed: 1.02, spark: "#f2ffd8", ripple: "rgba(238,255,232,.92)",
+      bg: ["#5f9573", "#356b52", "#1e4736"], sand: "#6e7550", decor: "pool",   amb: "bubble" }
   ];
-  /* 泳池追鱼专属鱼种：与深海鱼完全区分——泳池里只有观赏金鱼这一种（贴近真实金鱼），
-     三个色型随机出现；专属造型 shape:"poolGold"（蛋形圆身 + 背深橙到腹浅金纵向渐变 +
-     半透明暖橙鳍 + 鳃盖弧线 + 鳞片纹 + 黑亮圆眼）；136×76、游速偏快 + pulse 忽快忽慢 */
+  /* 小河戏鱼专属鱼种：河里的观赏鱼（对齐参考图的三条——红金鱼 / 黄金鱼 / 乌白云锦鲤），
+     三个色型随机出现；专属造型 shape:"creekFish" 是「俯视偏斜」视角——
+     卵形侧扁体 + 尾柄收细 + 半透明大扇尾（尾尖近白）+ 两侧胸鳍 + 脊背高光 + 双黑眼
+     （俯视能看到头的两侧各一只）。128×76 的命中盒略大于画出来的鱼身，猫好拍。 */
   G.POOL_FISH_SPECIES = [
-    { key: "poolgold", name: "泳池金鱼", shape: "poolGold", speed: 0.95, w: 136, h: 76, behavior: "pulse",
+    { key: "creekred", name: "红金鱼", shape: "creekFish", speed: 0.95, w: 128, h: 76, behavior: "pulse",
       variants: [
-        { body: "#ff8c2b", bodyGrad: ["#ef520f", "#ffdca8"], fin: "#ffb877", accent: "#241a14", pattern: null },
-        { body: "#e8562a", bodyGrad: ["#c9310b", "#ffd0a0"], fin: "#ff9e6e", accent: "#20140f", pattern: null },
-        { body: "#ffb730", bodyGrad: ["#f08c00", "#ffe6b8"], fin: "#ffd08a", accent: "#2a1d12", pattern: null }
+        { body: "#e8452a", bodyGrad: ["#d0331c", "#ff8a5c"], fin: "#ff8f66", tip: "#ffe0d2",
+          accent: "#1b1210", pattern: null, tailK: 1 }
+      ] },
+    { key: "creekyellow", name: "黄金鱼", shape: "creekFish", speed: 1.02, w: 128, h: 76, behavior: "pulse",
+      variants: [
+        { body: "#f2bf1c", bodyGrad: ["#e2a309", "#ffe081"], fin: "#ffd95c", tip: "#fffbe8",
+          accent: "#241b0c", pattern: null, tailK: 1.06 }
+      ] },
+    { key: "creekkoi", name: "乌白云锦鲤", shape: "creekFish", speed: 0.9, w: 128, h: 76, behavior: "pulse",
+      variants: [
+        { body: "#f4efe6", bodyGrad: ["#e6e0d3", "#fffdf8"], fin: "#dedcd0", tip: "#f8f8ee", tailK: 0.86,
+          accent: "#14141a", pattern: "koi",
+          /* 斑块按鱼身归一化坐标：x 0=尾柄 1=吻端，y 0=背 1=腹；rx/ry 为半径比例。
+             参考图的墨斑是"连成片的鞍状"：三块大斑沿背脊前后相连，再补一块头顶、一块尾柄 */
+          patches: [
+            { x: 0.36, y: 0.22, rx: 0.20, ry: 0.62, rot: -0.22 },
+            { x: 0.60, y: 0.80, rx: 0.15, ry: 0.52, rot: 0.26 },
+            { x: 0.80, y: 0.30, rx: 0.14, ry: 0.58, rot: -0.12 },
+            { x: 0.94, y: 0.58, rx: 0.12, ry: 0.48, rot: 0.06 },
+            { x: 0.12, y: 0.30, rx: 0.11, ry: 0.44, rot: 0 }
+          ] }
       ] }
   ];
-  G.POOL_FISH_KEYS = ["poolgold"];
+  G.POOL_FISH_KEYS = ["creekred", "creekyellow", "creekkoi"];
   /* 鱼群巡游专属鱼种：极小的银蓝"彗星"小鱼（亮头长尾迹，独立表不进深海全表），
-     数量多（36→44→52）聚成"饵球"——鲸鱼捕猎式致密鱼团，整体漂移+球内旋转 */
+     数量多（36→44→52）聚成"饵球"——鲸鱼捕食式致密鱼团，整体漂移+球内旋转 */
   G.SCHOOL_FISH_SPECIES = [
     { key: "minnow", name: "小银鱼", shape: "minnow", speed: 1.15, w: 52, h: 20, burst: 3.4, dartMul: 0.9,
       variants: [

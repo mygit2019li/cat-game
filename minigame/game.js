@@ -29,13 +29,13 @@ G.pauseHold = { active: false, t0: 0, progress: 0, id: null };   // HUD 暂停�
 let countT = 0, lastInt = -1;
 
 /* 设置抽屉：从首页左上角浮出，直接切屏（不走整屏淡入淡出），关闭时同样直接回首页。
-   入场动画为缩放 + 上浮淡入；G.settings.t0 是抽屉的入场时间戳，绘制层据此算展开进度。 */
-/* back = 关闭抽屉后回到的页面（默认首页）；结算页传 "result"，改完设置还能回到本局结果。 */
-G.openSettings = (back) => {
+   入场动画为缩放 + 上浮淡入；G.settings.t0 是抽屉的入场时间戳，绘制层据此算展开进度。
+   入口只有首页左上角的设置键——结算页已改为「返回」，抽屉不再需要「关掉后回哪页」的上下文。 */
+G.openSettings = () => {
   // 先解锁音频再记 t0：ensureAudio 首次创建 WebAudio 上下文可能阻塞上百毫秒，
   // 放在前面会把抽屉的入场时间戳"吃掉"，动画一帧都看不到
   if (G.ensureAudio) G.ensureAudio();
-  G.settings = { t0: performance.now(), back: back || "home" };
+  G.settings = { t0: performance.now() };
   G.screen = "settings"; G.nextScreen = null; G.transitionT = 0;
 };
 /* 关闭：先播反向滑出动画（200ms），动画结束后由 drawSettings 真正切回首页。
@@ -46,6 +46,9 @@ G.openModal = (key) => {
   G.modal = { key, t0: performance.now() };
   G.screen = key === "lb" ? "leaderboard" : "records";
   G.nextScreen = null; G.transitionT = 0;
+  /* 打开「本周记录」弹窗时触发一次插屏广告（仅 records，不含好友排行 lb）。
+     show 由 ad.js 内部兜底：实例未就绪 / 无填充 / 环境不支持都只记日志，不挡弹窗。 */
+  if (key === "records" && G.ad && G.ad.showInterstitial) G.ad.showInterstitial();
 };
 
 /* ================= 好友排行授权 =================
@@ -116,6 +119,14 @@ G.playSoundCard = (animal, snd) => {
   return ok;
 };
 
+/* 带原生模板广告位的页面白名单（与 js/ad.js 的 page key 一一对应）。
+   对局页只有横屏倒计时（counting）带广告；playing / paused 与设置、记录、声音、背景选择页不在其中：
+   这些页面要么打断操作、要么没有干净留白，一律不建实例。
+   挂在 G 上而不是用顶层 const：开发者工具热重载时旧作用域的闭包会留在 G.switchScreen 上，
+   顶层 const 在新作用域里拿不到（ReferenceError: AD_SCREENS is not defined），
+   走 G 就不会有这个问题。 */
+G.AD_SCREENS = ["feeder", "home", "result", "bgpick", "sound", "summon", "counting"];
+
 G.switchScreen = (name) => {
   if (G.screen === name) return;
   // 离开召唤页时收起自定义录入面板（面板只在 summon 页画，不收会在下次进页时错弹出来）
@@ -123,13 +134,13 @@ G.switchScreen = (name) => {
   // 离开声音页时停止试听（含从声音页直接跳设置等所有路径）
   if (G.screen === "sound" && name !== "sound" && G.stopAnimalSound) G.stopAnimalSound();
   // 离开任一广告位页面时销毁广告实例（hide + destroy），再进页会重新创建，不重复堆实例
-  if (G.ad && (G.screen === "feeder" || G.screen === "home" || G.screen === "result") && name !== G.screen) {
+  if (G.ad && G.AD_SCREENS.indexOf(G.screen) >= 0 && name !== G.screen) {
     G.ad.leave("switch:" + name);
   }
   // 进入带广告位的页面：尽早建实例（页面生命周期早期，早于首帧）。
-  // show 交给 pageFrame（首页/结算每帧打点）与 900ms 兜底；横屏或留白不足时 rect 返回 null，
+  // show 交给 pageFrame（首页/结算/召唤每帧打点）与 900ms 兜底；留白不足时 rect 返回 null，
   // ad.enter 自行静默跳过，不残留 page 标记。
-  if (G.ad && (name === "feeder" || name === "home" || name === "result")) {
+  if (G.ad && G.AD_SCREENS.indexOf(name) >= 0) {
     G.ad.enter(name);
   }
   G.nextScreen = name;
@@ -338,6 +349,33 @@ G.openBgPick = () => {
 };
 
 G.closeBgPick = () => { G.bgPick = null; G.switchScreen("home"); };
+
+/* 结算页左上角「返回」：回到二级菜单的选项卡页（玩法卡 / 场景卡），而不是首页。
+   入口路由与 G.requestStart 保持一致——有玩法组先回玩法卡页，否则回场景卡页；
+   两者都没有（理论上不会出现）才退回首页，保证「返回」永远有落点。
+   跳转前把本局残留状态收干净：预览用的旧猎物/特效、结算动画计时、暂停长按与
+   音频循环都不能带进选卡页，否则选卡页会带着上一局的余温重开。 */
+G.backToPick = () => {
+  const S = G.session;
+  S.running = false;
+  S.paused = false;
+  S.counting = false;
+  G.pauseHold.active = false; G.pauseHold.progress = 0; G.pauseHold.id = null;
+  G.shake = 0;
+  if (G.ui) G.ui.hudDimT = 0;
+  if (G.uiFX) G.uiFX.stagePop = 0;
+  if (G.stopMouseSqueak) G.stopMouseSqueak();
+  if (G.stopLadybugLoop) G.stopLadybugLoop();
+  if (G.fx && G.fx.clear) G.fx.clear();
+  if (G.clearPreys) G.clearPreys();
+  G.platform.keepScreen(false);
+  // 结算数据保留（切屏有 0.22s 淡出，此刻清空会让标题/数据先闪一下空值）；
+  // 下一次 G.endGame 会整体覆写，不会串到下一局。
+  const group = G.groupForType && G.groupForType(G.config.targetType);
+  if (group) { G.openModePick(G.groupKeyForType(G.config.targetType)); return; }
+  if (G.bgsFor && G.bgsFor(G.config.targetType).length) { G.openBgPick(); return; }
+  G.switchScreen("home");
+};
 
 /* 确认卡片 → 记住选择（跨局） → 开局 / 进入玩法场景选择 */
 G.confirmBgPick = () => {
@@ -700,9 +738,9 @@ function onHit(x, y, prey) {
     if (foldHit) { S.bonusHits++; G.playMilestone(); }
     G.floatText(x, y - 28, foldHit ? "折返截击 +2" : "+1", foldHit ? "big" : "");
   } else {
-    // 捕鱼命中：泳池海域走夸张的金橙水花、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
+    // 捕鱼命中：小河海域走浅色水花（青绿反光的白水花）、鱼群海域走彩虹纸屑+金环+专属配音（对齐逗猫捕鱼游戏），其余海域维持气泡
     const seaKey = G.session.sea && G.session.sea.key;
-    if (seaKey === "pool") G.splashBurst(x, y, S.combo >= 4, "gold");
+    if (seaKey === "pool") G.splashBurst(x, y, S.combo >= 4, "creek");
     else if (seaKey === "school") { G.confettiBurst(x, y); G.sparkBurst(x, y, "#dff2ff", 6); G.playSchoolPop(); }
     else {
       // 水草/珊瑚/深海/冰海：水花四溅（银白）+ 鱼鳞飞散 + 气泡——原来只有几个上浮气泡，几乎看不出"散开"
@@ -1059,9 +1097,9 @@ function loop() {
 
   // 广告实例兜底巡检：任何绕过 switchScreen 的页面切换，下一帧销毁，避免实例残留
   if (G.ad && G.ad.watchdog) G.ad.watchdog(G.screen);
-  // 广告首帧心跳：首页/结算每帧打一次点，累计两帧（布局已稳、入场动效已起）后再 show。
-  // 猫粮机页自带打点（feeder.js），这里跳过以免重复计数。
-  if (G.ad && G.ad.pageFrame && (G.screen === "home" || G.screen === "result")) {
+  // 广告首帧心跳：首页/结算/选场景每帧打一次点，累计两帧（布局已稳、入场动效已起）后再 show。
+  // 猫粮机页自带打点（feeder.js），声音/召唤页在各自绘制末尾打点，这里跳过以免重复计数。
+  if (G.ad && G.ad.pageFrame && (G.screen === "home" || G.screen === "result" || G.screen === "bgpick" || G.screen === "counting")) {
     G.ad.pageFrame(G.screen);
   }
 
@@ -1152,6 +1190,10 @@ G.platform.showCb.push(() => {
     try { G.platform.keepScreen(true); } catch (e) {}
   }
 });
+
+/* 冷启动首屏就是首页：没走 switchScreen，所以这里补一次 ad.enter。
+   （否则「第一次打开小游戏」这条最常见的路径上，首页广告永远不会建出来。） */
+if (G.screen === "home" && G.ad && G.ad.enter) G.ad.enter("home");
 
 requestAnimationFrame(loop);
 

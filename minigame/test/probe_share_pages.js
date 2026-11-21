@@ -151,7 +151,8 @@ function dumpImg(dataUrl, name) {
   const geo2 = await page.evaluate(() => {
     const G = window.G, P = G.platform, S = P.S || 1;
     const W = P.W / S, H = P.H / S;
-    const keys = G.ui.buttons.filter(b => b.w === 34 && b.h === 34)
+    /* 按 key 取顶部三颗键（旧版按 34×34 尺寸筛，按钮改成 40 之后就筛空了） */
+    const keys = G.ui.buttons.filter(b => ["back", "settings", "feeder-share"].indexOf(b.key || "") >= 0)
       .map(b => ({ k: b.key || "?", x: Math.round(b.x), y: Math.round(b.y), r: Math.round(b.x + b.w) }))
       .sort((a, b) => a.x - b.x);
     const sf = P.safe || {};
@@ -163,7 +164,7 @@ function dumpImg(dataUrl, name) {
   ok(geo2.keys.every(k => k.y === geo2.keys[0].y), "三颗圆键同高", JSON.stringify(geo2.keys.map(k => k.y)));
   ok(geo2.keys[1].x - geo2.keys[0].r === 8 && geo2.keys[2].x - geo2.keys[1].r === 8,
     "三颗圆键间距都是 8px", [geo2.keys[1].x - geo2.keys[0].r, geo2.keys[2].x - geo2.keys[1].r].join(" / "));
-  ok(geo2.keys[0].x === geo2.safeLeft + 12, "左边距 12（与首页齿轮对齐）", geo2.keys[0].x + " / safeLeft " + geo2.safeLeft);
+  ok(geo2.keys[0].x === geo2.safeLeft + 14, "左边距 14（与首页齿轮/其他二级页对齐）", geo2.keys[0].x + " / safeLeft " + geo2.safeLeft);
   ok(geo2.keys[2].r < geo2.W * 0.5, "分享键没顶到中场，标题有位置", geo2.keys[2].r + " vs " + Math.round(geo2.W / 2));
   await page.screenshot({ path: path.join(OUT, "02-feeder-portrait.png") });
 

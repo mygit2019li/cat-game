@@ -173,16 +173,9 @@ module.exports = function (G) {
           });
         }
       }
-      // 泳池主题专属：焦散网格间距 + 四角星芒（对齐泳池玩具参考图的网状光网 + 星光点）
-      if (th.decor === "pool") {
-        S.poolNet = { cs: Math.max(56, Math.round(Math.min(W, H) / 5.8)) };
-        S.poolStars = [];
-        const ns = Math.round(G.clamp(Math.min(W, H) / 85, 7, 13));
-        for (let i = 0; i < ns; i++) S.poolStars.push({
-          x: rand(0.06, 0.94), y: rand(0.08, 0.92), r: rand(5, 12),
-          ph: rand(0, Math.PI * 2), f: rand(0.6, 1.5), dx: rand(4, 12)
-        });
-      }
+      /* 小河戏鱼专属：卵石河床 / 苔藓 / 河石 / 岸边草丛 / 水下水草 / 浮叶 / 涟漪 / 碎金
+         （数据一次性生成，静态部分由 drawCreekBed 画进离屏缓存） */
+      if (th.decor === "pool") buildCreekData(S, W, H);
     }
     if (type === "pool") {
       /* 第一版荧光：深色石板地 + 环境萤尘（微光点缓漂呼吸），不再轮换主题。 */
@@ -394,8 +387,8 @@ module.exports = function (G) {
   function drawSea(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
     const th = S.theme || G.seaThemeNow();
-    // 泳池追鱼：整屏泳池布景（渐变池水 + 阳光 + 网状焦散 + 星芒 + 猫爪），无沙床/石头/水草
-    if (th.decor === "pool") { drawPoolSea(ctx, t); return; }
+    // 小河戏鱼：整屏溪流布景（青绿透水 + 卵石河床 + 岸边草石 + 水面涟漪 + 碎金）
+    if (th.decor === "pool") { drawCreekSea(ctx, t); return; }
     // 背景：主题渐变（珊瑚海=原型色，深海/冰海/水草各自换色系）
     const g = ctx.createRadialGradient(W / 2, 0, 0, W / 2, 0, Math.max(W, H) * 1.1);
     g.addColorStop(0, th.bg[0]); g.addColorStop(0.52, th.bg[1]); g.addColorStop(1, th.bg[2]);
@@ -524,43 +517,457 @@ module.exports = function (G) {
     });
   }
 
-  /* ============ 泳池追鱼布景（对齐泳池玩具参考图；玩家是猫，画面只留水景） ============
-     亮蓝池水纵向渐变 + 阳光辉光/光柱 + 网状焦散光网（不规则格点缓漂连网，
-     青白细线双层 + 亮斑呼吸）+ 四角星芒闪烁 */
+  /* ============ 小河戏鱼布景（对齐参考图：俯视浅溪，玩家是猫，画面只留水景） ============
+     构图取自参考图：青绿透水 + 卵石河床 + 苔藓块 + 岸边河石与亮黄绿草丛 + 水下水草 +
+     水面一圈圈涟漪 + 漂浮黄叶 + 阳光碎金。
+     性能：河床/石头/水草/岸边草全是静态 → 一次性画进离屏缓存（drawCreekBed），
+     每帧只 drawImage 一次；动态部分只有焦散光网（~1/24s 重绘一次，走 poolCausticsCache）、
+     4 组环境涟漪、6 片浮叶、十几颗碎金，都是描边/小填充，多鱼同屏也不掉帧。 */
   const vhash = (i, j, k) => {                    // 确定性格点杂湊（焦散网顶点漂移相位）
     const s = Math.sin(i * 127.1 + j * 311.7 + k * 74.7) * 43758.5453;
     return s - Math.floor(s);
   };
-  function drawPoolSea(ctx, t) {
-    const S = G.scene, W = S.W, H = S.H;
-    // 池水：纵向渐变（浅亮天蓝 → 钴蓝，阳光泳池）
-    let g = ctx.createLinearGradient(0, 0, 0, H);
-    g.addColorStop(0, "#41b7ee"); g.addColorStop(0.36, "#1e8fdc");
-    g.addColorStop(0.72, "#1560b8"); g.addColorStop(1, "#0e4a9e");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 顶部阳光辉光
-    g = ctx.createRadialGradient(W * 0.5, -H * 0.3, 0, W * 0.5, -H * 0.3, Math.max(W, H) * 0.95);
-    g.addColorStop(0, "rgba(255,255,255,.28)"); g.addColorStop(0.45, "rgba(255,255,255,.10)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-    // 阳光光柱（泳池比海域更透亮）
-    for (let i = 0; i < 3; i++) {
-      const lx = W * (0.16 + i * 0.31) + Math.sin(t * 0.3 + i) * 14;
-      const lg = ctx.createLinearGradient(lx, 0, lx + 60, H);
-      lg.addColorStop(0, "rgba(215,245,255,.20)"); lg.addColorStop(1, "rgba(215,245,255,0)");
-      ctx.fillStyle = lg;
-      ctx.beginPath();
-      ctx.moveTo(lx, 0); ctx.lineTo(lx + 56, 0); ctx.lineTo(lx + 132, H); ctx.lineTo(lx + 30, H);
-      ctx.closePath(); ctx.fill();
+
+  /* ---------- 布景数据（一次生成，缓存层与动态层共用） ---------- */
+  function buildCreekData(S, W, H) {
+    const cl = G.clamp;
+    const C = S.creek = {};
+    C.seed = Math.floor(rand(0, 1e9));
+    // 焦散光网：格子比泳池大一号（浅水的光网本来就散）、线更淡
+    S.poolNet = { cs: Math.round(cl(Math.min(W, H) / 3.4, 96, 230)) };
+    function makeBlades(a, b) {
+      const arr = [], n = Math.round(rand(a, b));
+      for (let i = 0; i < n; i++) arr.push({
+        len: rand(0.45, 1), w: rand(2.6, 5.4), lean: rand(-0.85, 0.85),
+        tone: Math.floor(rand(0, 4)), ph: rand(0, Math.PI * 2)
+      });
+      return arr;
     }
-    drawPoolCaustics(ctx, t, W, H);               // 网状焦散光网 + 光斑
-    drawPoolStars(ctx, t);                        // 四角星芒（最上层的闪亮光点）
+    // ---- 卵石：数量跟屏幕面积走（小石铺满 + 少量大卵石），明暗差异要够才看得出"石头" ----
+    C.pebbles = [];
+    const np = Math.round(cl(W * H / 1500, 220, 460));
+    const tones = ["#9da783", "#909a76", "#aab28c", "#828d6a", "#b2b895", "#78835f", "#bcc09e", "#96a078"];
+    for (let i = 0; i < np; i++) {
+      const big = Math.random() < 0.045;
+      const rx = big ? rand(7, 13) : rand(2.2, 6.6);
+      C.pebbles.push({
+        x: rand(-10, W + 10), y: rand(-10, H + 10),
+        rx, ry: rx * rand(0.58, 0.92), rot: rand(0, Math.PI),
+        c: tones[Math.floor(rand(0, tones.length))], a: rand(0.42, 0.78)
+      });
+    }
+    // ---- 细砂砾：铺一层 2~3px 的碎粒（近距离看才有的颗粒感）----
+    C.grits = [];
+    const ng = Math.round(cl(W * H / 900, 260, 620));
+    for (let i = 0; i < ng; i++) C.grits.push({
+      x: rand(0, W), y: rand(0, H), r: rand(0.8, 2.1),
+      c: Math.random() < 0.55 ? "rgba(214,212,180,.55)" : "rgba(52,62,40,.40)"
+    });
+    // ---- 苔藓/藻斑：卵石缝里的绿 ----
+    C.moss = [];
+    for (let i = 0; i < 16; i++) C.moss.push({
+      x: rand(0, W), y: rand(0, H), rx: rand(26, 96), ry: rand(16, 56),
+      rot: rand(0, Math.PI), a: rand(0.16, 0.36),
+      c: ["#3f7a34", "#4c8c3c", "#356b2e", "#5a9a44"][Math.floor(rand(0, 4))]
+    });
+    // ---- 河石：贴边的大石头（上/下/左/右），中间只放两颗沉的 ----
+    C.rocks = [];
+    for (let i = 0; i < 9; i++) {
+      const edge = i < 7;
+      let x, y;
+      if (edge) {
+        const side = i % 4;
+        if (side === 0) { x = rand(W * 0.03, W * 0.30); y = rand(-16, H * 0.08); }        // 上
+        else if (side === 1) { x = rand(W * 0.70, W * 0.99); y = rand(-12, H * 0.12); }    // 右上
+        else if (side === 2) { x = rand(W * 0.02, W * 0.22); y = rand(H * 0.84, H + 14); } // 左下
+        else { x = rand(W * 0.76, W * 0.99); y = rand(H * 0.80, H + 14); }                 // 右下
+      } else { x = rand(W * 0.26, W * 0.74); y = rand(H * 0.34, H * 0.80); }
+      const rx = edge ? rand(32, 70) : rand(18, 30);
+      C.rocks.push({
+        x, y, rx, ry: rx * rand(0.62, 0.86), rot: rand(-0.5, 0.5),
+        tone: rand(0, 1), moss: Math.random() < 0.8, depth: edge ? 0 : 1
+      });
+    }
+    C.rocks.sort((a, b) => a.depth - b.depth);      // 岸石先画、水中石后画
+    // ---- 岸边草丛：顶边一横排 + 下缘一排（前景框景，构图同参考图）----
+    C.grass = [];
+    const gTop = 8;
+    for (let i = 0; i < gTop; i++) {
+      const x = (i + rand(0.1, 0.9)) / gTop * W;
+      C.grass.push({ x, y: rand(2, H * 0.035), h: rand(38, 76), lean: rand(-0.5, 0.5), blades: makeBlades(8, 13) });
+    }
+    [[0.02, 1.02], [0.10, 0.99], [0.30, 1.03], [0.52, 1.02], [0.73, 1.01], [0.88, 1.03], [0.97, 0.99]].forEach(pt => {
+      C.grass.push({ x: W * pt[0], y: H * pt[1], h: rand(56, 118), lean: rand(-0.8, 0.8), blades: makeBlades(8, 13) });
+    });
+    // ---- 水下水草：贴底/贴边的小丛（参考图左下那株、右边那丛）----
+    C.weeds = [];
+    for (let i = 0; i < 12; i++) {
+      C.weeds.push({
+        x: rand(0, W), y: rand(H * 0.58, H + 10),
+        s: rand(0.7, 1.3), blades: makeBlades(4, 8), ph: rand(0, Math.PI * 2)
+      });
+    }
+    // ---- 浮叶：水面上缓缓漂的几片黄叶 ----
+    C.leaves = [];
+    for (let i = 0; i < 6; i++) C.leaves.push({
+      x0: rand(0, 1), y0: rand(0.1, 0.92), r: rand(5, 9),
+      rot: rand(0, Math.PI * 2), spin: rand(-0.35, 0.35),
+      drift: rand(0.006, 0.018) * (Math.random() < 0.5 ? -1 : 1),
+      ph: rand(0, Math.PI * 2), c: ["#b9c46a", "#d0cf72", "#a8b95e"][Math.floor(rand(0, 3))]
+    });
+    // ---- 水面涟漪：少量几组同心圆（鱼身边的涟漪由 prey 单独画，这里只补氛围）----
+    C.ripples = [];
+    for (let i = 0; i < 3; i++) C.ripples.push({
+      x: rand(0.10, 0.90), y: rand(0.16, 0.90), R: rand(28, 66),
+      dur: rand(2.8, 4.8), ph: rand(0, 1)
+    });
+    /* 光斑：几团落在河床上的阳光（缓漂 + 呼吸）。浅水戏水的"亮"主要靠它，
+       比整屏网格状的焦散线更像真实水面（那些线只在缓存层留一点点） */
+    C.sun = [];
+    for (let i = 0; i < 5; i++) C.sun.push({
+      x: rand(0.08, 0.92), y: rand(0.06, 0.88), r: rand(0.16, 0.34),
+      a: rand(0.13, 0.22), sp: rand(0.10, 0.26), ph: rand(0, Math.PI * 2), amp: rand(10, 26)
+    });
+    // ---- 阳光碎金（水面反光点）----
+    C.glints = [];
+    for (let i = 0; i < 15; i++) C.glints.push({
+      x: rand(0.02, 0.98), y: rand(0.03, 0.95), r: rand(2.0, 6.0),
+      ph: rand(0, Math.PI * 2), f: rand(0.5, 1.6)
+    });
   }
+
+  /* ---------- 河床静态层（离屏缓存，仅尺寸/布景变化时重绘） ---------- */
+  const creekBedCache = { cv: null, ctx: null, key: "" };
+  function drawCreekBed(S, W, H) {
+    const C = S.creek;
+    const dpr = Math.min(G.platform.dpr || 2, 1.75);       // 柔和纹理，1.75 倍足够，省一半显存
+    const key = Math.round(W) + "x" + Math.round(H) + "#" + C.seed;
+    if (!creekBedCache.cv) {
+      const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
+      creekBedCache.cv = mk();
+      creekBedCache.ctx = creekBedCache.cv.getContext("2d");
+    }
+    if (creekBedCache.key === key) return creekBedCache.cv;
+    creekBedCache.key = key;
+    const cv = creekBedCache.cv, c2 = creekBedCache.ctx;
+    cv.width = Math.ceil(W * dpr); cv.height = Math.ceil(H * dpr);
+    c2.setTransform(1, 0, 0, 1, 0, 0);
+    c2.clearRect(0, 0, cv.width, cv.height);
+    c2.scale(dpr, dpr);
+
+    // 1) 砂砾底：浅橄榄灰（透过水看下去的色，深色底让卵石的亮面跳出来）
+    let g = c2.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#8b9a70");
+    g.addColorStop(0.42, "#77855e");
+    g.addColorStop(0.78, "#647253");
+    g.addColorStop(1, "#53614a");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+    // 2) 苔藓/水深斑（软边大块，给河床起伏）
+    C.moss.forEach(m => {
+      c2.save(); c2.translate(m.x, m.y); c2.rotate(m.rot);
+      const rg = c2.createRadialGradient(0, 0, 0, 0, 0, Math.max(m.rx, m.ry));
+      rg.addColorStop(0, m.c); rg.addColorStop(1, "rgba(74,122,62,0)");
+      c2.globalAlpha = m.a; c2.fillStyle = rg;
+      c2.beginPath(); c2.ellipse(0, 0, m.rx, m.ry, 0, 0, Math.PI * 2); c2.fill();
+      c2.restore();
+    });
+    // 3) 卵石：投影 → 石体 → 上侧受光 → 细边（四道工序才看得出体积）
+    C.pebbles.forEach(pb => {
+      c2.save(); c2.translate(pb.x, pb.y); c2.rotate(pb.rot);
+      // 缝隙投影
+      c2.globalAlpha = pb.a * 0.5;
+      c2.fillStyle = "rgba(34,42,26,.85)";
+      c2.beginPath(); c2.ellipse(1.4, 2.0, pb.rx * 1.04, pb.ry * 1.04, 0, 0, Math.PI * 2); c2.fill();
+      // 石体
+      c2.globalAlpha = pb.a;
+      c2.fillStyle = pb.c;
+      c2.beginPath(); c2.ellipse(0, 0, pb.rx, pb.ry, 0, 0, Math.PI * 2); c2.fill();
+      // 上侧受光（光从左上来）
+      c2.globalAlpha = pb.a * 0.26;
+      c2.fillStyle = "rgba(255,255,236,.9)";
+      c2.beginPath(); c2.ellipse(-pb.rx * 0.16, -pb.ry * 0.34, pb.rx * 0.56, pb.ry * 0.30, 0, 0, Math.PI * 2); c2.fill();
+      // 下缘暗边
+      c2.globalAlpha = pb.a * 0.38;
+      c2.strokeStyle = "rgba(42,50,32,.9)"; c2.lineWidth = Math.max(0.6, pb.rx * 0.10);
+      c2.beginPath(); c2.ellipse(0, 0, pb.rx * 0.96, pb.ry * 0.96, 0, 0.15, Math.PI - 0.15); c2.stroke();
+      c2.restore();
+    });
+    // 4) 细砂砾（颗粒感）
+    c2.save();
+    C.grits.forEach(gt => {
+      c2.fillStyle = gt.c;
+      c2.beginPath(); c2.arc(gt.x, gt.y, gt.r, 0, Math.PI * 2); c2.fill();
+    });
+    c2.restore();
+    // 5) 水下水草（细叶丛，压在卵石之上、岸石之下）
+    const weedCols = ["#3f6b34", "#4a7a3a", "#35602e", "#548a42"];
+    C.weeds.forEach(wd => {
+      c2.save(); c2.translate(wd.x, wd.y); c2.scale(wd.s, wd.s);
+      wd.blades.forEach(bl => {
+        c2.globalAlpha = 0.86;
+        c2.fillStyle = weedCols[bl.tone];
+        const h = 26 + bl.len * 54, tipX = bl.lean * h * 0.34;
+        c2.beginPath();
+        c2.moveTo(-bl.w * 0.5, 0);
+        c2.quadraticCurveTo(bl.lean * h * 0.12, -h * 0.6, tipX, -h);
+        c2.quadraticCurveTo(bl.lean * h * 0.20 + bl.w * 0.2, -h * 0.5, bl.w * 0.5, 0);
+        c2.closePath(); c2.fill();
+      });
+      c2.restore();
+    });
+    // 6) 河石：不规则轮廓（10 个半径抖动的顶点连成平滑闭合曲线）+ 顶光/底暗 + 苔藓
+    C.rocks.forEach(rk => {
+      c2.save(); c2.translate(rk.x, rk.y); c2.rotate(rk.rot);
+      const base = rk.tone > 0.55 ? "#8f9488" : "#7b8179";
+      const mid = rk.tone > 0.55 ? "#a6a99c" : "#8f938c";
+      const N = 10, pts = [];
+      for (let i = 0; i < N; i++) {
+        const a = i / N * Math.PI * 2;
+        const jit = 1 + (vhash(i, Math.round(rk.x), 3) - 0.5) * 0.26;
+        pts.push([Math.cos(a) * rk.rx * jit, Math.sin(a) * rk.ry * jit]);
+      }
+      const rockPath = (k) => {                    // k：整体缩放（画高光时略收一点）
+        c2.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const p0 = pts[i % N], p1 = pts[(i + 1) % N];
+          const mx = (p0[0] + p1[0]) / 2 * (k || 1), my = (p0[1] + p1[1]) / 2 * (k || 1);
+          if (i === 0) c2.moveTo(mx, my);
+          else c2.quadraticCurveTo(p0[0] * (k || 1), p0[1] * (k || 1), mx, my);
+        }
+        c2.closePath();
+      };
+      if (rk.depth) c2.globalAlpha = 0.96;                 // 水中石
+      // 投影（朝右下）
+      c2.fillStyle = "rgba(24,36,26,.32)";
+      c2.beginPath(); c2.ellipse(5, rk.ry * 0.44, rk.rx * 1.00, rk.ry * 0.80, 0, 0, Math.PI * 2); c2.fill();
+      // 石体
+      c2.fillStyle = base; rockPath(); c2.fill();
+      // 顶面受光（裁进石头里，只亮上半个面）
+      c2.save(); rockPath(); c2.clip();
+      const sg = c2.createLinearGradient(0, -rk.ry, 0, rk.ry);
+      sg.addColorStop(0, "rgba(250,253,236,.62)");
+      sg.addColorStop(0.38, "rgba(250,253,236,.16)");
+      sg.addColorStop(0.72, "rgba(120,130,112,0)");
+      sg.addColorStop(1, "rgba(16,30,20,.42)");
+      c2.fillStyle = sg; c2.fillRect(-rk.rx, -rk.ry, rk.rx * 2, rk.ry * 2);
+      c2.fillStyle = mid;
+      c2.beginPath(); c2.ellipse(-rk.rx * 0.10, -rk.ry * 0.30, rk.rx * 0.62, rk.ry * 0.46, 0, 0, Math.PI * 2); c2.fill();
+      // 苔藓：贴着上缘长的一片（不是整齐的"帽子"，而是几个散开的小团）
+      if (rk.moss) {
+        for (let i = 0; i < 4; i++) {
+          const h1 = vhash(i, Math.round(rk.x), 7), h2 = vhash(i, Math.round(rk.y), 11);
+          c2.fillStyle = i % 2 ? "rgba(80,134,50,.66)" : "rgba(120,170,66,.52)";
+          c2.beginPath();
+          c2.ellipse((h1 - 0.5) * rk.rx * 1.1, -rk.ry * (0.42 + h2 * 0.28),
+            rk.rx * (0.16 + h1 * 0.20), rk.ry * (0.14 + h2 * 0.12), 0, 0, Math.PI * 2);
+          c2.fill();
+        }
+      }
+      c2.restore();
+      // 外缘细描（水下的石头边缘会有一道暗）
+      rockPath();
+      c2.strokeStyle = "rgba(40,54,38,.30)"; c2.lineWidth = 1.2; c2.stroke();
+      c2.restore();
+    });
+    // 7) 岸边湿土带：上下各压一条深色，把画面"框"进水岸里
+    g = c2.createLinearGradient(0, 0, 0, H * 0.09);
+    g.addColorStop(0, "rgba(26,34,20,.66)"); g.addColorStop(1, "rgba(26,34,20,0)");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H * 0.09);
+    g = c2.createLinearGradient(0, H, 0, H * 0.90);
+    g.addColorStop(0, "rgba(20,28,18,.60)"); g.addColorStop(1, "rgba(20,28,18,0)");
+    c2.fillStyle = g; c2.fillRect(0, H * 0.90, W, H * 0.10);
+    // 9) 远景压色：越靠上越"隔着一层水"，越靠下越暗（深度感，别压太重否则整屏发灰）
+    g = c2.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "rgba(46,136,98,.24)");
+    g.addColorStop(0.34, "rgba(46,136,98,.12)");
+    g.addColorStop(0.70, "rgba(18,84,58,.14)");
+    g.addColorStop(1, "rgba(10,54,38,.28)");
+    c2.fillStyle = g; c2.fillRect(0, 0, W, H);
+    // 8) 岸边草丛：亮黄绿长叶（参考图最亮的一层绿，压在最上面）
+    const grassCols = ["#94c856", "#aede63", "#74a642", "#cbe184"];
+    C.grass.forEach(cl2 => {
+      c2.save(); c2.translate(cl2.x, cl2.y);
+      cl2.blades.forEach(bl => {
+        const h = cl2.h * bl.len, tipX = cl2.lean * h * 0.5 + bl.lean * h * 0.42;
+        c2.globalAlpha = 0.96;
+        c2.fillStyle = grassCols[bl.tone];
+        c2.beginPath();
+        c2.moveTo(-bl.w * 0.5, 4);
+        c2.quadraticCurveTo(tipX * 0.18, -h * 0.62, tipX, -h);
+        c2.quadraticCurveTo(tipX * 0.30 + bl.w * 0.5, -h * 0.55, bl.w * 0.5, 4);
+        c2.closePath(); c2.fill();
+      });
+      c2.restore();
+    });
+    return cv;
+  }
+
+  /* ---------- 每帧：水体 + 河床 + 涟漪 + 浮叶 + 碎金 ---------- */
+  function drawCreekSea(ctx, t) {
+    const S = G.scene, W = S.W, H = S.H;
+    const C = S.creek;
+    // 1) 水体底色（河床缓存盖住大部分，这层定调 + 补边角）
+    let g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, "#6fb192");
+    g.addColorStop(0.42, "#3f8a6c");
+    g.addColorStop(0.78, "#256753");
+    g.addColorStop(1, "#14473a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 2) 顶部阳光辉光（光源在画面上方偏左，参考图左上最亮）
+    g = ctx.createRadialGradient(W * 0.40, -H * 0.24, 0, W * 0.40, -H * 0.24, Math.max(W, H) * 0.96);
+    g.addColorStop(0, "rgba(255,255,222,.30)");
+    g.addColorStop(0.40, "rgba(238,255,206,.10)");
+    g.addColorStop(1, "rgba(238,255,206,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 3) 河床（离屏缓存：卵石/苔藓/水草/河石/岸边草）
+    if (C) {
+      const bed = drawCreekBed(S, W, H);
+      ctx.drawImage(bed, 0, 0, W, H);
+    }
+    // 4) 水面流动的宽光带（三条斜向 soft band 缓慢横移，给"活水"感，压得很淡）
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 3; i++) {
+      const off = ((t * (10 + i * 5) * (i % 2 ? -1 : 1)) % (W + 400) + W + 400) % (W + 400) - 200;
+      const bg2 = ctx.createLinearGradient(off - 170, 0, off + 170, H * 0.4);
+      bg2.addColorStop(0, "rgba(232,255,206,0)");
+      bg2.addColorStop(0.5, "rgba(232,255,206," + (0.028 + i * 0.008).toFixed(3) + ")");
+      bg2.addColorStop(1, "rgba(232,255,206,0)");
+      ctx.fillStyle = bg2;
+      ctx.fillRect(off - 190, 0, 380, H);
+    }
+    ctx.restore();
+    // 5) 焦散光网（大格、细线、很淡；~1/24s 重绘一次）
+    drawPoolCaustics(ctx, t, W, H, {
+      net: S.poolNet,
+      fillBase: 0.002, fillVar: 0.006,
+      linePass: [
+        { w: 3.4, c: "rgba(198,255,206,.5)", a: 0.045 },
+        { w: 1.0, c: "rgba(244,255,228,.95)", a: 0.065 }
+      ],
+      nodes: 0
+    });
+    // 5b) 河床上的光斑：几团柔和的阳光缓漂 + 呼吸（浅水的"亮"由它负责）
+    if (C && C.sun) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      C.sun.forEach(sp => {
+        const x = sp.x * W + Math.sin(t * sp.sp + sp.ph) * sp.amp;
+        const y = sp.y * H + Math.cos(t * sp.sp * 0.8 + sp.ph) * sp.amp * 0.6;
+        const r = sp.r * Math.min(W, H);
+        const a = sp.a * (0.72 + 0.28 * Math.sin(t * 0.7 + sp.ph * 2));
+        const rg = ctx.createRadialGradient(x, y, 0, x, y, r);
+        rg.addColorStop(0, "rgba(255,255,214," + a.toFixed(3) + ")");
+        rg.addColorStop(0.55, "rgba(240,255,206," + (a * 0.38).toFixed(3) + ")");
+        rg.addColorStop(1, "rgba(240,255,206,0)");
+        ctx.fillStyle = rg;
+        ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.66, 0, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.restore();
+    }
+    // 6) 水面涟漪（镜头里最抢眼的一层）
+    if (C) drawCreekRipples(ctx, t, C, W, H);
+    // 7) 浮叶
+    if (C) drawCreekLeaves(ctx, t, C, W, H);
+    // 8) 暗角：四角压深，把注意力收到中间的鱼
+    g = ctx.createRadialGradient(W * 0.5, H * 0.46, Math.min(W, H) * 0.40, W * 0.5, H * 0.46, Math.max(W, H) * 0.78);
+    g.addColorStop(0, "rgba(10,36,28,0)");
+    g.addColorStop(0.60, "rgba(10,36,28,.05)");
+    g.addColorStop(1, "rgba(8,28,22,.18)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // 9) 阳光碎金（最上层的亮点，压在最前面才有"反光"的锐度）
+    if (C) drawCreekGlints(ctx, t, C, W, H);
+  }
+
+  /* 水面涟漪：每组 2 圈，从中心扩散到 R 后淡出；环顶多一道亮弧（参考图里亮在环的上侧） */
+  function drawCreekRipples(ctx, t, C, W, H) {
+    ctx.save();
+    ctx.lineCap = "round";
+    C.ripples.forEach(rp => {
+      const cx = rp.x * W, cy = rp.y * H;
+      for (let k = 0; k < 2; k++) {
+        const p = ((t / rp.dur) + rp.ph + k / 2) % 1;
+        const r = 8 + p * rp.R;
+        const a = Math.pow(1 - p, 2.4) * 0.34;
+        if (a < 0.02) continue;
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = "rgba(238,255,236,.95)";
+        ctx.lineWidth = 1.0 + (1 - p) * 1.5;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.44, 0, 0, Math.PI * 2); ctx.stroke();
+        // 环顶亮弧（水面张力造成的强反光）
+        ctx.globalAlpha = a * 0.85;
+        ctx.strokeStyle = "rgba(255,255,246,.95)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.ellipse(cx, cy, r, r * 0.44, 0, -2.55, -1.80); ctx.stroke();
+      }
+    });
+    ctx.restore();
+  }
+
+  /* 浮叶：水面上慢慢漂的几片黄叶（横向漂 + 轻微上下浮动 + 自转） */
+  function drawCreekLeaves(ctx, t, C, W, H) {
+    C.leaves.forEach(lf => {
+      const x = (((lf.x0 + lf.drift * t) % 1) + 1) % 1 * (W + 80) - 40;
+      const y = lf.y0 * H + Math.sin(t * 0.6 + lf.ph) * 6;
+      const rot = lf.rot + t * lf.spin;
+      ctx.save();
+      ctx.translate(x, y); ctx.rotate(rot);
+      // 叶影（贴在水面上的一层淡影）
+      ctx.fillStyle = "rgba(16,44,32,.18)";
+      ctx.beginPath(); ctx.ellipse(1.5, 2.5, lf.r * 1.05, lf.r * 0.52, 0, 0, Math.PI * 2); ctx.fill();
+      // 叶身：两段弧合成的水滴形
+      ctx.fillStyle = lf.c;
+      ctx.beginPath();
+      ctx.moveTo(-lf.r, 0);
+      ctx.quadraticCurveTo(-lf.r * 0.2, -lf.r * 0.62, lf.r, 0);
+      ctx.quadraticCurveTo(-lf.r * 0.2, lf.r * 0.62, -lf.r, 0);
+      ctx.closePath(); ctx.fill();
+      // 主脉
+      ctx.strokeStyle = "rgba(120,140,60,.55)"; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(-lf.r * 0.9, 0); ctx.lineTo(lf.r * 0.9, 0); ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  /* 阳光碎金：暖白小点 + 大颗才带十字星芒（lighter 叠加，闪烁相位各自独立） */
+  function drawCreekGlints(ctx, t, C, W, H) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    C.glints.forEach(gl => {
+      const tw = 0.5 + 0.5 * Math.sin(t * gl.f + gl.ph);
+      const a = 0.18 + 0.72 * tw * tw;
+      const x = gl.x * W + Math.sin(t * 0.3 + gl.ph) * 5;
+      const y = gl.y * H + Math.cos(t * 0.26 + gl.ph * 1.4) * 3;
+      const r = gl.r * (0.72 + 0.5 * tw);
+      const rg = ctx.createRadialGradient(x, y, 0, x, y, r * 3);
+      rg.addColorStop(0, "rgba(255,255,232," + (a * 0.40).toFixed(2) + ")");
+      rg.addColorStop(1, "rgba(255,255,232,0)");
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(x, y, r * 3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,240," + a.toFixed(2) + ")";
+      ctx.beginPath(); ctx.arc(x, y, r * 0.48, 0, Math.PI * 2); ctx.fill();
+      if (gl.r > 4.4 && tw > 0.74) {                 // 大颗的才带十字星芒，避免满屏星光
+        const L = r * 1.4, w = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(x - L, y); ctx.lineTo(x, y - w); ctx.lineTo(x + L, y); ctx.lineTo(x, y + w);
+        ctx.closePath(); ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(x, y - L); ctx.lineTo(x + w, y); ctx.lineTo(x, y + L); ctx.lineTo(x - w, y);
+        ctx.closePath(); ctx.fill();
+      }
+    });
+    ctx.restore();
+  }
+
 
   /* 网状焦散：格点随时间正弦合成缓漂（无状态、确定性），连成不规则网格；
      每条边两遍描边（宽柔光 + 细亮线），透明度按各自相位呼吸 → 光网流动闪烁。
-     性能：整层画到离屏 canvas，每 ~1/24s 才重绘一次（2~3 帧一换），主循环只做一次 drawImage */
+     性能：整层画到离屏 canvas，每 ~1/24s 才重绘一次（2~3 帧一换），主循环只做一次 drawImage。
+     O（可选）是鱼群巡游的调参口：网格更大、线更细更淡、不填充亮斑、格点加小亮点，
+     不传 O 时行为与泳池完全一致（默认值即原常量）。 */
   const poolCausticsCache = { cv: null, ctx: null, frame: -1 };
-  function drawPoolCaustics(ctx, t, W, H) {
+  function drawPoolCaustics(ctx, t, W, H, O) {
+    O = O || {};
     const dpr = G.platform.dpr || 2;
     if (!poolCausticsCache.cv) {
       const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
@@ -577,7 +984,7 @@ module.exports = function (G) {
       c2.clearRect(0, 0, poolCausticsCache.cv.width, poolCausticsCache.cv.height);
       c2.scale(dpr, dpr);
       const S = G.scene;
-      const cs = (S.poolNet && S.poolNet.cs) || 76;
+      const cs = (O.net && O.net.cs) || (S.poolNet && S.poolNet.cs) || 76;
       const cols = Math.ceil(W / cs), rows = Math.ceil(H / cs);
       const vx = (i, j) => i * cs + Math.sin(t * 0.30 + vhash(i, j, 1) * 6.283 + j * 0.53) * cs * 0.30
                           + Math.sin(t * 0.16 + vhash(i, j, 3) * 6.283) * cs * 0.12;
@@ -596,9 +1003,11 @@ module.exports = function (G) {
       c2.globalCompositeOperation = "lighter";
       c2.lineCap = "round";
       // 亮斑：格内四边形淡填充（呼吸），对比度压低（长时间看不疲劳）
-      for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const fillBase = O.fillBase == null ? 0.012 : O.fillBase;
+      const fillVar = O.fillVar == null ? 0.034 : O.fillVar;
+      if (fillBase + fillVar > 0) for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
         const sh = 0.5 + 0.5 * Math.sin(t * 1.1 + vhash(i, j, 5) * 6.283);
-        const a = 0.012 + 0.034 * sh * sh;
+        const a = fillBase + fillVar * sh * sh;
         const p = [[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(q => ({ x: vx(q[0], q[1]), y: vy(q[0], q[1]) }));
         const mid = (a2, b2) => ({ x: (a2.x + b2.x) / 2, y: (a2.y + b2.y) / 2 });
         const m = mid(p[3], p[0]);
@@ -609,15 +1018,27 @@ module.exports = function (G) {
         c2.fill();
       }
       // 网线：两遍（宽柔光打底 + 细亮线提神），透明度整体压低
-      for (let pass = 0; pass < 2; pass++) {
-        c2.strokeStyle = pass ? "rgba(200,245,255,.85)" : "rgba(120,210,255,.35)";
-        c2.lineWidth = pass ? 1.5 : 4.2;
+      const passes = O.linePass || [{ w: 4.2, c: "rgba(120,210,255,.35)", a: 0.15 },
+                                    { w: 1.5, c: "rgba(200,245,255,.85)", a: 0.22 }];
+      for (let pass = 0; pass < passes.length; pass++) {
+        c2.strokeStyle = passes[pass].c;
+        c2.lineWidth = passes[pass].w;
         for (let i = 0; i <= cols; i++) for (let j = 0; j <= rows; j++) {
           const sh = 0.55 + 0.45 * Math.sin(t * 1.25 + vhash(i, j, 6) * 6.283);
-          c2.globalAlpha = (pass ? 0.22 : 0.15) * (0.35 + 0.65 * sh);
+          c2.globalAlpha = passes[pass].a * (0.35 + 0.65 * sh);
           const x1 = vx(i, j), y1 = vy(i, j);
           if (i < cols) edge(x1, y1, vx(i + 1, j), vy(i + 1, j));
           if (j < rows) edge(x1, y1, vx(i, j + 1), vy(i, j + 1));
+        }
+      }
+      // 格点亮斑：线交汇处的小亮点（参考图网格节点的星光感）
+      if (O.nodes) {
+        c2.fillStyle = "rgba(235,250,255,.85)";
+        for (let i = 0; i <= cols; i++) for (let j = 0; j <= rows; j++) {
+          const sh = 0.5 + 0.5 * Math.sin(t * 1.4 + vhash(i, j, 7) * 6.283);
+          c2.globalAlpha = 0.28 + 0.5 * sh;
+          const r2 = O.nodes * (0.6 + 0.7 * sh);
+          c2.beginPath(); c2.arc(vx(i, j), vy(i, j), r2, 0, Math.PI * 2); c2.fill();
         }
       }
       c2.globalAlpha = 1;
@@ -2001,7 +2422,10 @@ module.exports = function (G) {
     gold: { drop: ["#ffffff", "#ffe27a", "rgba(255,150,40,.5)"], ring1: "rgba(255,236,170,.95)", ring2: "rgba(255,196,90,.9)",
             glow: "rgba(255,220,120,.95)", spark: "#ffd76a", rip: "rgba(255,224,130,.95)" },
     silver: { drop: ["#ffffff", "#d8f2ff", "rgba(140,200,255,.5)"], ring1: "rgba(238,250,255,.95)", ring2: "rgba(168,220,250,.9)",
-            glow: "rgba(205,238,255,.95)", spark: "#cfeaff", rip: "rgba(205,238,255,.95)" }
+            glow: "rgba(205,238,255,.95)", spark: "#cfeaff", rip: "rgba(205,238,255,.95)" },
+    /* 小河戏鱼：浅水溅起的水花——亮白碎点带一点青绿反光（泳池那套金橙在绿水里会发脏） */
+    creek: { drop: ["#ffffff", "#eaffd0", "rgba(150,215,150,.5)"], ring1: "rgba(255,255,236,.95)", ring2: "rgba(198,244,198,.9)",
+            glow: "rgba(240,255,210,.95)", spark: "#f2ffd8", rip: "rgba(234,255,224,.95)" }
   };
   G.splashBurst = (x, y, big, pal) => {
     const P = SPLASH_PAL[pal] || SPLASH_PAL.lime;

@@ -59,7 +59,7 @@ module.exports = function (G) {
     if (sp.shape === "puffer") return D.puffer(ctx, p, c, t);
     if (sp.shape === "whale")  return D.whale(ctx, p, c, t);
     if (sp.shape === "turtle") return D.turtle(ctx, p, c, t);
-    if (sp.shape === "poolGold") return D.poolGold(ctx, p, c, t);
+    if (sp.shape === "creekFish") return D.creekFish(ctx, p, c, t);
     if (sp.shape === "minnow") return D.minnow(ctx, p, c, t);
 
     const cl = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -207,125 +207,261 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(82, 32.5, 1.5, 0, Math.PI * 2); ctx.fill();
   };
 
-  /* ---------- 泳池金鱼（贴近真实观赏金鱼的侧视造型，设计空间 120×72，头朝右） ----------
-     蛋形圆身 + 背部深橙到腹部浅金的纵向渐变 + 半透明大扇尾（双叶分叉带鳍条）+
-     飘逸背鳍 / 胸鳍 / 腹鳍 + 鳃盖弧线 + 鳞片纹 + 黑亮圆眼带高光 */
-  D.poolGold = (ctx, p, c, t) => {
-    const wag = Math.sin(t * Math.PI * 2 / Math.max(p.wagDur || 0.5, 0.08) + p.phase) * 0.3;
-    const finW = Math.sin(t * 4.2 + p.phase) * 0.18;
-    const top = (c.bodyGrad && c.bodyGrad[0]) || "#ff7a1c";
-    const belly = (c.bodyGrad && c.bodyGrad[1]) || "#ffe0b0";
+  /* ---------- 小河观赏鱼（俯视偏斜视角，设计空间 120×72，头朝右） ----------
+     对齐参考图的视角与体态：从水面斜看下去，看到的是卵形侧扁的鱼背 + 收细的尾柄 +
+     半透明大扇尾（越靠尾尖越透，边缘一道白） + 两侧胸鳍 + 脊背一道水光高光；
+     俯视能看到头的两侧各一只眼睛（黑瞳 + 一圈很淡的眼白）。
+     游动：沿岸线做正弦摆动（尾部摆幅最大、相位滞后），尾鳍再补一点相位差，
+     读起来是"整条鱼在扭"，不是只有尾巴在扇。
+     配色/斑块全由 speciesColors 决定：bodyGrad[0]=背（深）→[1]=腹（浅），
+     fin=鳍色，tip=尾尖色，pattern:"koi" 时按 patches 画黑斑（乌白云锦鲤）。 */
+  D.creekFish = (ctx, p, c, t) => {
+    const CY = 36;
+    const ph = p.phase || 0;
+    // 摆动相位：wagDur 越小摆得越快（不同鱼种节奏不同）
+    const swim = t * Math.PI * 2 / Math.max(p.wagDur || 0.62, 0.12) + ph;
+    const finW = 0.5 + 0.5 * Math.sin(swim * 1.35 + 0.6);   // 0..1 胸鳍扑扇
+    const AMP = 5.0;
+    // 尾柄处的摆幅最大，越靠吻端越小
+    const spine = (u) => Math.sin(swim - u * 2.6) * AMP * Math.pow(1 - u, 1.9);
+    /* 身体半宽剖面（u=0 尾柄 → u=1 吻端）：中段最饱满、尾柄急收、吻端圆钝 */
+    const PR = [[0, 3.4], [0.05, 5.2], [0.13, 8.0], [0.23, 11.6], [0.34, 14.8],
+                [0.46, 17.4], [0.58, 18.8], [0.68, 18.4], [0.78, 16.2], [0.87, 12.8], [0.94, 9.0], [1, 1.2]];
+    const halfW = (u) => {
+      for (let i = 1; i < PR.length; i++) {
+        if (u <= PR[i][0]) {
+          const a = PR[i - 1], b = PR[i], k = (u - a[0]) / (b[0] - a[0] || 1);
+          return a[1] + (b[1] - a[1]) * k;
+        }
+      }
+      return PR[PR.length - 1][1];
+    };
+    const X0 = 20, XL = 94;                                // 尾柄 x / 身长
+    const bx = (u) => X0 + u * XL;
+    const bodyPath = () => {
+      const N = 18;
+      ctx.beginPath();
+      for (let i = 0; i <= N; i++) {                       // 上缘：吻 → 尾
+        const u = 1 - i / N, x = bx(u), y = CY + spine(u) - halfW(u);
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      for (let i = 0; i <= N; i++) {                       // 下缘：尾 → 吻
+        const u = i / N;
+        ctx.lineTo(bx(u), CY + spine(u) + halfW(u));
+      }
+      ctx.closePath();
+    };
+    const top = (c.bodyGrad && c.bodyGrad[0]) || c.body || "#e8452a";
+    const belly = (c.bodyGrad && c.bodyGrad[1]) || "#ff9a70";
+    const finC = c.fin || "#ff9a70";
+    const tipC = c.tip || "#fff4e8";
+    const koi = c.pattern === "koi";
 
-    // ---- 尾鳍（大扇尾：上下双叶 + 半透明渐变 + 鳍条）----
+    // ---- 尾鳍：绕尾柄旋转（跟随脊柱斜率 + 一点相位差），双叶大扇尾 ----
+    // 颜色沿尾轴从"鳍色"渐变到"尾尖色 + 高透"，只有边缘留一道白 —— 不能整片发白，否则像帆
+    const tailAng = (spine(0.06) - spine(0)) / (0.06 * XL) * 0.9 + Math.sin(swim + 1.2) * 0.07;
     ctx.save();
-    ctx.translate(28, 36); ctx.rotate(wag * 0.55);
-    const tg = ctx.createLinearGradient(0, 0, -40, 0);
-    tg.addColorStop(0, "rgba(255,145,65,.95)");
-    tg.addColorStop(0.45, "rgba(255,172,95,.62)");
-    tg.addColorStop(1, "rgba(255,214,160,.10)");
+    ctx.translate(X0 - 1, CY + spine(0)); ctx.rotate(tailAng);
+    const tailK = c.tailK || 1;
+    ctx.scale(1, tailK);
+    const tg = ctx.createLinearGradient(3, 0, -32, 0);
+    tg.addColorStop(0, finC);
+    tg.addColorStop(0.40, finC);
+    tg.addColorStop(0.74, c.tip ? tipC : finC);
+    tg.addColorStop(1, c.tip ? tipC : finC);
+    ctx.globalAlpha = 0.94;
     ctx.fillStyle = tg;
     ctx.beginPath();
     ctx.moveTo(4, -3);
-    ctx.bezierCurveTo(-8, -22, -28, -36, -40, -30);      // 上叶外缘（更长更飘）
-    ctx.bezierCurveTo(-32, -18, -22, -7, -14, -1);       // 上叶内缘
-    ctx.bezierCurveTo(-24, 7, -33, 20, -38, 29);         // 下叶内缘
-    ctx.bezierCurveTo(-26, 28, -10, 16, 4, 3);           // 下叶外缘
+    ctx.bezierCurveTo(-7, -15, -20, -32, -34, -30);        // 上叶外缘（后掠弧，先扬后收）
+    ctx.bezierCurveTo(-30, -18, -23, -7, -11, -1.5);       // 上叶内缘 → 缺口
+    ctx.bezierCurveTo(-23, 7, -30, 18, -34, 30);           // 下叶内缘
+    ctx.bezierCurveTo(-20, 32, -7, 15, 4, 3);              // 下叶外缘
     ctx.closePath(); ctx.fill();
-    // 鳍条（从尾柄散开的细纹）
-    ctx.strokeStyle = "rgba(255,238,212,.6)"; ctx.lineWidth = 1.1;
-    [[-5, -14], [-10, -24], [-8, 12], [-15, 22]].forEach(k => {
-      ctx.beginPath(); ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(k[0] * 1.6, k[1] * 0.7, k[0] * 3.4, k[1] * 1.3);
+    // 尾尖透明度衰减：外缘压一层"水色"，尾鳍才不会像一块白帆
+    const fade = ctx.createLinearGradient(-8, 0, -34, 0);
+    fade.addColorStop(0, "rgba(255,255,255,0)");
+    fade.addColorStop(1, "rgba(40,96,72,.34)");
+    ctx.fillStyle = fade; ctx.fill();
+    // 外缘一道白（参考图里尾鳍最外圈那圈亮边）
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = tipC; ctx.lineWidth = 1.6; ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(-11, -1.5);
+    ctx.bezierCurveTo(-23, -7, -30, -18, -34, -30);
+    ctx.moveTo(-11, 1.5);
+    ctx.bezierCurveTo(-23, 7, -30, 18, -34, 30);
+    ctx.stroke();
+    // 鳍条：从尾柄散开的细纹
+    ctx.globalAlpha = 0.26;
+    ctx.strokeStyle = "rgba(255,255,255,.9)"; ctx.lineWidth = 0.85; ctx.lineCap = "round";
+    [[-0.62], [-0.34], [0.02], [0.34], [0.62]].forEach(k => {
+      ctx.beginPath(); ctx.moveTo(1, 0);
+      ctx.quadraticCurveTo(k[0] * 12, k[0] * 16, k[0] * 30, k[0] * 27);
       ctx.stroke();
     });
+    ctx.globalAlpha = 1;
     ctx.restore();
 
-    // ---- 背鳍（背部飘逸长鳍，后缘随游微颤）----
-    const dg = ctx.createLinearGradient(0, 6, 0, 26);
-    dg.addColorStop(0, "rgba(255,178,105,.92)");
-    dg.addColorStop(1, "rgba(255,214,160,.28)");
+    // ---- 背鳍：贴着脊背的一条窄鳍（俯视只看得到中间一线，露在背线外 3px）----
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    const dg = ctx.createLinearGradient(0, CY - 26, 0, CY - 4);
+    dg.addColorStop(0, finC);
+    dg.addColorStop(1, "rgba(255,255,255,.05)");
     ctx.fillStyle = dg;
     ctx.beginPath();
-    ctx.moveTo(36, 22);
-    ctx.bezierCurveTo(46, 6 + finW * 7, 68, 2, 80, 15);  // 前缘上扬到背峰
-    ctx.quadraticCurveTo(66, 18, 58, 23);                // 后缘回落
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "rgba(255,236,205,.45)"; ctx.lineWidth = 1;
-    [46, 56, 66].forEach(px => {
-      ctx.beginPath(); ctx.moveTo(px, 22); ctx.quadraticCurveTo(px + 2, 14, px + 5, 9); ctx.stroke();
-    });
-
-    // ---- 身体（蛋形但更瘦长：背深橙 → 腹浅金，金鱼体态轻盈）----
-    const bg = ctx.createLinearGradient(0, 15, 0, 58);
-    bg.addColorStop(0, top);
-    bg.addColorStop(0.40, c.body);
-    bg.addColorStop(1, belly);
-    ctx.fillStyle = bg;
-    ctx.beginPath();
-    ctx.moveTo(102, 35);
-    ctx.bezierCurveTo(100, 23, 86, 16, 66, 17.5);
-    ctx.bezierCurveTo(42, 19, 25, 27, 23, 36);
-    ctx.bezierCurveTo(25, 47, 45, 56, 66, 54.5);
-    ctx.bezierCurveTo(87, 53, 101, 46, 102, 35);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "rgba(178,64,16,.30)"; ctx.lineWidth = 1.2; ctx.stroke();   // 体缘薄描边，增强体积
-
-    // ---- 背部受光（柔和sheen，增加圆润体积；压低强度避免整体发灰）----
-    const sheen = ctx.createRadialGradient(66, 24, 2, 66, 25, 30);
-    sheen.addColorStop(0, "rgba(255,252,232,.18)");
-    sheen.addColorStop(1, "rgba(255,252,232,0)");
-    ctx.fillStyle = sheen;
-    ctx.beginPath(); ctx.ellipse(62, 25, 26, 8.5, -0.08, 0, Math.PI * 2); ctx.fill();
-
-    // ---- 鳞片纹（两排错位的浅弧，朝向尾部，低调不抢主体）----
-    ctx.strokeStyle = "rgba(255,246,225,.16)"; ctx.lineWidth = 1;
-    for (let row = 0; row < 2; row++) {
-      for (let col = 0; col < 4; col++) {
-        const sx = 42 + col * 14 + (row % 2) * 7, sy = 30 + row * 10;
-        ctx.beginPath(); ctx.arc(sx, sy, 7, Math.PI * 0.62, Math.PI * 1.38); ctx.stroke();
-      }
+    for (let i = 0; i <= 6; i++) {                          // 前缘（背脊上侧）
+      const u = 0.30 + i / 6 * 0.38, x = bx(u), y = CY + spine(u) - halfW(u) * 0.98 - 3.2;
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
     }
-
-    // ---- 鳃盖弧线 ----
-    ctx.strokeStyle = "rgba(190,80,25,.38)"; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.moveTo(86, 22); ctx.quadraticCurveTo(81, 33, 87, 44); ctx.stroke();
-
-    // ---- 腹鳍 / 臀鳍（腹下小半透明鳍）----
-    ctx.fillStyle = "rgba(255,182,115,.8)";
-    ctx.beginPath();
-    ctx.moveTo(52, 51);
-    ctx.quadraticCurveTo(47, 61 + finW * 3, 38, 63);
-    ctx.quadraticCurveTo(46, 53, 48, 49);
+    for (let i = 6; i >= 0; i--) {                          // 后缘回到背脊
+      const u = 0.30 + i / 6 * 0.38;
+      ctx.lineTo(bx(u), CY + spine(u) - halfW(u) * 0.72);
+    }
     ctx.closePath(); ctx.fill();
-
-    // ---- 胸鳍（体侧扇形，轻扑扇）----
-    ctx.save();
-    ctx.translate(82, 41); ctx.rotate(0.4 + finW);
-    const pg2 = ctx.createLinearGradient(0, 0, -10, 18);
-    pg2.addColorStop(0, "rgba(255,198,138,.95)");
-    pg2.addColorStop(1, "rgba(255,226,182,.22)");
-    ctx.fillStyle = pg2;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(-18, 4, -23, 17);
-    ctx.quadraticCurveTo(-7, 14, 3, 5);
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = "rgba(255,240,214,.4)"; ctx.lineWidth = 0.9;
-    ctx.beginPath(); ctx.moveTo(-2, 1); ctx.quadraticCurveTo(-12, 7, -18, 15); ctx.stroke();
     ctx.restore();
 
-    // ---- 眼睛（黑亮圆眼 + 浅色眼环 + 白高光）----
-    ctx.fillStyle = "rgba(255,240,215,.9)";
-    ctx.beginPath(); ctx.arc(95, 28, 4.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = c.accent || "#241a14";
-    ctx.beginPath(); ctx.arc(95, 28, 2.9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.85)";
-    ctx.beginPath(); ctx.arc(96.1, 26.9, 1.05, 0, Math.PI * 2); ctx.fill();
+    // ---- 臀鳍（尾柄下侧的一小片）----
+    ctx.save();
+    ctx.globalAlpha = 0.5; ctx.fillStyle = finC;
+    ctx.beginPath();
+    ctx.moveTo(31, CY + spine(0.12) + 8);
+    ctx.quadraticCurveTo(25, CY + spine(0.12) + 18, 16, CY + spine(0.12) + 16);
+    ctx.quadraticCurveTo(23, CY + spine(0.12) + 9, 27, CY + spine(0.12) + 5);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
 
-    // ---- 嘴（吻端短弧）----
-    ctx.strokeStyle = "rgba(160,60,15,.45)"; ctx.lineWidth = 1.2; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(102.5, 32); ctx.quadraticCurveTo(105.5, 35, 102.5, 38); ctx.stroke();
+    // ---- 身体：背深腹浅的横向渐变 ----
+    const bg = ctx.createLinearGradient(0, CY - 21, 0, CY + 21);
+    bg.addColorStop(0, top);
+    bg.addColorStop(0.30, top);
+    bg.addColorStop(0.58, c.body || belly);
+    bg.addColorStop(1, belly);
+    ctx.fillStyle = bg;
+    bodyPath(); ctx.fill();
+
+    // 以下全部裁进鱼身：斑块 / 鳞片 / 脊背高光 / 内缘暗边
+    ctx.save();
+    bodyPath(); ctx.clip();
+
+    // 乌白云锦鲤：黑斑（每块由两个错位椭圆叠成，破掉"标准圆斑"感）
+    if (koi && c.patches) {
+      c.patches.forEach(pt => {
+        const px = bx(pt.x), py = CY + spine(pt.x) + (pt.y - 0.5) * 2 * halfW(pt.x) * 0.9;
+        const rx = pt.rx * XL, ry = Math.max(5, pt.ry * halfW(pt.x) * 1.5);
+        ctx.save();
+        ctx.translate(px, py); ctx.rotate(pt.rot || 0);
+        const pg = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(rx, ry));
+        pg.addColorStop(0, "#191a20");
+        pg.addColorStop(0.72, "#22242c");
+        pg.addColorStop(1, "rgba(34,36,44,0)");
+        ctx.fillStyle = pg;
+        ctx.beginPath(); ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(rx * 0.34, -ry * 0.30, rx * 0.62, ry * 0.56, (pt.rot || 0) + 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    }
+
+    /* 体表受光：浅水里鱼背是"湿亮的"——上缘一道强反光、往下快速衰减，
+       再沿脊柱叠一道细高光。这两层是鱼从平涂变成立体的关键。 */
+    const hl = ctx.createLinearGradient(0, CY - 20, 0, CY + 20);
+    hl.addColorStop(0, "rgba(24,12,6,.20)");        // 上缘（背侧）压暗
+    hl.addColorStop(0.26, "rgba(255,255,255,.16)"); // 背脊偏上受光
+    hl.addColorStop(0.46, "rgba(255,255,255,.07)");
+    hl.addColorStop(0.74, "rgba(255,255,255,.03)"); // 腹侧开始转暗
+    hl.addColorStop(1, "rgba(24,12,6,.16)");
+    ctx.fillStyle = hl;
+    ctx.fillRect(0, CY - 24, 120, 48);
+    // 脊柱细高光（一道沿身体的亮线，游动时跟着弯）
+    ctx.strokeStyle = "rgba(255,255,255,.20)"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    ctx.beginPath();
+    for (let i = 0; i <= 12; i++) {
+      const u = 0.14 + i / 12 * 0.78, x = bx(u), y = CY + spine(u) - halfW(u) * 0.34;
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.stroke();
+
+    // 鳞片：三排错位的浅弧（低对比，只铺中段，不抢斑块）
+    if (!koi) {
+      ctx.strokeStyle = "rgba(255,246,232,.22)"; ctx.lineWidth = 0.9;
+      for (let r = -1; r <= 1; r++) {
+        for (let i = 0; i < 5; i++) {
+          const u = 0.22 + i * 0.12 + (r === 0 ? 0.06 : 0);
+          const x = bx(u), y = CY + spine(u) + r * halfW(u) * 0.46;
+          ctx.beginPath(); ctx.arc(x, y, 5.2, Math.PI * 0.52, Math.PI * 1.48); ctx.stroke();
+        }
+      }
+    }
+    // 内缘暗边：贴着轮廓往里压一道深色，鱼身立刻有圆柱感
+    bodyPath();
+    ctx.strokeStyle = "rgba(46,26,12,.16)"; ctx.lineWidth = 3.2; ctx.stroke();
+    ctx.restore();
+
+    // 上缘水光（背线外侧一道很细的亮边，像刚出水）
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i <= 18; i++) {
+      const u = 1 - i / 18, x = bx(u), y = CY + spine(u) - halfW(u);
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    }
+    ctx.strokeStyle = "rgba(255,255,255,.30)"; ctx.lineWidth = 1.1; ctx.lineJoin = "round";
+    ctx.stroke();
+    ctx.restore();
+
+    // ---- 鳃盖：头部一条前凸的弧线（俯视是横跨背脊的一道弧）----
+    const gx = 95;
+    ctx.strokeStyle = "rgba(80,36,16,.30)"; ctx.lineWidth = 1.2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(gx, CY + spine(0.80) - 11);
+    ctx.quadraticCurveTo(gx + 5.5, CY + spine(0.80), gx, CY + spine(0.80) + 11);
+    ctx.stroke();
+
+    // ---- 胸鳍：体侧两片半透明小扇鳍（俯视两侧各一，轻扑扇）----
+    [-1, 1].forEach(sd => {
+      const u = 0.79, ax = bx(u), ay = CY + spine(u) + sd * halfW(u) * 0.74;
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(sd * (0.80 + finW * 0.28));
+      const pg = ctx.createLinearGradient(0, 0, -16, sd * 18);
+      pg.addColorStop(0, finC);
+      pg.addColorStop(0.6, c.tip ? tipC : finC);
+      pg.addColorStop(1, "rgba(255,255,255,.05)");
+      ctx.fillStyle = pg;
+      ctx.globalAlpha = 0.72;
+      ctx.beginPath();
+      ctx.moveTo(1, 0);
+      ctx.quadraticCurveTo(-9, sd * 8, -17, sd * 17);
+      ctx.quadraticCurveTo(-4, sd * 13, 4, sd * 3);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 0.8;
+      ctx.beginPath(); ctx.moveTo(-2, sd * 1); ctx.quadraticCurveTo(-9, sd * 8, -13, sd * 14); ctx.stroke();
+      ctx.restore();
+    });
+
+    // ---- 眼睛：俯视能看到头的两侧各一只（很小的黑瞳 + 一圈很淡的眼白）----
+    const eu = 0.90, ex = bx(eu), er = 2.4;
+    [-1, 1].forEach(sd => {
+      const ey = CY + spine(eu) + sd * halfW(eu) * 0.62;
+      ctx.fillStyle = "rgba(255,252,244,.55)";
+      ctx.beginPath(); ctx.arc(ex, ey, er * 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = c.accent || "#1b1210";
+      ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.75)";
+      ctx.beginPath(); ctx.arc(ex - 0.6, ey - 0.8, er * 0.30, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // ---- 吻端：一道小弧当嘴（俯视只看得到吻的收口）----
+    ctx.strokeStyle = "rgba(60,28,14,.34)"; ctx.lineWidth = 1.0; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(bx(0.98), CY + spine(1) - 3.2);
+    ctx.quadraticCurveTo(bx(1) + 2.4, CY + spine(1), bx(0.98), CY + spine(1) + 3.2);
+    ctx.stroke();
   };
+
 
   /* ---------- 鲨鱼（瘦长鱼雷体 + 尖吻 + 新月尾 + 高背鳍 + 5 道鳃裂） ---------- */
   D.shark = (ctx, p, c, t) => {

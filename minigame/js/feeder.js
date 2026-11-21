@@ -182,7 +182,9 @@ module.exports = function (G) {
       top: (sf.top || 0) / S, bottom: (sf.bottom || 0) / S,
       left: (sf.left || 0) / S, right: (sf.right || 0) / S
     };
-    return { W, H, safe };
+    const mr = G.platform.menu || null;
+    const menu = mr ? { left: mr.left / S, top: mr.top / S, right: mr.right / S, bottom: mr.bottom / S } : null;
+    return { W, H, safe, menu };
   }
   function camHome(L) {
     /* 底部那行状态文字已经去掉，机器可以直接站到底边：竖向只留给 toast 一行高，
@@ -1281,31 +1283,45 @@ module.exports = function (G) {
     if (G.ad && G.ad.pageFrame) G.ad.pageFrame("feeder");
   };
 
-  /* 原生模板广告位（由 ad.js 读取）：只落在页面自己的空白带上，绝不压机器与按钮。
+  /* 原生模板广告位（由 ad.js 读取）：浮卡——只遮挡，不参与本页版式。
+     落点在本页自己的空白带上，绝不压机器与出粮按钮；位置算完交给 ad.fit 统一
+     夹进安全区、避胶囊、判最小宽，放不下就返回 null（这条不出，页面纹丝不动）。
      横屏 → 舞台右侧竖条；竖屏 → 底栏按钮下方的横条（宽度按可用高度收敛，避免广告比留白还高）。 */
   G.feederAdRect = () => {
+    if (!G.ad || !G.ad.fit) return null;
     const L = layout();
     const st = stageRect(L);
     const land = L.W > L.H;
     const gap = 14;
     if (land) {
-      /* 右侧起点取三者最右：舞台右缘 +24、出粮大按钮右缘 +12（按钮比舞台宽约 1.23 倍、居中）、
-         以及实测机器内容边界 ≈0.715W —— 保证不压机器、不压按钮。 */
-      const btnRight = (L.W + st.w * 1.23) * 0.5;
-      const left = Math.max(st.x + st.w + 24, btnRight + 12, Math.round(L.W * 0.715));
-      return {
-        left: left,
-        top: Math.round(L.safe.top + 22),
-        width: Math.floor(Math.min(300, L.W - left - 16))
-      };
+      /* 横屏：紧贴顶部、靠右的竖卡（与首页一致）。上缘贴安全区顶部；右缘止于微信胶囊左侧，
+         这样与胶囊水平不相交，ad.fit 不会把卡挪到胶囊下方（表现为往下移）。 */
+      const menuL = L.menu ? L.menu.left : L.W - L.safe.right;
+      const rightLimit = Math.floor(menuL - 8);
+      const adTop = Math.round(L.safe.top + 8);
+      const wantW = Math.max(120, Math.floor(Math.min(300, L.W * 0.24)));
+      /* 首选：左缘贴舞台右缘 +8，完全不压机器；宽度取想要值与右缘余量的较小者。 */
+      const cleanLeft = Math.max(Math.round(st.x + st.w + 8), rightLimit - wantW);
+      if (cleanLeft + 120 <= rightLimit) {
+        const r = G.ad.fit([{ left: cleanLeft, top: adTop, width: Math.min(wantW, rightLimit - cleanLeft), height: 110 }], {
+          pad: 8, avoid: [st]
+        });
+        if (r) return r;
+      }
+      /* 降级：窄虚拟宽档（如 1024×768 / 1366×1024）舞台太宽、贴顶放不下 120，
+         则贴右保底 120，允许浮卡压住机器右上角一小段（浮层允许遮挡，与首页取舍一致）。 */
+      const fallbackW = Math.max(120, wantW);
+      const fallbackLeft = rightLimit - fallbackW;
+      if (fallbackLeft < L.safe.left) return null;
+      return G.ad.fit([{ left: fallbackLeft, top: adTop, width: fallbackW, height: 110 }], { pad: 8 });
     }
     const top = st.y + st.h + gap;
     const bandH = Math.max(0, L.H - L.safe.bottom - top - 8);
-    return {
-      left: 20,
-      top: Math.round(top),
-      width: Math.floor(Math.min(L.W - 40, bandH * 0.95, 340))
-    };
+    const width = Math.floor(Math.min(L.W - 40, bandH * 0.95, 340));
+    if (width < 120) return null;
+    return G.ad.fit([{ left: 20, top: top, width: width, height: Math.min(bandH, 110) }], {
+      pad: 8, avoid: [st]
+    });
   };
 
   /* ================= 每帧更新 ================= */

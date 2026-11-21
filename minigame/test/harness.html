@@ -80,9 +80,28 @@
         offError: () => { h.error = null; },
         onClose: (cb) => { h.close = cb; },
         offClose: () => { h.close = null; },
+        /* 部分横幅模板会在 show 之前回传真实宽高：测试用 window.__adResize({width,height}) 触发 */
+        onResize: (cb) => { (h.resize = h.resize || []).push(cb); },
+        offResize: () => { h.resize = []; },
+        style: { left: opt.style.left, top: opt.style.top, width: opt.style.width },
         show: () => { rec.shown++; rec.alive = true; return Promise.resolve(); },
         hide: () => { rec.hidden++; rec.alive = false; },
         destroy: () => { rec.destroyed++; rec.alive = false; }
+      };
+      /* 测试触发：把尺寸回调发给最后创建的那个实例（含 style 位置便于断言 realign） */
+      window.__adResize = (size) => {
+        const lastH = (window.__adHandlers || [])[(window.__adHandlers || []).length - 1];
+        if (!lastH || !lastH.resize) return false;
+        lastH.resize.forEach(f => { try { f(size); } catch (e) {} });
+        return true;
+      };
+      /* 测试触发：模拟 onLoad / onError / onClose（arg 为回调入参） */
+      window.__adEmit = (evt, arg) => {
+        const lastH = (window.__adHandlers || [])[(window.__adHandlers || []).length - 1];
+        if (!lastH || !lastH[evt === "error" ? "error" : evt === "load" ? "load" : "close"]) return false;
+        const f = lastH[evt === "error" ? "error" : evt === "load" ? "load" : "close"];
+        try { f(arg); } catch (e) {}
+        return true;
       };
       return inst;
     },
