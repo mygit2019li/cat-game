@@ -2101,7 +2101,9 @@ module.exports = function (G) {
           const s = this.sc * vs;
           ctx.scale(s, s);
           ctx.translate(-60, -50);
-          G.draw.mouseTop(ctx, this, t);
+          // 优先序列帧动画（俯视，top 注册表 120×100）；不可用则回退现程序化绘制
+          const tName = G.frames.clipFor(this, true);
+          if (!G.frames.draw(ctx, "top", tName, t, 120, 100)) G.draw.mouseTop(ctx, this, t);
         } else {
           // 裁剪到猎物包围盒（模拟 overflow:hidden 的洞口钻出效果）
           const hw = this.baseW * this.sc / 2, hh = this.baseH * this.sc / 2;
@@ -2111,7 +2113,9 @@ module.exports = function (G) {
           const s = this.sc;
           ctx.scale(s * (this.def.face ? this.faceDir : 1), s);
           ctx.translate(-60, -39);
-          G.draw.mouse(ctx, this, t);
+          // 优先序列帧动画（侧视，side 注册表 120×78）；不可用则回退现程序化绘制
+          const cName = G.frames.clipFor(this, false);
+          if (!G.frames.draw(ctx, "side", cName, t, 120, 78)) G.draw.mouse(ctx, this, t);
         }
       } else if (this.type === "butterfly") {
         const tilt = this.state === "FLAP" ? -12 : this.state === "GLIDE" ? 6 : this.state === "LANDING" ? -8 : 0;

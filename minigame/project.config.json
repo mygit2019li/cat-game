@@ -53,6 +53,10 @@
         "type": "file"
       },
       {
+        "value": "node_modules",
+        "type": "folder"
+      },
+      {
         "value": "assets/home-reference.png",
         "type": "file"
       }

@@ -604,6 +604,28 @@ module.exports = function (G) {
       paw: "#b0aab6", foot: "#a49eae", eye: "#1c1822", eyeRim: "rgba(0,0,0,.28)",
       nose: "#c9848a", haunch: "rgba(70,66,84,.3)", sheen: "rgba(210,205,220,.5)" }
   ];
+  /* 序列帧动画（Cocos Creator 关键帧 → 导出 PNG 序列帧的接入配置）。
+     两个视角各一套注册表，设计框与 draw.mouse（侧视 120×78）/ draw.mouseTop（俯视 120×100）中心对齐。
+     file 为 assets 内相对路径；每段 sheet 是「横向单行 N 帧」拼接，每帧尺寸 = 该视角 design.w × design.h。
+     未放帧资源 / 文件缺失时，frames.js 静默回退到 draw.js 程序化绘制，游戏照常。 */
+  G.MOUSE_ANIM = {
+    /* 侧视探头鼠（draw.mouse）：设计框 120×78 */
+    side: {
+      design: { w: 120, h: 78 },
+      clips: {
+        run:   { file: "assets/frames/mouse_run.png",   frames: 8, fps: 12, loop: true  },   // 疾跑/窜逃（dart/scurry）
+        peek:  { file: "assets/frames/mouse_peek.png",  frames: 6, fps: 8,  loop: false }    // 探头/停驻（peek/pause）
+      }
+    },
+    /* 俯视群鼠（draw.mouseTop）：设计框 120×100 */
+    top: {
+      design: { w: 120, h: 100 },
+      clips: {
+        run:   { file: "assets/frames/mousetop_run.png",   frames: 8, fps: 12, loop: true  },   // 疾走（scurry）
+        pause: { file: "assets/frames/mousetop_pause.png", frames: 4, fps: 6,  loop: true  }    // 停驻（pause）
+      }
+    }
+  };
   /* 激光花色 variants：红色为主（w = 出现权重），翠绿更快更小（约 1/4 概率）；只保留红绿两色 */
   /* 只保留赤红光点：之前 red(权重 3) / green(权重 1) 加权随机，约 25% 概率抽到翠绿光点，
      玩家会误以为激光"变色了"。绿色那档的配色与绘制代码仍保留在下方（LASER_COLORS.green /

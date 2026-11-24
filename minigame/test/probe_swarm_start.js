@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const pc = (function () {
-  for (const p of ["/Users/lipeng/node_modules/playwright-core", "/tmp/ffshot/node_modules/playwright-core"]) {
+  for (const p of ["/Users/lipeng/.workbuddy/binaries/node/workspace/node_modules/playwright-core", "/Users/lipeng/node_modules/playwright-core", "/tmp/ffshot/node_modules/playwright-core"]) {
     try { return require(p); } catch (e) {}
   }
   throw new Error("找不到 playwright-core");

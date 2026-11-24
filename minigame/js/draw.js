@@ -618,28 +618,63 @@ module.exports = function (G) {
     ctx.restore();
   };
 
-  /* ---------- 老鼠（设计空间 120×78，面向右；花色 variants 参数化） ---------- */
+  /* ---------- 老鼠（设计空间 120×78，面向右；花色 variants 参数化） ----------
+     部件层级（由远及近，画在独立 transform 里，可各自摆动）：
+       触影 → 尾(独立 pivot 摆动) → 远耳 → 躯干(径向立体光+背脊/腹侧 AO) → 近足(踏步)
+       → 头部件(眼+吻+近耳，整体随嗅探微动)
+     动画参数全部由 state/phase 派生，无需改 prey.js 状态机：
+       摆尾 wag、踏步 step、眨眼 blink、嗅探 sniff、颠动 bob 各取各的相位。 */
   D.mouse = (ctx, p, t) => {
     const v = p.mouseVar || G.MOUSE_VARIANTS[0];
-    // 体型比例：以躯干中心 (60,44) 为轴横向拉长、纵向压扁 → 更瘦长的鼠形（耳/眼轻微椭圆化，观感更灵巧）
-    ctx.save(); ctx.translate(60, 44); ctx.scale(1.08, 0.80); ctx.translate(-60, -44);
-    const sniff = Math.sin(t * 9 + p.phase) * 1.4;
-    // 尾（锥形曲线，随跑动摆动；环节阴影）
-    ctx.strokeStyle = v.tail; ctx.lineWidth = 5; ctx.lineCap = "round";
-    const tw = p.state === "dart" ? Math.sin(t * 22) * 8 : Math.sin(t * 2.4 + p.phase) * 5;
-    ctx.beginPath(); ctx.moveTo(30, 50);
-    ctx.bezierCurveTo(14, 46 + tw * 0.4, 4, 52 + tw, 6, 62);
+    const ph = p.phase || 0;
+    const state = p.state || "peek";
+    const moving = (state === "dart") || (state === "scurry");   // 高速跑动
+    const idle = (state === "peek") || (state === "pause") || !state;
+    // —— 动画相位（各部件独立，互不打架）——
+    const wag = moving ? Math.sin(t * 24 + ph) * 7.5 : Math.sin(t * 2.6 + ph) * 4.5;  // 尾巴左右摆
+    const sniff = Math.sin(t * (idle ? 7 : 14) + ph) * (idle ? 1.6 : 1.1);            // 吻部嗅探
+    const bob = (moving ? Math.sin(t * 22 + ph) * 1.1 : Math.sin(t * 2.0 + ph) * 0.6); // 身体上下颠
+    // 眨眼：周期 ~4.4s，快速闭合（每只鼠相位错开，不一起眨）
+    const cyc = (t * 1 + ph * 0.13) % 4.4;
+    const blink = cyc < 0.18 ? Math.sin((cyc / 0.18) * Math.PI) : 0;   // 0 睁 → 1 闭
+
+    // 体型：横向微拉长、纵向压扁（保留原比例）+ 整体随步频轻颠
+    ctx.save();
+    ctx.translate(60, 44); ctx.scale(1.08, 0.80); ctx.translate(-60, -44);
+    ctx.translate(0, bob);
+
+    // [0] 触地柔影（随颠动轻微缩放，越颠越大→落地感）
+    const shS = 1 + bob * 0.02;
+    const sh = ctx.createRadialGradient(62, 73, 3, 62, 73, 52);
+    sh.addColorStop(0, "rgba(20,16,12," + (0.30 - bob * 0.03).toFixed(3) + ")");
+    sh.addColorStop(0.6, "rgba(20,16,12,.12)");
+    sh.addColorStop(1, "rgba(20,16,12,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(62, 73, 44 * shS, 7 * shS, 0, 0, Math.PI * 2); ctx.fill();
+
+    // [1] 尾（独立部件：绕尾根 (29,52) 摆动，紧凑下垂弧 + 环节；收回 120×78 设计框内，
+    //     不再向左甩出 → 不与洞口裁剪盒/相邻老鼠重叠）
+    ctx.save();
+    ctx.translate(29, 52); ctx.rotate(wag * 0.014); ctx.translate(-29, -52);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = v.tail; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(29, 52);
+    ctx.bezierCurveTo(21, 57 + wag * 0.4, 18, 65 + wag * 0.5, 24, 68 + wag * 0.4);
     ctx.stroke();
-    ctx.strokeStyle = v.tailRing; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(9, 56); ctx.lineTo(12.4, 54.4); ctx.moveTo(8, 60); ctx.lineTo(11.6, 59.6);
-    ctx.moveTo(13.5, 52.6); ctx.lineTo(16.6, 51.8); ctx.stroke();
-    // 远耳（耳廓 + 内耳）
-    ctx.fillStyle = v.earFar; ctx.beginPath(); ctx.arc(76, 17.5, 9, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = v.earIn; ctx.beginPath(); ctx.arc(76, 17.5, 5.4, 0, Math.PI * 2); ctx.fill();
-    // 躯干（梨形渐变：背深腹浅）
-    const grad = ctx.createLinearGradient(0, 18, 0, 72);
-    grad.addColorStop(0, v.back); grad.addColorStop(0.55, v.mid); grad.addColorStop(1, v.belly);
-    ctx.fillStyle = grad;
+    ctx.lineWidth = 1.5; ctx.strokeStyle = "rgba(255,236,240,.55)";   // 尾背受光
+    ctx.beginPath(); ctx.moveTo(27, 53); ctx.bezierCurveTo(20, 56.4 + wag * 0.3, 17.4, 63, 22, 66); ctx.stroke();
+    ctx.strokeStyle = v.tailRing; ctx.lineWidth = 0.9; ctx.lineCap = "butt";
+    ctx.beginPath();
+    ctx.moveTo(22.4, 56 + wag * 0.3); ctx.lineTo(25.4, 55.2 + wag * 0.3);
+    ctx.moveTo(20.6, 61 + wag * 0.4); ctx.lineTo(23.8, 60.4 + wag * 0.4);
+    ctx.stroke();
+    ctx.restore();
+
+    // [2] 远耳（更暗 + 内耳）
+    ctx.fillStyle = v.earFar; ctx.beginPath(); ctx.ellipse(76, 17.5, 8.6, 9.6, -0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = v.earIn; ctx.beginPath(); ctx.ellipse(76, 18, 5.2, 6, -0.12, 0, Math.PI * 2); ctx.fill();
+
+    // [3] 躯干（径向立体光：背部受光点偏左上，边缘收暗 → 摆脱平面感）
     ctx.beginPath();
     ctx.moveTo(111, 44);
     ctx.bezierCurveTo(107, 35, 98, 29.5, 88, 28);
@@ -648,47 +683,100 @@ module.exports = function (G) {
     ctx.bezierCurveTo(25.5, 60, 35, 68.5, 50, 69.5);
     ctx.bezierCurveTo(65, 70.5, 76, 67, 83, 60);
     ctx.bezierCurveTo(93, 57, 105, 52, 111, 44);
-    ctx.closePath(); ctx.fill();
-    // 后躯阴影 + 腹部受光 + 颊部过渡
-    ctx.fillStyle = v.haunch; ctx.beginPath(); ctx.ellipse(43, 52, 16, 12.5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = v.sheen; ctx.beginPath(); ctx.ellipse(67, 58.5, 20, 8.5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(60,48,38,.1)"; ctx.beginPath(); ctx.ellipse(90, 44, 8.5, 7.5, 0.5, 0, Math.PI * 2); ctx.fill();
-    // 背毛毛流（背脊两道 + 后躯三道，顺毛方向）
-    ctx.strokeStyle = v.fur; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+    ctx.closePath();
+    const bodyG = ctx.createRadialGradient(74, 34, 8, 60, 48, 52);
+    bodyG.addColorStop(0, _mix(v.back, [255, 248, 235], 0.10));
+    bodyG.addColorStop(0.45, v.mid);
+    bodyG.addColorStop(0.8, v.back);
+    bodyG.addColorStop(1, _mix(v.back, [42, 32, 22], 0.4));
+    ctx.fillStyle = bodyG; ctx.fill();
+    // 腹侧白带（沿下缘，柔和）
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = v.sheen; ctx.beginPath(); ctx.ellipse(66, 60, 22, 9, -0.08, 0, Math.PI * 2); ctx.fill();
+    // 后臀 AO + 背脊暗带（球面转折）
+    ctx.fillStyle = v.haunch; ctx.beginPath(); ctx.ellipse(44, 53, 15, 12, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(60,48,38,.14)"; ctx.beginPath(); ctx.ellipse(92, 45, 9, 8, 0.5, 0, Math.PI * 2); ctx.fill();
+    // 背脊高光（顶部受光）
+    const spG = ctx.createLinearGradient(0, 20, 0, 58);
+    spG.addColorStop(0, "rgba(255,248,236,.32)");
+    spG.addColorStop(0.5, "rgba(255,248,236,.06)");
+    spG.addColorStop(1, "rgba(255,248,236,0)");
+    ctx.fillStyle = spG; ctx.fillRect(26, 16, 88, 44);
+    ctx.restore();
+
+    // [4] 背毛/侧毛丝（短而带方向的毛流，比原来更密、有疏有密，制造毛发质感）
+    ctx.lineCap = "round";
+    ctx.strokeStyle = v.fur; ctx.lineWidth = 1.05;
     ctx.beginPath();
     ctx.moveTo(40, 30); ctx.quadraticCurveTo(48, 26, 57, 25);
     ctx.moveTo(34, 37); ctx.quadraticCurveTo(41, 33, 48, 31);
     ctx.moveTo(53, 26); ctx.quadraticCurveTo(59, 24, 65, 24);
     ctx.moveTo(31, 45); ctx.quadraticCurveTo(38, 42.5, 44, 41.5);
     ctx.moveTo(38, 52); ctx.quadraticCurveTo(45, 50, 51, 49.5);
-    ctx.moveTo(72, 24); ctx.quadraticCurveTo(78, 23.5, 83, 24.5); ctx.stroke();
-    // 近耳（耳廓 + 内耳 + 顶缘高光 + 耳根投影）
+    ctx.moveTo(72, 24); ctx.quadraticCurveTo(78, 23.5, 83, 24.5);
+    // 侧腹短毛（顺体势，少量）
+    ctx.moveTo(50, 66); ctx.quadraticCurveTo(56, 68, 62, 68);
+    ctx.moveTo(70, 64); ctx.quadraticCurveTo(76, 63, 82, 60);
+    ctx.stroke();
+
+    // [5] 近足（独立踏步：前后足交替抬落，跑动时抬脚、落地压扁）
+    const step = moving ? Math.sin(t * 22 + ph) : Math.sin(t * 2.0 + ph) * 0.4;
+    const footY = (base, off) => base + Math.max(0, step + off) * 1.4;   // 抬脚时 y 减小
+    // 后足
+    ctx.fillStyle = v.foot;
+    ctx.beginPath(); ctx.ellipse(47, footY(68, 0), 6, 3.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,248,236,.25)"; ctx.beginPath(); ctx.ellipse(45.5, footY(68, 0) - 1, 3, 1.4, 0, 0, Math.PI * 2); ctx.fill();
+    // 前爪（与后足反相位）
+    ctx.fillStyle = v.paw;
+    ctx.beginPath(); ctx.ellipse(86.5, footY(63.5, Math.PI), 4.8, 3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(118,98,78,.42)"; ctx.lineWidth = 0.8; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(84.8, footY(63.5, Math.PI) - 2); ctx.lineTo(84.8, footY(63.5, Math.PI) + 1.4);
+    ctx.moveTo(87.6, footY(63.5, Math.PI) - 2.2); ctx.lineTo(87.6, footY(63.5, Math.PI) + 1.2);
+    ctx.stroke();
+
+    // [6] 头部件（眼+吻+近耳，整体随嗅探微动 → 头会"探头"）
+    ctx.save();
+    ctx.translate(0, sniff * 0.35); ctx.rotate(sniff * 0.006);
+    // 近耳（耳廓+内耳+顶缘高光+耳根投影）
     ctx.fillStyle = "rgba(60,48,38,.16)"; ctx.beginPath(); ctx.ellipse(90, 26.5, 9, 3.2, 0.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = v.ear; ctx.beginPath(); ctx.arc(92, 17, 10, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = v.earIn; ctx.beginPath(); ctx.arc(92, 16.5, 6.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = v.ear; ctx.beginPath(); ctx.ellipse(92, 17, 9.6, 10, 0.08, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = v.earIn; ctx.beginPath(); ctx.ellipse(92, 16.5, 6.2, 6.6, 0.08, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = v.earRim; ctx.lineWidth = 1.6;
-    ctx.beginPath(); ctx.arc(92, 17, 9, Math.PI * 1.08, Math.PI * 1.85); ctx.stroke();
-    // 珠状眼（眼眶 + 双高光）
-    ctx.fillStyle = v.eyeRim; ctx.beginPath(); ctx.arc(98.8, 37, 4.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = v.eye; ctx.beginPath(); ctx.arc(99, 37, 3.4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(100.3, 35.8, 1.1, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.beginPath(); ctx.arc(97.7, 38.6, 0.8, 0, Math.PI * 2); ctx.fill();
-    // 吻部（鼻尖嗅探微动 + 胡须三根）
+    ctx.beginPath(); ctx.ellipse(92, 17, 8.6, 9.2, 0.08, Math.PI * 1.05, Math.PI * 1.85); ctx.stroke();
+
+    // 眼（带眨眼：闭合时压成一条缝）
+    const eyeOpen = 1 - blink * 0.9;
+    ctx.save();
+    ctx.translate(99, 37); ctx.scale(1, Math.max(0.08, eyeOpen));
+    ctx.fillStyle = v.eyeRim; ctx.beginPath(); ctx.arc(0, 0, 4.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = v.eye; ctx.beginPath(); ctx.arc(0, 0, 3.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.85)"; ctx.beginPath(); ctx.arc(1.3, -1.2, 1.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.beginPath(); ctx.arc(-1.3, 1.6, 0.8, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    if (blink > 0.4) {   // 闭眼时画一条下睑缝
+      ctx.strokeStyle = "rgba(40,30,24,.7)"; ctx.lineWidth = 1.1; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(95.5, 37.4); ctx.quadraticCurveTo(99, 38.2, 102.5, 37.4); ctx.stroke();
+    }
+
+    // 吻部（鼻尖嗅探微动 + 胡须）
     ctx.save(); ctx.translate(111.6, 43.6 + sniff * 0.4);
     ctx.strokeStyle = "rgba(90,64,50,.5)"; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(-3, 0.4); ctx.quadraticCurveTo(-5.4, 2.3, -7.6, 1.4); ctx.stroke();
     ctx.fillStyle = v.nose; ctx.beginPath(); ctx.ellipse(0, 0, 2.7, 2.2, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.beginPath(); ctx.arc(-0.7, -0.7, 0.9, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(238,228,212,.78)"; ctx.lineWidth = 0.9;
-    ctx.beginPath(); ctx.moveTo(0, 1.4); ctx.lineTo(-13.6, -1.1);
-    ctx.moveTo(0, 2.4); ctx.lineTo(-13.1, 3.2);
-    ctx.moveTo(0.2, 3.4); ctx.lineTo(-11.1, 6.9); ctx.stroke();
+    ctx.fillStyle = "rgba(255,255,255,.4)"; ctx.beginPath(); ctx.arc(-0.7, -0.7, 0.9, 0, Math.PI * 2); ctx.fill();
+    // 胡须（3 根，随嗅探轻微扇动）
+    const wf = sniff * 0.25;
+    ctx.strokeStyle = "rgba(238,228,212,.78)"; ctx.lineWidth = 0.9; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(0, 1.4); ctx.lineTo(-13.6, -1.1 + wf);
+    ctx.moveTo(0, 2.4); ctx.lineTo(-13.1, 3.2 + wf * 0.6);
+    ctx.moveTo(0.2, 3.4); ctx.lineTo(-11.1, 6.9 - wf);
+    ctx.stroke();
     ctx.restore();
-    // 前爪（三趾）+ 后足
-    ctx.fillStyle = v.paw; ctx.beginPath(); ctx.ellipse(86.5, 63.5, 4.8, 3, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = "rgba(118,98,78,.42)"; ctx.lineWidth = 0.8;
-    ctx.beginPath(); ctx.moveTo(84.8, 61.5); ctx.lineTo(84.8, 64.9); ctx.moveTo(87.6, 61.3); ctx.lineTo(87.6, 64.9); ctx.stroke();
-    ctx.fillStyle = v.foot; ctx.beginPath(); ctx.ellipse(47, 68, 6, 3.4, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();   // 头部件结束
+
     ctx.restore();
   };
 
@@ -1117,10 +1205,27 @@ module.exports = function (G) {
       ctx.beginPath(); ctx.moveTo(51 + wag * 0.6, 110); ctx.lineTo(48 + wag, 114); ctx.stroke();
     }
 
-    // 腿脚全部收进身体投影里：只画干净的背部剪影（不再露出四肢/爪掌）
+    // 踏步：跑动时四肢前后交替抬起（对角步），停驻时轻颤
+    const moving = p.state === "scurry" || p.state === "dash";
+    const step = moving ? 1 : 0.25;
+    const legLift = (i) => Math.max(0, Math.sin(gaitT + (i % 2) * Math.PI)) * 2.6 * step;  // 对角配对交替
 
     ctx.save();
     ctx.translate(0, bob);                             // 极轻微的呼吸/步频起伏
+    // 四肢脚掌（从身侧伸出，跑动时交替抬落 → 俯视"在跑"的动感）
+    const foot = (fx, fy, i, dir) => {
+      const off = legLift(i);
+      ctx.fillStyle = "rgba(60,44,34,.4)";   // 脚底阴影
+      ctx.beginPath(); ctx.ellipse(fx, fy + 1.6, 4.4, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = pal.bellyBand;          // 脚掌（取腹侧色，与身体协调）
+      ctx.beginPath(); ctx.ellipse(fx, fy - off * 0.5, 4.6, 2.8, dir * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.28)";  // 脚背受光
+      ctx.beginPath(); ctx.ellipse(fx - dir * 1, fy - off * 0.5 - 0.8, 2.4, 1.3, dir * 0.5, 0, Math.PI * 2); ctx.fill();
+    };
+    foot(47, 40, 0, -1);   // 左前（对角 1）
+    foot(73, 40, 1, 1);    // 右前（对角 2）
+    foot(51, 84, 2, -1);   // 左后（对角 2）
+    foot(69, 84, 3, 1);    // 右后（对角 1）
 
     // ---- 粉色圆耳（外耳暗粉 + 内耳径向亮粉 + 浅色外圈描边；收小更贴合鼠身比例）----
     const ear = (ex, ey, sgn) => {

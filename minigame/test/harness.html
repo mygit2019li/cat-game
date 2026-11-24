@@ -171,6 +171,15 @@
   /* 迷你 CommonJS：模块源码由测试脚本注入 window.__MODULES__ */
   const REG = (window.__MODULES__ = {});
   const CACHE = {};
+  /* frames.js 兜底：老测试脚本的 MODS 列表未包含 ./js/frames.js 时，给一个 no-op 实现，
+     让 game.js 的 require 通过、游戏回退到 draw.js 程序化绘制（无帧动画）。
+     新脚本注入真实 frames.js 时 REG[name] 存在，下方优先走真实实现。 */
+  if (REG["./js/frames.js"] == null) {
+    REG["./js/frames.js"] =
+      "module.exports = function (G) { G.frames = { _reg: {}, isReady: function(){return false;}, " +
+      "clipFor: function(){return 'run';}, draw: function(){return false;}, " +
+      "ensure: function(r,c,cb){cb&&cb(null);}, loadManifest: function(){} }; };";
+  }
   window.__req__ = (name) => {
     if (CACHE[name]) return CACHE[name].exports;
     const src = REG[name];

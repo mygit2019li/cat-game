@@ -7,6 +7,7 @@ require("./js/platform.js")(G);
 require("./js/config.js")(G);
 require("./js/audio.js")(G);
 require("./js/draw.js")(G);
+require("./js/frames.js")(G);   // 序列帧动画播放器（Cocos 导出帧的导入层，无帧资源时静默回退）
 require("./js/scenery.js")(G);
 require("./js/prey.js")(G);
 require("./js/ui.js")(G);
