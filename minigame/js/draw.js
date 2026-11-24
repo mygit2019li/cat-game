@@ -618,9 +618,36 @@ module.exports = function (G) {
     ctx.restore();
   };
 
+  /* HD 贴图侧视鼠：素材内容框 x[8,221] y[9,257]（231×267），头朝右、尾朝左。
+     映射到设计空间 120×78（面向右，中心 60,39），程序叠加奔跑起伏、嗅探、发光眼。 */
+  const _mouseSideHD = (ctx, p, t, v, tex) => {
+    const sniff = Math.sin(t * 9 + (p.phase || 0)) * 1.2;
+    const running = p.state === "dart";
+    const bob = running ? Math.abs(Math.sin(t * 20)) * 1.8 : Math.sin(t * 2.4 + (p.phase || 0)) * 0.6;
+    const sx0 = 8, sy0 = 9, sw = 213, shh = 248;
+    const dw = 104, dh = 78;
+    ctx.save();
+    ctx.translate(60, 39 + bob * 0.5);
+    ctx.drawImage(tex, sx0, sy0, sw, shh, -dw / 2 + 2, -dh / 2, dw, dh);
+    ctx.restore();
+    // 眼高光（贴图珠眼上叠一点暖光，暗夜可辨）
+    const isRedEye = v.key === "albino";
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    const g = ctx.createRadialGradient(99, 36, 0, 99, 36, 7);
+    const c0 = isRedEye ? "rgba(255,110,100," : "rgba(255,214,140,";
+    g.addColorStop(0, c0 + "0.5)"); g.addColorStop(1, "rgba(255,180,90,0)");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(99, 36, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  };
+
   /* ---------- 老鼠（设计空间 120×78，面向右；花色 variants 参数化） ---------- */
   D.mouse = (ctx, p, t) => {
     const v = p.mouseVar || G.MOUSE_VARIANTS[0];
+    D.initMiceHD();
+    if (_mouseVideo(ctx, p, t, v)) return;        // 视频关键帧奔跑动画（侧视，最高优先）
+    const tex = MICEHD.side[v.key];
+    if (tex && tex.ok) return _mouseSideHD(ctx, p, t, v, tex);
     // 体型比例：以躯干中心 (60,44) 为轴横向拉长、纵向压扁 → 更瘦长的鼠形（耳/眼轻微椭圆化，观感更灵巧）
     ctx.save(); ctx.translate(60, 44); ctx.scale(1.08, 0.80); ctx.translate(-60, -44);
     const sniff = Math.sin(t * 9 + p.phase) * 1.4;
@@ -1086,9 +1113,392 @@ module.exports = function (G) {
     ctx.restore();
   };
 
+  /* ---------- 小鼠 HD 贴图（AI 素材 6 花色着色版：俯视 / 侧视） ----------
+     素材提供逼真外形、毛发纹理与表情；程序化叠加发光眼、柔光与状态驱动形变。
+     贴图未加载时自动回退原有矢量绘制，保证零闪烁降级。 */
+  const MICEHD = { tried: false, top: {}, side: {}, back: {}, parts: {}, real: {}, video: {} };
+  D.initMiceHD = () => {
+    if (MICEHD.tried) return;
+    MICEHD.tried = true;
+    const keys = ["house", "charcoal", "albino", "deer", "pup", "smoky"];
+    const sub = (typeof location !== "undefined" && location.protocol === "file:" &&
+                 /\/test\/[^/]*$/.test(decodeURIComponent(location.pathname))) ? "../" : "";
+    const load = (name, k, slot) => {
+      try {
+        const img = (typeof wx !== "undefined" && wx.createImage) ? wx.createImage() : new Image();
+        img.ok = false;
+        img.onload = () => { img.ok = true; };
+        img.onerror = () => { img.ok = false; };
+        img.src = sub + "assets/mice/" + name + "-" + k + ".png";
+        slot[k] = img;
+      } catch (e) { slot[k] = null; }
+    };
+    const PART_KEYS = ["earL", "earR", "legL", "legR", "tail"];
+    const DIRS = [0, 45, 90, 135, 180, 225, 270, 315];
+    keys.forEach(k => {
+      ["top", "side"].forEach(view => load(view, k, MICEHD[view]));
+      load("back-body", k, MICEHD.back);   // 抹除静态耳爪的干净背面身体
+      // 独立可动部件（6 花色着色，绕 pivot 旋转）
+      PART_KEYS.forEach(part => {
+        if (!MICEHD.parts[part]) MICEHD.parts[part] = {};
+        load("top-" + part, k, MICEHD.parts[part]);
+      });
+      // 写实 8 朝向贴图（真实光影+毛发，按朝向角选择）
+      DIRS.forEach(d => {
+        if (!MICEHD.real[d]) MICEHD.real[d] = {};
+        load("real/dir" + d, k, MICEHD.real[d]);
+      });
+      // 视频提取的卡通鼠奔跑序列（16 帧 × 6 花色）
+      MICEHD.video[k] = [];
+      for (let i = 0; i < 16; i++) {
+        try {
+          const img = (typeof wx !== "undefined" && wx.createImage) ? wx.createImage() : new Image();
+          img.ok = false;
+          img.onload = () => { img.ok = true; };
+          img.onerror = () => { img.ok = false; };
+          img.src = sub + "assets/mice/video/run-" + k + "_" + (i < 10 ? "0" : "") + i + ".png";
+          MICEHD.video[k].push(img);
+        } catch (e) { MICEHD.video[k].push(null); }
+      }
+    });
+  };
+  D.MICEHD = MICEHD;   // 测试钩子
+
+  /* ===== 视频关键帧鼠·俯视群鼠版：侧视序列帧始终以侧面朝向玩家（不随朝向旋转，
+       避免侧视图旋转成仰躺），仅按行进方向的水平分量决定左右镜像，配合轻微上下起伏。
+       抵消外层 rotate(_visAng+π/2) 后绘制。 ===== */
+  const _mouseVideoTop = (ctx, p, t, v) => {
+    const frames = MICEHD.video[v.key];
+    if (!frames || !frames.length || !frames[0] || !frames[0].ok) return false;
+    const running = p.state !== "pause" && !(p.vanishT > 0);
+    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
+    const fps = running ? 14 + spd * 3 : 5;
+    let fi = running ? Math.floor((t * fps + (p.phase || 0) * 0.5) % frames.length) : 0;
+    const img = frames[fi];
+    if (!img || !img.ok) return false;
+
+    const bob = running ? Math.abs(Math.sin(t * fps * 0.4)) * 1.4 : 0;
+    // 柔影（在世界坐标下，抵消旋转前画更简单：仍在外层坐标系画椭圆即可）
+    const sh = ctx.createRadialGradient(60, 66, 4, 60, 66, 38);
+    sh.addColorStop(0, "rgba(6,10,9,.38)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.15)");
+    sh.addColorStop(1, "rgba(6,10,9,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(60, 66 + bob * 0.3, 30, 22, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 抵消外层旋转，让鼠始终侧面对着玩家
+    const outerRot = (p._visAng || 0) + Math.PI / 2;
+    const faceLeft = Math.cos(p._visAng || 0) < 0;   // 朝左跑则镜像
+    const dw = 104, dh = dw * 195 / 495;
+    ctx.save();
+    ctx.translate(60, 48 + bob * 0.3);
+    ctx.rotate(-outerRot);
+    if (!faceLeft) ctx.scale(-1, 1);                  // 视频帧头朝左：朝右跑需镜像为头朝右
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+    return true;
+  };
+
+  /* ===== 视频关键帧鼠：16 帧奔跑序列（绿幕视频提取），按步态相位循环播放。
+       侧视专用（室内模式）：序列帧头朝左，镜像为头朝右，外层 scale(faceDir) 处理朝向。 ===== */
+  const _mouseVideo = (ctx, p, t, v) => {
+    const frames = MICEHD.video[v.key];
+    if (!frames || !frames.length || !frames[0] || !frames[0].ok) return false;
+
+    const running = p.state !== "pause" && !(p.vanishT > 0);
+    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
+    // 步频：随速度；16 帧序列，按相位取帧
+    const fps = running ? 14 + spd * 3 : 4;   // 帧/秒
+    const phase = (t * fps + (p.phase || 0) * 0.5) % frames.length;
+    let fi = Math.floor(phase);
+    // 停顿时定格在站立感最强的帧（0）
+    if (!running) fi = 0;
+    const img = frames[fi];
+    if (!img || !img.ok) return false;
+
+    // 触地柔影
+    const bob = running ? Math.abs(Math.sin(t * fps * 0.4)) * 1.2 : 0;
+    const sh = ctx.createRadialGradient(60, 70, 4, 60, 70, 40);
+    sh.addColorStop(0, "rgba(6,10,9,.38)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.15)");
+    sh.addColorStop(1, "rgba(6,10,9,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(60, 70 + bob * 0.3, 32, 25, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 侧视渲染：序列帧鼠身长轴水平（495×195）。设计空间 120×78，鼠身目标宽 ~104、高 ~41
+    const dw = 108, dh = 108 * 195 / 495;
+    ctx.save();
+    ctx.translate(60, 44 + bob * 0.3);
+    ctx.scale(-1, 1);                            // 视频鼠头朝左 → 镜像为头朝右（匹配 D.mouse 约定）
+    ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+    return true;
+  };
+
+  /* ===== 写实 8 朝向鼠：按行进方向选对应朝向贴图（贴图已含真实毛发/光影/尾/耳/腿），
+       叠加程序化跑动起伏、步频挤压、呼吸缩放。贴图自带朝向，不再额外旋转。
+       朝向映射：局部"头朝上"=dir0；外层 rotate(_visAng+π/2) 后，
+       世界朝向 visAng 对应的贴图方向 dir = visAng + 90°（弧度转角度）。
+       降级：任一朝向贴图未加载时回退到矢量版。 ===== */
+  const _mouseReal = (ctx, p, t, v) => {
+    // 世界朝向角（度）。visAng=0(右) → dir90；visAng=π/2(下) → dir180
+    const angDeg = ((p._visAng || 0) * 180 / Math.PI + 90 + 360) % 360;
+    const dir = ((Math.round(angDeg / 45) * 45) % 360 + 360) % 360;
+    const tex = (MICEHD.real[dir] || {})[v.key];
+    if (!tex || !tex.ok) return false;
+
+    const running = p.state !== "pause" && !(p.vanishT > 0);
+    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
+    const freq = running ? 9 + spd * 1.5 : 2.4;
+    const phase = t * freq + (p.phase || 0);
+    const amp = running ? Math.min(1.2, 0.7 + spd * 0.3) : 0.3;
+    const bob = running ? Math.abs(Math.sin(phase)) * 1.6 : Math.sin(t * 2) * 0.4;
+    const squash = 1 + (running ? Math.sin(phase * 2) * 0.035 * amp : 0);  // 步频挤压
+    const crouch = p.vanishT > 0 ? 0.9 : 1;
+
+    // 触地柔影
+    const sh = ctx.createRadialGradient(60, 72, 4, 60, 72, 42);
+    sh.addColorStop(0, "rgba(6,10,9,.40)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.16)");
+    sh.addColorStop(1, "rgba(6,10,9,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(60, 72 + bob * 0.3, 34 * crouch, 27 * crouch, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 抵消外层 rotate(_visAng+π/2)：贴图自带世界朝向，需把坐标系转回世界坐标
+    const outerRot = (p._visAng || 0) + Math.PI / 2;
+    // 贴图居中绘制在 (60,50)，尺寸适配设计空间
+    const SIZE = 118;
+    ctx.save();
+    ctx.translate(60, 50);
+    ctx.rotate(-outerRot);                      // 撤销外层旋转
+    ctx.translate(0, bob * 0.35);
+    ctx.scale(crouch * squash, crouch / squash);
+    ctx.drawImage(tex, -SIZE / 2, -SIZE / 2, SIZE, SIZE);
+    ctx.restore();
+    return true;
+  };
+
+  /* ===== 骨骼驱动版俯视鼠：干净身体贴图 + 程序化可动部件（耳/腿/尾/眼）=====
+     设计空间 120×100，头朝上（y 小）、尾朝下（y 大），身体中心 (60,50)。
+     共享步态相位 phase 驱动全部部件；转向角速度 turn 驱动侧倾与耳外展；
+     状态 scurry/pause/dart 决定频率与幅度。各部件绕自身 pivot 旋转。 */
+  const _mouseTopRig = (ctx, p, t, v, bodyTex) => {
+    const isRed = v.key === "albino";
+    const earCol = v.ear || v.mid;
+    const earIn = "rgba(244,168,162,.92)";   // 素材粉内耳
+    const tailCol = v.tail || "#eaa99f";
+
+    // ---- 运动信号 ----
+    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
+    const running = p.state !== "pause" && !(p.vanishT > 0);
+    const freq = running ? 8.5 + spd * 1.6 : 2.2;             // 步频随速度
+    const amp = running ? Math.min(1.25, 0.75 + spd * 0.28) : 0.35;
+    const phase = t * freq + (p.phase || 0);
+    // 转向角速度：用可见角的变化率，驱动侧倾/耳外展
+    let turn = 0;
+    if (p._lastVisAng != null) {
+      let da = (p._visAng || 0) - p._lastVisAng;
+      while (da > Math.PI) da -= Math.PI * 2;
+      while (da < -Math.PI) da += Math.PI * 2;
+      turn = Math.max(-1, Math.min(1, da * 14));
+    }
+    p._lastVisAng = p._visAng || 0;
+    const crouch = p.vanishT > 0 ? 0.9 : (p.state === "pause" ? 0.98 : 1);
+    const bob = running ? Math.abs(Math.sin(phase)) * 1.8 : Math.sin(t * 2) * 0.5;
+    const lean = turn * 0.14 + (running ? Math.sin(phase * 0.5) * 0.03 : 0);
+
+    // ---- 触地柔影 ----
+    const sh = ctx.createRadialGradient(60, 74, 4, 60, 74, 44);
+    sh.addColorStop(0, "rgba(6,10,9,.42)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.17)");
+    sh.addColorStop(1, "rgba(6,10,9,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(60, 74 + bob * 0.3, 36 * crouch, 29 * crouch, 0, 0, Math.PI * 2); ctx.fill();
+
+    ctx.save();
+    ctx.translate(60, 50 + bob * 0.4);
+    ctx.rotate(lean);
+    ctx.scale(crouch, crouch);
+
+    // ---- 尾巴：多节相位延迟鞭状波（相对中心，粉色系取自素材）----
+    const wagBase = Math.sin(phase * 0.7) * (running ? 8 : 4) + turn * 6;
+    const seg = (k) => Math.sin(phase * 0.7 - k * 0.55) * (running ? 4.2 : 2) * amp;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    const tp = () => {
+      ctx.beginPath();
+      ctx.moveTo(0, 28);
+      ctx.bezierCurveTo(seg(0), 38, seg(1) * 1.4, 46, seg(2) * 1.9 + wagBase * 0.3, 53);
+    };
+    ctx.strokeStyle = tailCol; ctx.lineWidth = 5;
+    tp(); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,236,240,.85)"; ctx.lineWidth = 1.6;
+    tp(); ctx.stroke();
+    if (v.accessory === "whiteTip") {
+      ctx.strokeStyle = "rgba(250,248,244,.95)"; ctx.lineWidth = 3.2;
+      ctx.beginPath(); ctx.moveTo(seg(2) * 1.5, 50); ctx.lineTo(seg(2) * 1.9 + wagBase * 0.3, 53); ctx.stroke();
+    }
+
+    // ---- 腿 ×4（矢量，绕腿根 pivot 旋转；对角步态）----
+    // 素材爪是粉色 → 用暖粉色系，不随毛色变深
+    const pawC = v.key === "albino" ? "#f6d5cf" : "#eaa99f";
+    const legC = v.key === "albino" ? "#f0e2d8" : _mix(v.mid, [255,210,200], 0.35);
+    const leg = (px, py, ph) => {
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(Math.sin(ph) * 0.36 * amp + turn * 0.08);
+      ctx.fillStyle = legC;
+      ctx.beginPath(); ctx.ellipse(0, 6, 5.2, 8, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = pawC;
+      ctx.beginPath(); ctx.ellipse(-1.6, 12, 3.1, 2.5, -0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(1.8, 12, 3.1, 2.5, 0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    leg(-13, 16, phase);          // 左后
+    leg(13, 16, phase + Math.PI); // 右后
+
+    // ---- 干净身体贴图（含后脑 + 脸/眼，旋转 180° 转正）----
+    const sx0 = 9, sy0 = 9, sw = 149, shh = 138, dw = 84, dh = 84;
+    ctx.save(); ctx.rotate(Math.PI);
+    ctx.drawImage(bodyTex, sx0, sy0, sw, shh, -dw / 2, -dh / 2 - 4, dw, dh);
+    ctx.restore();
+
+    // 前爪（对角交叉相位）
+    leg(-14, -16, phase + Math.PI);   // 左前
+    leg(14, -16, phase);              // 右前
+
+    // ---- 耳朵 ×2（矢量，素材粉色；绕耳根反相摆动 + 转向外展）----
+    const earShell = v.key === "albino" ? "#eadfd6" : _mix(v.ear, [255,220,210], 0.3);
+    const ear = (px, py, sgn, ph) => {
+      ctx.save(); ctx.translate(px, py);
+      const sw = Math.sin(ph) * 0.18 * amp + turn * sgn * 0.25 + Math.sin(t * 2.4 + (p.phase || 0)) * 0.05;
+      ctx.rotate(sw);
+      ctx.fillStyle = earShell;
+      ctx.beginPath(); ctx.ellipse(sgn * 5, -2, 10, 11.5, sgn * 0.18, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = earIn;
+      ctx.beginPath(); ctx.ellipse(sgn * 5, -2, 6.6, 8.2, sgn * 0.18, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(255,240,246,.35)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(sgn * 5, -2, 10, 11.5, sgn * 0.18, 0, Math.PI * 2); ctx.stroke();
+      if (v.accessory === "scar" && sgn < 0) {
+        ctx.strokeStyle = "rgba(222,208,178,.95)"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(sgn * 5 - 3, -6); ctx.lineTo(sgn * 5, -1); ctx.lineTo(sgn * 5 - 3, 4); ctx.stroke();
+      }
+      ctx.restore();
+    };
+    ear(-20, -34, -1, phase);
+    ear(20, -34, 1, phase + 0.6);
+
+    // ---- 眼睛：贴图眼上叠发光脉动 + 随机眨眼（相对中心偏移）----
+    const isRedEye = isRed;
+    const eyes = [[-11, -38], [11, -38]];
+    const pulse = 0.7 + 0.3 * Math.sin(t * 3.2 + (p.phase || 0));
+    const h0 = isRedEye ? "rgba(255,120,110," : "rgba(255,214,140,";
+    const h1 = isRedEye ? "rgba(240,90,80," : "rgba(255,196,110,";
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    eyes.forEach(([ex, ey]) => {
+      const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 7);
+      g.addColorStop(0, h0 + (0.38 * pulse).toFixed(3) + ")");
+      g.addColorStop(0.45, h1 + (0.16 * pulse).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,180,90,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(ex, ey, 7, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+    ctx.restore();   // 结束身体形变
+
+    // 颈圈配饰
+    if (v.accessory === "collar") {
+      ctx.strokeStyle = "rgba(82,56,34,.9)"; ctx.lineWidth = 2.8; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(46, 33); ctx.quadraticCurveTo(60, 39, 74, 33); ctx.stroke();
+      ctx.fillStyle = "rgba(112,78,46,.95)";
+      ctx.beginPath(); ctx.arc(60, 37, 2.1, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+
+  /* HD 贴图俯视鼠（真·背面素材 T19：看到脊背+后脑+双耳，头朝下需转正 180°）。
+     贴图内容框 x[9,157] y[9,146]（149×138）；旋转 180° 后眼位于头部两侧、尾从臀下伸出。
+     程序化补：粉色摆尾（素材背面图无尾）、发光眼微光、状态形变（奔跑起伏/扭腰/缩身/嗅探）。 */
+  const _mouseTopHD = (ctx, p, t, v, tex) => {
+    const isRedEye = v.key === "albino";
+    const tailCol = v.tail || "#c99f85";
+    const gait = t * 9.2 + (p.phase || 0);
+    const running = p.state !== "pause" && !(p.vanishT > 0);
+    const speedK = Math.min(1.45, Math.max(0.6, (p.def && p.def.speed || 1) * (p.mSpeed || 1)));
+    const stride = running ? Math.sin(gait) : Math.sin(t * 2.2 + (p.phase || 0)) * 0.25;
+    const bob = running ? Math.abs(Math.sin(gait)) * 2 : Math.sin(t * 2 + (p.phase || 0)) * 0.6;
+    const lean = running ? Math.sin(gait * 0.5) * 0.045 * speedK : 0;
+    const crouch = p.vanishT > 0 ? 0.9 : (p.state === "pause" ? 0.98 : 1);
+    const wag = Math.sin(t * 3.1 + (p.phase || 0)) * (running ? 9 : 5);   // 尾巴摆动
+
+    // 触地柔影
+    const sh = ctx.createRadialGradient(60, 74, 4, 60, 74, 44);
+    sh.addColorStop(0, "rgba(6,10,9,.42)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.17)");
+    sh.addColorStop(1, "rgba(6,10,9,0)");
+    ctx.fillStyle = sh;
+    ctx.beginPath(); ctx.ellipse(60, 72 + bob * 0.3, 36 * crouch, 29 * crouch, 0, 0, Math.PI * 2); ctx.fill();
+
+    // 程序化粉色尾巴（臀下 y≈78 伸出，向后拖、末端摆动渐细；素材背面图无尾）
+    const tailPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(60, 80);
+      ctx.bezierCurveTo(60 + wag * 0.3, 90, 57 + wag * 0.7, 97, 50 + wag, 103);
+    };
+    ctx.lineCap = "round";
+    ctx.strokeStyle = tailCol; ctx.lineWidth = 4.2; tailPath(); ctx.stroke();
+    ctx.strokeStyle = "rgba(255,236,240,.85)"; ctx.lineWidth = 1.5; tailPath(); ctx.stroke();
+    if (v.accessory === "whiteTip") {
+      ctx.strokeStyle = "rgba(250,248,244,.95)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(53 + wag * 0.6, 99); ctx.lineTo(50 + wag, 103); ctx.stroke();
+    }
+
+    // 贴图主体：旋转 180° 转正（背脊朝上、头朝行进方向）
+    const sx0 = 9, sy0 = 9, sw = 149, shh = 138;
+    const dw = 84, dh = 84;                            // 俯视圆润身，略收以匹配场景比例
+    ctx.save();
+    ctx.translate(60, 46 + bob * 0.4);
+    ctx.rotate(lean);
+    ctx.scale(crouch * (1 + Math.abs(stride) * 0.02), crouch * (1 - Math.abs(stride) * 0.015));
+    ctx.rotate(Math.PI);                               // 转正：头朝上
+    ctx.drawImage(tex, sx0, sy0, sw, shh, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+
+    // 发光眼微光（贴图眼在转正后头部两侧偏前 ≈ (50,17)/(70,17)，极轻叠加保持卡通眼主体）
+    const h0 = isRedEye ? "rgba(255,120,110," : "rgba(255,214,140,";
+    const h1 = isRedEye ? "rgba(240,90,80," : "rgba(255,196,110,";
+    const h2 = isRedEye ? "rgba(220,70,60,0)" : "rgba(255,180,90,0)";
+    const eyes = [[51, 20], [69, 20]];
+    const pulse = 0.72 + 0.28 * Math.sin(t * 3.2 + (p.phase || 0));
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    eyes.forEach(([ex, ey]) => {
+      const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, 7.5);
+      g.addColorStop(0, h0 + (0.4 * pulse).toFixed(3) + ")");
+      g.addColorStop(0.45, h1 + (0.18 * pulse).toFixed(3) + ")");
+      g.addColorStop(1, h2);
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(ex, ey, 7.5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.restore();
+
+    // 配饰 collar：颈圈旧皮绳
+    if (v.accessory === "collar") {
+      ctx.strokeStyle = "rgba(82,56,34,.9)"; ctx.lineWidth = 2.8; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(46, 33); ctx.quadraticCurveTo(60, 39, 74, 33); ctx.stroke();
+      ctx.fillStyle = "rgba(112,78,46,.95)";
+      ctx.beginPath(); ctx.arc(60, 37, 2.1, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+
   D.mouseTop = (ctx, p, t) => {
     const v = p.mouseVar || G.MOUSE_VARIANTS[0];        // 花色变体（群鼠 6 只差异化）
     const pal = _mousePalette(v);
+    D.initMiceHD();
+    if (_mouseVideoTop(ctx, p, t, v)) return;                                // 视频关键帧鼠（俯视群鼠）
+    if (_mouseReal(ctx, p, t, v)) return;                                    // 写实 8 朝向版（俯视群鼠）
+    const backTex = MICEHD.back[v.key];
+    if (backTex && backTex.ok) return _mouseTopRig(ctx, p, t, v, backTex);  // 骨骼驱动版（部件跟随运动）
+    const tex = MICEHD.top[v.key];
+    if (tex && tex.ok) return _mouseTopHD(ctx, p, t, v, tex);
     const isRedEye = (v.key === "albino");              // 霜尖红眼：眼珠用 v.eye
     const wag = Math.sin(t * 2.4 + (p.phase || 0)) * 10;
     const gaitT = t * 8.6 + (p.phase || 0);           // 爬行步态相位（对角步）
