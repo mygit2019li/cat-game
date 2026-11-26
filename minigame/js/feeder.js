@@ -117,6 +117,7 @@ module.exports = function (G) {
   }
   function tickTimer() {
     const c = cfg();
+    if (F.mode === "modal") return;   // 设置面板打开期间不推进饭点：否则 dispense 被 modal 挡掉、feedNextAt 仍前进 → 静默漏餐
     if (c.feedMode !== "timer") return;
     if (!(c.feedNextAt > 0)) { c.feedNextAt = nowMs() + intervalMs(); G.saveConfig(); return; }
     let guard = 0, fed = 0;
@@ -137,7 +138,11 @@ module.exports = function (G) {
     const room = TUNE.bowlCap - (c.feedBowl + flying());
     if (room <= 0) { hint("食盆堆满了，先清空再出粮"); G.playMiss(); F.errT = 0.42; return false; }
     const want = portion() * TUNE.piecesPerPortion;
-    const pieces = Math.min(want, room);
+    // 出粮量同时受储粮桶约束：每份耗 hopperCost%，买得起几份就最多出几份，
+    // 否则会把 hopper 扣成负数再被 Math.max(0,…) 吞掉 → 储粮不够也白出整份
+    const affordable = Math.floor(c.feedHopper / TUNE.hopperCost);
+    const pieces = Math.min(want, room, affordable * TUNE.piecesPerPortion);
+    if (pieces <= 0) { hint("储粮不够出一份，先补粮"); G.playMiss(); F.errT = 0.42; return false; }
     const parts = pieces / TUNE.piecesPerPortion;
 
     c.feedHopper = Math.max(0, c.feedHopper - parts * TUNE.hopperCost);
@@ -966,7 +971,7 @@ module.exports = function (G) {
     ctx.restore();
     G.ui.buttons.push({
       x: p.x, y: p.y, w: p.s, h: p.s, key: "settings",
-      cb: () => { F.mode = "modal"; G.playTick(); }
+      cb: () => { if (F.mode !== "home") return; F.mode = "modal"; G.playTick(); }   // 与出粮键同款状态守卫，防止演出过渡期被劫成设置面板
     });
   }
 

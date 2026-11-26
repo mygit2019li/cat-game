@@ -12,7 +12,7 @@ module.exports = function (G) {
   /* silent=true 时只画不注册（抽屉背后复用的首页就是这样画的，避免"抽屉外"的卡片被点到） */
   const btn = (x, y, w, h, cb) => { if (ui.silent) return; ui.buttons.push({ x, y, w, h, cb }); };
   /* 带 key 的命中区：给自动化测试一个不依赖坐标算式的查找入口 */
-  const btnKey = (x, y, w, h, key, cb) => { ui.buttons.push({ x, y, w, h, key, cb }); };
+  const btnKey = (x, y, w, h, key, cb) => { if (ui.silent) return; ui.buttons.push({ x, y, w, h, key, cb }); };   // 与 btn 一致：silent（抽屉背后复绘首页）时不注册命中区
   const inBtn = (x, y, b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
   G.hitButton = (x, y) => {
     for (let i = ui.buttons.length - 1; i >= 0; i--) {
@@ -1318,9 +1318,10 @@ module.exports = function (G) {
 
   /* ================= 首页原生模板广告（浮卡） =================
      只遮挡、不挤压：面板 / 卡片 / 猫图 / 「开始捕猎」/ 底栏的位置与尺寸完全不因广告改变。
-     落点都在猫图区顶部、收窄到猫图宽度的 ~42%：
+     落点按屏幕方向分开：
        竖屏：贴玩法面板下缘、靠右（猫头在左，窄卡盖窗光/蝴蝶，不压猫脸）
-       横屏：贴品牌行下缘、靠左（紧贴猫图区/安全区左缘，避开面板与底栏）
+       横屏：紧贴顶部、靠右（右缘止于胶囊左侧，浮在玩法面板上沿之上）。
+             冷启动加载屏（横屏）期间 G.screen 仍是 home，这张卡就是加载页右上角的广告。
      位置算完交给 G.ad.fit 统一夹进安全区、避开微信右上角胶囊与下面声明的禁区；
      放不下（矮屏 + 大图模板）就返回 null，这条广告不出，也不去动页面。
      高度用实测值（onResize 回传），未回报时按 96 估。 */
@@ -1855,7 +1856,7 @@ module.exports = function (G) {
 
     /* ---- 顶部：胶囊返回键 + 玩法标题 + 右上步骤胶囊 ---- */
     const navS = F(40), top = safe.top + F(10);
-    const backW = backPill(edgeL, top, navS, { color: C.ink2, key: "bgpick-top-back", cb: () => G.closeBgPick() });
+    const backW = backPill(safe.left + F(6), top, navS, { color: C.ink2, w: F(96), key: "bgpick-top-back", cb: () => G.closeBgPick() });
     const titleFs = land ? F(30) : F(26), subFs = F(13);
     const tx = edgeL + backW + F(8), ty = top + navS * .30;
     const playTitle = group ? group.title : (PLAY_TITLE[G.config.targetType] || "逗猫乐园");
@@ -1902,6 +1903,7 @@ module.exports = function (G) {
     if (!P.drag && P.relOff) {
       const rk = Math.min(1, (performance.now() - P.relT0) / 240);
       off = P.relOff * Math.pow(1 - rk, 3);
+      if (rk >= 1) P.relOff = 0;   // 回弹结束清零（与 drawSummon 同款），避免 relOff 残留、每帧空算
     }
     const cards = [];
     if (n === 1) cards.push({ b: list[0], d: off / step });
@@ -2013,7 +2015,13 @@ module.exports = function (G) {
     const colW = settingsW / 3;
     const colX = [edgeL + F(10), edgeL + F(10) + colW, edgeL + F(10) + colW * 2];
     const lblFs = F(11);
-    const term = PLAY_TERM[G.config.targetType] || PLAY_TERM.fish;   // 当前玩法的猎物/量词/环境音文案
+    /* 「当前展示卡」是底部面板的基准（数量控件形态 + 猎物/量词/环境音文案）：
+       玩法卡页上用户翻到哪张卡就以哪张为准，不再等点「开始游戏」确认 targetType 后才跟着变。 */
+    const selCard = list[((P.idx % n) + n) % n] || list[0];
+    const selTarget = (group && group.targetByKey)
+      ? (group.targetByKey[selCard.key] || G.config.targetType)
+      : G.config.targetType;
+    const term = PLAY_TERM[selTarget] || PLAY_TERM.fish;   // 当前玩法的猎物/量词/环境音文案
 
     // 游戏速度（舒缓 / 适中 / 活泼 → easy / normal / hard）
     text("游戏速度", colX[0], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
@@ -2029,22 +2037,27 @@ module.exports = function (G) {
       btn(ox, sy, sw, sh, () => { G.config.difficulty = sp.v; G.saveConfig(); G.playTick(); });
     });
 
-    // 猎物数量：部分玩法按阶段/命中能力自动调节，显示固定说明而不是无效的调节键。
-    // 可增减的玩法各自读数量键（默认 preyCount；暗夜荧光走 ffCount）。
+    // 猎物数量：控件形态按「当前展示卡」判定（G.countModeFor，与 prey.js 的数量分支同步），
+    // 翻到不支持调数量的卡时立即变化，不再等点「开始游戏」确认 targetType 后才跟着变。
+    //   auto   —— 数量由引擎自动决定，显示只读徽章，不展示任何增减控件；
+    //   binary —— 局内只认「单只/多只」两档（preyCount 为 1 / 非 1），展示两档切换（与全局设置同值）；
+    //   exact  —— 设定值即同屏实际数量，展示 ± 步进（青蛙按组 countMax 封顶；暗夜荧光读 ffCount）。
+    const countMode = G.countModeFor(selTarget, selCard.key);
     const countKey = (group && group.countKey) || "preyCount";
-    /* 不支持手动增减数量的模式：显示只读说明徽章，隐藏 ± 按钮（界面与规则一致）。
-       - tadpole：蝌蚪快跑——同屏数量由阶段基线 + 命中能力动态调节（1–3），不展示控件。
-       - mouse + swarm：群鼠乱窜——同屏数量由阶段固定为 4/5/6，preyCount 不生效，不展示控件。
-       - group.count === "fixed"：固定 1 只（历史口径，保留）。
-       其余模式（青蛙/蝴蝶/激光/暗夜荧光/室内房间捕鼠）都真读数量键，保留 ± 增减入口。
-       青蛙跳跳过去是「按阶段自动 3→4→5」，现已改为受「猎物数量」设置控制，所以不再出只读徽章。 */
-    const countNote = (group && group.count === "fixed") ? "固定 1 只"
-      : (G.config.targetType === "tadpole") ? "自动 1–3 只"
-      : (G.config.targetType === "mouse" && G.currentBg && G.currentBg() === "swarm") ? "自动 4–6 只"
+    /* 只读徽章文案（仅 auto 形态出现）：
+       - group.count === "fixed"：固定 1 只（历史口径，保留）；
+       - tadpole：蝌蚪快跑——同屏数量由阶段基线 + 命中能力动态调节（1–3）；
+       - mouse + swarm：群鼠乱窜——同屏数量由阶段固定为 4/5/6，preyCount 不生效。 */
+    const countNote = countMode === "auto"
+      ? ((group && group.count === "fixed") ? "固定 1 只"
+        : (selTarget === "tadpole") ? "自动 1–3 只" : "自动 4–6 只")
       : null;
-    text(countNote ? "猎物数量" : term.prey + "数量", colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
+    const isTadNow = countMode === "tad";
+    const countLbl = countMode === "exact" ? term.prey + "数量" : "猎物数量";
+    /* 标题统一左对齐（与小鱼游 / 蝴蝶 / 激光的 binary 卡一致），不另做居中特殊处理。 */
+    text(countLbl, colX[1], settingsTop + F(12), lblFs + "px sans-serif", C.ink2, "left");
     const os = F(24), oy = settingsTop + F(24);
-    if (countNote) {
+    if (countMode === "auto") {
       const t = countNote;
       ctx.font = F(13) + "px sans-serif";
       const tw = ctx.measureText(t).width;
@@ -2052,6 +2065,47 @@ module.exports = function (G) {
       ctx.fillStyle = "rgba(214,235,218,.62)";
       G.rr(ctx, colX[1] + F(4), oy - F(2), bw, os + F(4), F(10)); ctx.fill();
       text(t, colX[1] + F(4) + bw / 2, oy + os / 2, F(13) + "px sans-serif", C.tealDeep);
+    } else if (isTadNow) {
+      /* 蝌蚪快跑「猎物数量」：两档选项卡（单条 / 多条）。
+         外观与「小鱼游 / 蝴蝶 / 激光」的 binary「单只 / 多只」按钮完全一致——
+         两个独立胶囊、选中项浅绿底（rgba(214,235,218,.88)）+ 深青字、未选中平文字，
+         不另造轨道 / 白滑块样式。仅两点不同：
+         · 文案为「单条 / 多条」（蝌蚪用「条」作量词，与小鱼「单只 / 多只」区分）；
+         · 写入键固定为 tadCount（1 单条 / 3 多条，跨局记忆）——prey.js stageTargetCount 只认它，
+           不复用 countKey：frog 玩法组没配 countKey，回落到 preyCount 会把蝌蚪档位写错键。
+         单条 = 全程固定 1 条；多条 = 按阶段 1→2→3 动态增减（命中多可加到 3 条）。 */
+      const tadKey = "tadCount";
+      const isSingle = Number(G.config[tadKey]) === 1;
+      [{ l: "单条", v: 1 }, { l: "多条", v: 3 }].forEach((sp, i) => {
+        const bw = (colW - F(26) - F(4)) / 2;
+        const ox = colX[1] + F(4) + i * (bw + F(4)), on = (i === 0) === isSingle;
+        if (on) {
+          ctx.fillStyle = "rgba(214,235,218,.88)";
+          G.rr(ctx, ox, oy, bw, os, os / 2); ctx.fill();
+        }
+        text(sp.l, ox + bw / 2, oy + os / 2, F(12) + "px sans-serif", on ? C.tealDeep : C.ink2);
+        btn(ox, oy, bw, os, () => {
+          G.config[tadKey] = sp.v; G.saveConfig(); G.playTick();
+        });
+      });
+    } else if (countMode === "binary") {
+      /* 单只/多只两档切换：写入值与全局设置抽屉一致（1 / 3），局内按 preyCount === 1 判定。
+         过去这里给的是 ± 步进（可显示 1–7 但局内只有「1 / 非 1」两档生效，显示值与实际数量对不上），
+         改成两档开关后界面所见即所得，也消除了「调到 5 只却按阶段出 3/5/7」的误解。
+         外观沿用左列「游戏速度」的分段样式：选中项底纹 + 深绿字。 */
+      const isSingle = Number(G.config[countKey]) === 1;
+      [{ l: "单只", v: 1 }, { l: "多只", v: 3 }].forEach((sp, i) => {
+        const bw = (colW - F(26) - F(4)) / 2;
+        const ox = colX[1] + F(4) + i * (bw + F(4)), on = (i === 0) === isSingle;
+        if (on) {
+          ctx.fillStyle = "rgba(214,235,218,.88)";
+          G.rr(ctx, ox, oy, bw, os, os / 2); ctx.fill();
+        }
+        text(sp.l, ox + bw / 2, oy + os / 2, F(12) + "px sans-serif", on ? C.tealDeep : C.ink2);
+        btn(ox, oy, bw, os, () => {
+          G.config[countKey] = sp.v; G.saveConfig(); G.playTick();
+        });
+      });
     } else {
       const minusX = colX[1] + F(4), plusX = colX[1] + colW - os - F(6);
       /* 上限按玩法收口：青蛙受荷叶数限制最多 5 只（MODE_GROUPS.frog.countMax），其余按 7。
@@ -2078,8 +2132,7 @@ module.exports = function (G) {
     }
 
     /* 蝌蚪卡：第三列换成「蝌蚪造型」——四种黑白造型可点选，跨局记忆。
-       非蝌蚪卡仍显示原来的环境音开关。 */
-    const selCard = list[((P.idx % n) + n) % n] || list[0];
+       非蝌蚪卡仍显示原来的环境音开关。（selCard 在数量控件段已按当前展示卡求出） */
     const isTadCard = !!(group && group.targetByKey && group.targetByKey[selCard.key] === "tadpole");
     if (isTadCard) {
       const styles = G.TAD_STYLES || [];
@@ -4191,7 +4244,7 @@ module.exports = function (G) {
        内部分组（箭头 + 间距 + 文字）按实测文字宽整体居中——齿轮换成细线箭头后视觉重量变轻，
        左对齐会显得内容贴边、右侧空出一大块。 */
     {
-      const sw = 76, sh = 34, sx = safe.left + 12, sy = safe.top + 10;
+      const sw = 96, sh = 34, sx = safe.left + 6, sy = safe.top + 10;
       ctx.fillStyle = "rgba(255,255,255,.94)";
       ctx.strokeStyle = C.line; ctx.lineWidth = 1.2;
       G.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill(); ctx.stroke();
@@ -4433,42 +4486,27 @@ module.exports = function (G) {
     });
   };
 
-  /* 原生模板广告位（由 ad.js 读取）：选场景页横屏「场景卡左侧」那条空白竖带
-     （用户标注的落点）。几何与 drawBgPick 的 land 分支同式，改绘制时必须同步这里。
-     左缘贴安全区，右缘止于当前主卡左边界——不压卡、不压底部设置面板；
-     竖屏主卡几乎占满屏宽、两侧无干净留白 → 返回 null 不出。 */
+  /* 原生模板广告位（由 ad.js 读取）：二级卡页横屏「贴顶靠右」窄卡。
+     与首页横屏同一条基线：上缘贴安全区顶部（留 8px 呼吸），右缘止于微信胶囊左侧——
+     这样广告与胶囊水平不相交，ad.fit 不会因撞胶囊把它自动挪到胶囊下方。
+     浮卡原则：只遮挡不改版式，卡片区不进 avoid；仍避底部设置面板。
+     竖屏主卡几乎占满屏宽、顶部无干净留白 → 返回 null 不出。 */
   G.bgpickAdRect = () => {
     if (!G.ad || !G.ad.fit) return null;
-    const { W, H, land, safe } = layout();
+    const { W, H, land, safe, menu } = layout();
     if (!land) return null;
     const k = Math.max(.78, Math.min(1.12, Math.min(H / 431, W / 765)));
     const F = n => Math.max(1, Math.round(n * k));
-    const edgeL = safe.left + 14, edgeR = W - safe.right - 14;
-    const cx0 = safe.left + (W - safe.left - safe.right) / 2;
-    const top = safe.top + F(10), navS = F(40);
-    const topEnd = top + navS + F(12);
     const panelH = F(94), panelY = H - safe.bottom - F(10) - panelH;
-    const dotY = panelY - F(18), cardBottom = dotY - F(12);
-    const zoneH = cardBottom - topEnd;
-    const CH = Math.max(150, Math.min(Math.round(zoneH * .94), Math.round((edgeR - edgeL) * .29)));
-    const CW = Math.min(Math.round(CH * 1.78), Math.round(edgeR - edgeL - F(10)));
-    const cardY = topEnd + Math.max(0, (zoneH - CH) / 2);
-    const cardLeft = cx0 - CW / 2;
-    /* 广告放到返回按钮正下方：左缘与返回键对齐(edgeL)，顶边紧挨返回键下缘(top+navS+6)。
-       宽度向右展开但止于主卡左缘——不压主卡；这是用户指定的二级页落点。 */
-    const left = Math.ceil(edgeL);
-    const adTop = Math.round(top + navS + 6);
-    const right = Math.floor(cardLeft - 8);
-    const width = right - left;
     const h = Number(G.bgpickAdMeasuredH) || 110;
-    /* 返回键下方竖向空间很小（主卡从 cardY 就开始），广告放在这里必然压到主卡上部——
-       浮卡本就允许遮挡，用户明确要贴着返回键，故不把主卡列入 avoid。
-       只避顶部返回键/标题行与底部设置面板。 */
-    if (width < 120 || adTop + h > panelY - 6) return null;
-    return G.ad.fit([{ left: left, top: adTop, width: width, height: h }], {
+    const top = Math.round(safe.top + 8);
+    const rightLimit = Math.floor((menu ? menu.left : W - safe.right) - 8);  // 右缘贴胶囊左侧
+    const width = Math.max(120, Math.min(160, Math.round(rightLimit - safe.left - 16)));
+    const left = rightLimit - width;
+    if (width < 120 || left < safe.left || top + h > panelY - 6) return null;
+    return G.ad.fit([{ left: left, top: top, width: width, height: h }], {
       pad: 8,
       avoid: [
-        { left: 0, top: 0, width: W, height: top + navS + 4 },  // 顶部返回键 + 标题行
         { left: 0, top: panelY, width: W, height: H - panelY }  // 底部设置面板
       ]
     });

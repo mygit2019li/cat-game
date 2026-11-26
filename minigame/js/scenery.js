@@ -226,7 +226,7 @@ module.exports = function (G) {
       });
     }
     if (type === "tadpole") {
-      /* 白纸墨影：没有任何背景装饰。只留一层贴边渐暗 + 一圈极淡的内框，
+      /* 白纸墨影：没有任何背景装饰。只留一层贴边渐暗，
          让「屏幕边界」可被看见（折返与漏击都发生在这里），中心保持纯白。 */
       S.tadBg = "paper";
       S.pads = []; S.dust = []; S.glints = [];
@@ -504,7 +504,7 @@ module.exports = function (G) {
       : th.key === "ice" ? ["#6f9fb8", "#5d8aa4", "#4e778f", "#7fb0c8"]
       : ["#1c6157", "#154b46", "#0f3c3e", "#1f7160"];
     S.plants.forEach((p, pi) => {
-      if (p.startle > 0) p.startle = Math.max(0, p.startle - 0.016);
+      if (p.startle > 0) p.startle = Math.max(0, p.startle - (G.lastDt || 0.016));   // dt 缩放：高刷屏衰减不加速
       p.blades.forEach((b, bi) => {
         const sway = Math.sin(t * 1.6 * b.f + b.ph) * (0.16 + p.startle * 0.4);
         ctx.fillStyle = cols[(pi + bi) % cols.length];
@@ -965,16 +965,21 @@ module.exports = function (G) {
      性能：整层画到离屏 canvas，每 ~1/24s 才重绘一次（2~3 帧一换），主循环只做一次 drawImage。
      O（可选）是鱼群巡游的调参口：网格更大、线更细更淡、不填充亮斑、格点加小亮点，
      不传 O 时行为与泳池完全一致（默认值即原常量）。 */
-  const poolCausticsCache = { cv: null, ctx: null, frame: -1 };
+  const poolCausticsCache = { cv: null, ctx: null, frame: -1, key: "" };
   function drawPoolCaustics(ctx, t, W, H, O) {
     O = O || {};
     const dpr = G.platform.dpr || 2;
-    if (!poolCausticsCache.cv) {
+    // key 含尺寸+dpr：旋转/换屏后必须重建离屏画布，否则沿用小画布会被拉伸模糊
+    //（同文件河床/地面/群鼠地板缓存都带 key 检查，此前这里漏了）
+    const ckey = Math.round(W) + "x" + Math.round(H) + ":" + dpr;
+    if (!poolCausticsCache.cv || poolCausticsCache.key !== ckey) {
       const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
       poolCausticsCache.cv = mk();
       poolCausticsCache.cv.width = Math.ceil(W * dpr);
       poolCausticsCache.cv.height = Math.ceil(H * dpr);
       poolCausticsCache.ctx = poolCausticsCache.cv.getContext("2d");
+      poolCausticsCache.key = ckey;
+      poolCausticsCache.frame = -1;   // 重建后强制下帧整幅重绘（新画布是空的）
     }
     const f = Math.floor(t * 24);
     if (f !== poolCausticsCache.frame) {
@@ -1104,7 +1109,7 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.moveTo(0, grassY); ctx.lineTo(W, grassY); ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
     // 前景大花（停花目标，nudge 轻颤回弹；原型五瓣花）
     S.flowers.forEach(f => {
-      if (f.nudgeT > 0) f.nudgeT = Math.max(0, f.nudgeT - 0.016);
+      if (f.nudgeT > 0) f.nudgeT = Math.max(0, f.nudgeT - (G.lastDt || 0.016));   // dt 缩放：高刷屏衰减不加速
       const sway = Math.sin(t * 1.2 + f.swayPh) * 3 + Math.sin(f.nudgeT * 40) * f.nudgeT * 4;
       ctx.strokeStyle = "#4a7a2e"; ctx.lineWidth = 2.4;
       ctx.beginPath(); ctx.moveTo(f.x, H); ctx.quadraticCurveTo(f.x + sway, (f.y + H) / 2, f.x + sway, f.y + f.r * 0.5); ctx.stroke();
@@ -1349,7 +1354,9 @@ module.exports = function (G) {
     if (!W || !H) return;
     // 1) 建离屏光晕画布（尺寸不足则重建）
     if (!swarmLightC || swarmLightC.width < W || swarmLightC.height < H) {
-      swarmLightC = document.createElement("canvas");
+      // 微信环境无 DOM：必须走 wx.createCanvas，否则真机每帧在此抛错（mouse+swarm 背景整帧卡死）
+      const mk = (typeof wx !== "undefined" && wx.createCanvas) ? () => wx.createCanvas() : () => document.createElement("canvas");
+      swarmLightC = mk();
       swarmLightC.width = Math.max(1, W); swarmLightC.height = Math.max(1, H);
     }
     const lctx = swarmLightC.getContext("2d");
@@ -1825,7 +1832,7 @@ module.exports = function (G) {
 
   /* ============ 蝌蚪快跑 · 白纸墨影 ============
      纯白 #ffffff 是唯一底色，黑色剪影直接压在上面（对比度 21:1）。
-     只做两件事：贴边极淡渐暗（约 4.5% 黑）标出可玩边界，一圈 1px 内框标出折返线。
+     只做一件事：贴边极淡渐暗（约 4.5% 黑）标出可玩边界（中间的 1px 内框已移除）。
      不做纸纹/噪点——任何纹理都会让「黑蝌蚪」看起来是脏点。 */
   function drawPaper(ctx, t) {
     const S = G.scene, W = S.W, H = S.H;
@@ -1841,19 +1848,7 @@ module.exports = function (G) {
       S._paperVg = vg; S._paperVgW = W; S._paperVgH = H;
     }
     ctx.fillStyle = S._paperVg; ctx.fillRect(0, 0, W, H);
-    // 折返线：可玩区域外沿一圈 1px 内框（很淡，只在看边缘时出现）
-    const b = G.bounds();
-    const x0 = b.x + 0.5, y0 = b.y + 0.5, w0 = b.w - 1, h0 = b.h - 1, rad = 14;
-    ctx.save();
-    ctx.strokeStyle = "rgba(16,18,22,.075)"; ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x0 + rad, y0);
-    ctx.arcTo(x0 + w0, y0, x0 + w0, y0 + h0, rad);
-    ctx.arcTo(x0 + w0, y0 + h0, x0, y0 + h0, rad);
-    ctx.arcTo(x0, y0 + h0, x0, y0, rad);
-    ctx.arcTo(x0, y0, x0 + w0, y0, rad);
-    ctx.closePath(); ctx.stroke();
-    ctx.restore();
+    // 中间的白色框线已移除：只保留贴边渐暗作为可玩边界暗示，不再画 1px 内框。
   }
 
   function drawPond(ctx, t) {
@@ -2158,7 +2153,7 @@ module.exports = function (G) {
   /* 单片荷叶：水下投影 + 叶面双色 + 叶缘缺口 + 叶脉 + 落点预兆光圈 */
   function drawPad(ctx, p, t) {
     const sway = p.swayAmt > 0 ? Math.sin(t * 11) * p.swayAmt : 0;
-    if (p.swayAmt > 0) p.swayAmt = Math.max(0, p.swayAmt - 0.09);   // 被拍后约 0.7s 停止晃动
+    if (p.swayAmt > 0) p.swayAmt = Math.max(0, p.swayAmt - 0.09 * ((G.lastDt || 0.016) / 0.016));   // 被拍后约 0.7s 停止晃动（dt 缩放：高刷屏衰减不加速）
     const y = p.y + sway + Math.sin(t * 0.9 + p.ph) * 1.5;
     const sinkK = p.sink || 0;
     if (sinkK >= 0.995) return;                       // 完全没入水下：这一帧不画叶片
@@ -2704,39 +2699,6 @@ module.exports = function (G) {
       }
     });
     ctx.globalAlpha = 1;
-    fx.pollen.forEach(p => {
-      ctx.globalAlpha = Math.min(p.life, 0.9);
-      ctx.fillStyle = p.glow || "#ffe27a";
-      if (p.glow) {
-        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 2.2, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = Math.min(p.life, 0.95);
-      }
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-    });
-    fx.scales.forEach(p => {
-      ctx.globalAlpha = Math.min(p.life, 0.85);
-      ctx.fillStyle = "#ffd76a";
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-    fx.sparks.forEach(p => {
-      ctx.globalAlpha = Math.max(p.life * 1.8, 0);
-      ctx.fillStyle = p.c || fx.sparkColor || "#ffd76a";   // 逐粒子颜色（多彩爆发靠它）
-      ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2); ctx.fill();
-    });
-    ctx.globalAlpha = 1;
-    fx.ripples.forEach(p => {
-      ctx.globalAlpha = Math.max(p.life * (p.miss ? 0.3 : 0.85), 0);
-      const col = p.miss
-        ? ((G.scene && G.scene.type === "tadpole") ? "rgba(16,18,22,.18)" : "rgba(255,255,255,.3)")
-        : (p.color || "rgba(255,255,255,.85)");
-      ctx.strokeStyle = col; ctx.lineWidth = p.miss ? 2 : (p.big ? 4.5 : 3);
-      ctx.beginPath();
-      // flat=贴水面的水波：俯视透视下压成扁椭圆（池塘/泳池用）
-      if (p.flat) ctx.ellipse(p.x, p.y, p.r, p.r * 0.42, 0, 0, Math.PI * 2);
-      else ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-      ctx.stroke();
-    });
     /* 光爆碎点：发光小球（黄绿=暗夜荧光默认，泳池金橙水花走逐粒自带色） */
     fx.droplets.forEach(p => {
       const a = Math.min(p.life * 1.5, 0.95);

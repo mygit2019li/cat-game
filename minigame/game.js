@@ -266,6 +266,7 @@ G.startGame = () => {
   S.infinite = !!G.config.infinite;   // 无限模式：倒计时仅用于阶段推进，不自动结束
   S.running = false; S.paused = false; S.counting = true;
   S.time = 0; S.secAcc = 0; S.stage = 1;
+  S.lastHitT = 0; S.tadHolds = []; S.strugglePrey = null;        // 蝌蚪快跑：长按尾巴挣扎 + 无命中悬停档位
   S.tadCount = 1; S.tadEval = 0; S.tadMark = 0; S.tadDown = 0;   // 蝌蚪快跑：同屏 1→2→3
   S.escapes = 0;                                                  // 蝌蚪快跑：漏击次数
   G.uiFX.stagePop = 0; G.ui.hudDimT = 0;
@@ -400,7 +401,10 @@ G.confirmBgPick = () => {
 
 function bgPickStep() {
   const P = G.bgPick;
-  return P && P.cw ? P.cw + P.gap : (G.platform.W || 300) * 0.6;
+  // P.cw / P.gap 都是虚拟单位（ui.js layout() 里按 W/S 算的），回退值也要用虚拟宽，
+  // 否则 S≠1（大屏/平板/开发者工具）时步长单位错乱，翻页动画幅度不对。
+  const vW = G.platform.W / (G.platform.S || 1);
+  return P && P.cw ? P.cw + P.gap : (vW || 300) * 0.6;
 }
 /* 点侧卡切换：绘制层是循环画廊，这里也按 visIdx 连续 ±1，第一张点左边照样能翻到上一张。
    与松手吸附共用同一动画（relOff 连续归零），拖动中忽略。 */
@@ -469,7 +473,9 @@ G.bgPickTouchEnd = (x) => {
   if (P.moved > 8) {                               // 拖动：按位移阈值换页
     if (Math.abs(P.off) > step * 0.16) dir = P.off < 0 ? 1 : -1;
   } else if (x != null) {                          // 点按：当前卡左右边缘之外（层叠露出的邻卡/空侧）翻页
-    const W = G.platform.W;
+    // x 是虚拟坐标（touch 入口已 clientX/S），P.cw 也是虚拟单位 → 宽度必须用虚拟宽，
+    // 否则 S≠1 时右卡点按区消失、左区变大（真实宽 vs 虚拟 x 单位混用）。
+    const W = G.platform.W / (G.platform.S || 1);
     const half = (P.cw || W * 0.64) / 2;
     if (x < W / 2 - half) dir = -1;
     else if (x > W / 2 + half) dir = 1;
@@ -666,6 +672,7 @@ function onHit(x, y, prey) {
   const aerial = isFrog && prey.fState === "leap";   // 空中截击：青蛙唯一的 +2 窗口
   S.touches++;
   S.hits++;
+  S.lastHitT = S.time;   // 蝌蚪快跑：悬停档位按"距上次击中时长"评估
   S.combo++;
   S.maxCombo = Math.max(S.maxCombo, S.combo);
   S.missStreak = Math.max(0, S.missStreak - 2);
@@ -770,7 +777,7 @@ G.onHit = onHit;                                   // 测试钩子：命中路�
 /* ================= 蝌蚪漏击 =================
    蝌蚪完整穿出画面（不是被拍散）才算一次漏击：
    · 连击 -3（最低 0），漏击计数 +1，连续漏击会触发原有的自适应放慢；
-   · 只给一圈灰环 + 一声低音，不弹大字——白纸画面里任何大块提示都比猎物更抢眼。 */
+   · 只给一圈灰环 + 一声低音，不弹"漏击"浮字——这是给猫玩的，文字对猫没有意义。 */
 G.tadpoleEscape = (prey) => {
   const S = G.session;
   if (!S || !S.running) return;
@@ -779,11 +786,7 @@ G.tadpoleEscape = (prey) => {
   S.missStreak = (S.missStreak || 0) + 1;
   G.playTadpoleMiss && G.playTadpoleMiss();
   if (G.ripple) G.ripple(prey.x, prey.y, true);
-  /* 离场点可能已经在画面外：把提示夹回可玩区，否则玩家只看得到"什么都没发生"。 */
-  const bb = G.bounds();
-  const fx2 = Math.max(bb.x + 34, Math.min(bb.x + bb.w - 34, prey.x));
-  const fy2 = Math.max(bb.y + 24, Math.min(bb.y + bb.h - 24, prey.y));
-  G.floatText(fx2, fy2 - 20, "漏击", "hint");
+  /* 漏击不弹"漏击"浮字：这是给猫玩的，文字对猫没有意义，灰环 + 低音足矣。 */
   applyAdaptive();
   applyComboBoost();
   G.pokeHud();
@@ -887,6 +890,7 @@ function noteDualPaw(list) {
 }
 
 G.platform.onTouchStart = (e) => {
+  if (!G.assetsReady) return;   // 资源未就绪：不响应触摸（防误触 ensureAudio / hitButton）
   const list = tpList(e);
   if (!list.length) return;
   const S = G.platform.S || 1;
@@ -910,6 +914,23 @@ G.platform.onTouchStart = (e) => {
         continue;
       }
       if (k === 0 && G.hitButton(vx, vy)) continue;
+      /* 蝌蚪长按尾巴：压到尾巴先记"按住"，延迟结算——
+         满 300ms 触发挣扎（位置冻结、尾巴快摆 + 头扭动）；
+         松手 = 抓住，结算为命中；快速松开（<300ms）按普通命中结算，
+         保留"压到尾就算中"的原语义。 */
+      let holdTaken = false;
+      if (G.config.targetType === "tadpole") {
+        for (let i = G.preys.length - 1; i >= 0; i--) {
+          const q = G.preys[i];
+          if (q.type === "tadpole" && !(q.tadStruggle > 0) && q.hittable(x, y) && q._hitPart === "tail") {
+            const SESS = G.session;
+            (SESS.tadHolds = SESS.tadHolds || []).push({ id: tpId(list[k]), t0: performance.now(), x, y, p: q, active: false });
+            holdTaken = true;
+            break;
+          }
+        }
+      }
+      if (holdTaken) continue;
       // 命中测试（后绘制的优先，对齐 DOM 顶层元素语义）；每根手指各自判定，互不顶替
       let hit = null;
       for (let i = G.preys.length - 1; i >= 0; i--) {
@@ -959,6 +980,25 @@ G.platform.onTouchMove = (e) => {
 G.platform.onTouchEnd = (e) => {
   const list = tpList(e);
   const S = G.platform.S || 1;
+  /* 蝌蚪长按尾巴：松手结算——
+     挣扎已触发（位置冻结）→ 清挣扎状态，松手 = 抓住，结算命中；
+     未触发（快速松开）→ 目标仍存活则按普通命中结算（压到尾=中）；
+     目标已不在 → 静默丢弃。 */
+  if (G.screen === "playing" && G.session.tadHolds && G.session.tadHolds.length) {
+    const holds = G.session.tadHolds;
+    for (let i = holds.length - 1; i >= 0; i--) {
+      const h = holds[i];
+      const lifted = list.length
+        ? list.some(t => tpId(t) == null || h.id == null || tpId(t) === h.id)
+        : true;
+      if (!lifted) continue;
+      const p = h.p;
+      const alive = G.preys.indexOf(p) >= 0 && p.vanishT <= 0 && p.darkT <= 0;
+      if (h.active && alive) { p.tadStruggle = 0; p.tadStruggleT = 0; p.tadStruggleW = 0; G.session.strugglePrey = null; }
+      if (alive) onHit(h.x, h.y, p);
+      holds.splice(i, 1);
+    }
+  }
   if (G.screen === "bgpick") {
     // 空事件兜底（测试垫片会传 {}）：取不到 x 则跳过点按翻页，仅走拖动收尾
     G.bgPickTouchEnd(list.length ? list[0].clientX / S : null);
@@ -984,23 +1024,29 @@ G.platform.onTouchEnd = (e) => {
 /* ================= 画面绘制 ================= */
 let _lastDt = 0.016;   // 最近一帧 dt（供局部照明等需要帧率无关平滑的地方读取）
 function drawGameFrame(t) {
-  ctx.save();
-  if (G.shake > 0.1) {
-    const sx = (Math.random() - 0.5) * G.shake;
-    const sy = (Math.random() - 0.5) * G.shake;
-    ctx.translate(sx, sy);
-  }
-  G.drawScene(ctx, t);
-  // 群鼠乱窜 · 局部照明：顶灯跟着鼠群走，鼠处被照亮、其余压暗（在地板之后、老鼠之前）
-  if (G.scene && G.scene.type === "mouse" && G.scene.mouseBg === "swarm") G.drawSwarmLight(ctx, t, _lastDt);
-  // 激光暗室：先压暗背景，让激光光点与拖尾"穿透"黑暗，对比更醒目
-  if (G.scene && G.scene.dark) {
-    ctx.fillStyle = "rgba(0,0,0,.72)";
-    ctx.fillRect(-20, -20, G.platform.W + 40, G.platform.H + 40); // Larger to cover shake
-  }
-  G.preys.forEach(p => p.render(ctx, t));
-  G.fx.draw(ctx);
-  ctx.restore();
+  /* 渲染体整体兜底：任何单帧绘制异常（如某些 Chromium 本地预览下跨域画布
+     taint 抛 SecurityError）都不能上抛——loop() 末尾的 requestAnimationFrame 在
+     try 之外，异常一旦出本函数 RAF 循环就永久停摆，表现为「点开始游戏后页面卡死」。
+     吞掉异常只丢一帧（下一帧继续），游戏逻辑（update）不受影响。 */
+  try {
+    ctx.save();
+    if (G.shake > 0.1) {
+      const sx = (Math.random() - 0.5) * G.shake;
+      const sy = (Math.random() - 0.5) * G.shake;
+      ctx.translate(sx, sy);
+    }
+    G.drawScene(ctx, t);
+    // 群鼠乱窜 · 局部照明：顶灯跟着鼠群走，鼠处被照亮、其余压暗（在地板之后、老鼠之前）
+    if (G.scene && G.scene.type === "mouse" && G.scene.mouseBg === "swarm") G.drawSwarmLight(ctx, t, _lastDt);
+    // 激光暗室：先压暗背景，让激光光点与拖尾"穿透"黑暗，对比更醒目
+    if (G.scene && G.scene.dark) {
+      ctx.fillStyle = "rgba(0,0,0,.72)";
+      ctx.fillRect(-20, -20, G.platform.W + 40, G.platform.H + 40); // Larger to cover shake
+    }
+    G.preys.forEach(p => p.render(ctx, t));
+    G.fx.draw(ctx);
+    ctx.restore();
+  } catch (e) { /* 单帧渲染失败：保持 ctx 状态可恢复，下帧照常 */ }
 }
 
 /* ================= 主循环 ================= */
@@ -1022,6 +1068,19 @@ function loop() {
   const dt = Math.max(0, Math.min((now - lastTs) / 1000, 0.05));
   lastTs = now;
   if (dt > 0) _lastDt = dt;
+  G.lastDt = _lastDt;   // 暴露给场景层做帧率无关衰减（120Hz 高刷设备不再 2 倍速衰减）
+
+  // assets 分包未就绪：只画加载屏，不推进游戏逻辑（避免 drawImage 失败出白图/黑块）
+  if (!G.assetsReady) {
+    drawAssetsLoadingScreen();
+    /* 加载屏上也尽早 show 广告（G.screen 仍是 "home"，横屏浮卡即加载页右上角横带）。
+       旧逻辑加载期间不打 pageFrame，只能等 900ms 兜底——分包加载快时广告出现得晚，
+       甚至加载结束都没来得及 show，加载页看起来像没有广告。 */
+    if (G.ad && G.ad.pageFrame) G.ad.pageFrame(G.screen);
+    requestAnimationFrame(loop);
+    return;
+  }
+
   const S = G.session;
   const t = S.time;
 
@@ -1033,15 +1092,18 @@ function loop() {
   }
 
   if (G.screen === "counting") {
-    if (G.nextScreen === "playing") return; // Prevent logic during transition to playing
-    countT -= dt;
-    const ci = Math.ceil(countT);
-    if (ci !== lastInt && ci > 0) {
-      lastInt = ci;
-      if (G.playCountdownTick) G.playCountdownTick(ci);
-      else if (!(G.quietMouseRoom && G.quietMouseRoom())) G.playTick();   // 室内捕鼠局：倒计时也不出声
+    // 过渡到 playing 期间跳过倒计时逻辑（避免重复 beginPlay / 再响 tick），
+    // 但不能整体 return：裸 return 会跳过 loop() 末尾的 requestAnimationFrame，主循环永久停摆。
+    if (G.nextScreen !== "playing") {
+      countT -= dt;
+      const ci = Math.ceil(countT);
+      if (ci !== lastInt && ci > 0) {
+        lastInt = ci;
+        if (G.playCountdownTick) G.playCountdownTick(ci);
+        else if (!(G.quietMouseRoom && G.quietMouseRoom())) G.playTick();   // 室内捕鼠局：倒计时也不出声
+      }
+      if (countT <= 0) beginPlay();
     }
-    if (countT <= 0) beginPlay();
   } else if (G.screen === "playing" && S.running && !S.paused) {
     S.time += dt;
     S.secAcc += dt;
@@ -1049,6 +1111,32 @@ function loop() {
     // 蝌蚪快跑：数量按击中能力动态调节（每 8s 评估，1–7 只）
     if (G.tadpoleTick) G.tadpoleTick(dt);
     G.preys.forEach(p => p.update(dt, S.time));
+    /* 蝌蚪长按尾巴：按住满 300ms 且目标仍存活 → 挣扎（位置冻结、尾巴快摆、头扭动、瞪眼）；
+       目标已不在（被另一只爪子拍走/离场）→ 静默丢弃，不结算 */
+    const holds = S.tadHolds;
+    if (holds && holds.length) {
+      const holdMs = (G.TADPOLE && G.TADPOLE.holdMs) || 300;
+      const now = performance.now();
+      for (let i = holds.length - 1; i >= 0; i--) {
+        const h = holds[i];
+        if (h.active || now - h.t0 < holdMs) continue;
+        const p = h.p;
+        const alive = G.preys.indexOf(p) >= 0 && p.vanishT <= 0 && p.darkT <= 0 && !(p.tadStruggle > 0);
+        if (alive) {
+          h.active = true;
+          p.tadStruggle = 1; p.tadStruggleT = 0;
+          S.strugglePrey = p;
+          if (G.ripple) G.ripple(h.x, h.y, true);
+        } else {
+          holds.splice(i, 1);
+        }
+      }
+    }
+    /* 挣扎目标已消失的兜底清理（正常路径由 onTouchEnd 负责） */
+    if (S.strugglePrey) {
+      const sp = S.strugglePrey;
+      if (G.preys.indexOf(sp) < 0 || sp.vanishT > 0 || sp.darkT > 0 || !(sp.tadStruggle > 0)) S.strugglePrey = null;
+    }
   }
   // 老鼠出洞循环声：有 peek/dart 的鼠就唧唧叫，全部回洞就停；暂停/切后台也会停
   if (G.updateMouseSqueak) G.updateMouseSqueak();
@@ -1147,6 +1235,10 @@ G.platform.resizeCb.push(() => {
     G.topUpPreys();   // 旋转屏幕等重建于 3 点后，按当前阶段补足
   }
   if (G.screen === "leaderboard") G.ui.showLB();           // 排行榜卡片区域随屏重发
+  /* 尺寸/安全区/胶囊变化后，重算已挂载广告的落点。冷启动瞬间部分安卓机横屏尚未生效，
+     广告是按竖屏坐标创建的（首页浮卡会卡在加载屏中部偏下的旧位置）——这里统一纠正，
+     让加载页/首页横屏的广告始终回到「贴顶靠右」。无实例时 realign 是空操作。 */
+  if (G.ad && G.ad.realign) G.ad.realign();
 });
 
 /* ================= 埋点：启动来源 / 次日回访 =================
@@ -1194,6 +1286,310 @@ G.platform.showCb.push(() => {
 /* 冷启动首屏就是首页：没走 switchScreen，所以这里补一次 ad.enter。
    （否则「第一次打开小游戏」这条最常见的路径上，首页广告永远不会建出来。） */
 if (G.screen === "home" && G.ad && G.ad.enter) G.ad.enter("home");
+
+/* ===== assets 分包门控 =====
+   assets/ 已配为子包（game.json subpackages root:"assets/"），主包不再含这些资源。
+   真机编译时子包需 wx.loadSubpackage 显式加载，否则 drawImage 全失败回退旧造型。
+   浏览器垫片（harness.html）无 wx.loadSubpackage，直接放行。
+
+   两个已确认的坑：
+   ① 开发者工具：wx.loadSubpackage 有「success/fail 都不触发」的已知 bug（官方社区确认，
+      重新编译后行为还会漂移）；且工具里资源本来就是本地文件、直接路径可用（工具容忍直读），
+      → 工具环境直接放行，不进加载屏，从根上避开这个坑；
+   ② 真机：个别基础库同样会挂起（两个回调都不来）。看门狗：30s 无 success 且 0 进度
+      → 置错误态显示「资源加载失败」，让用户退出重进，而不是永远卡在「加载中…」。 */
+G.assetsReady = false;
+G.assetsProgress = 0;
+G.assetsError = null;
+/* 分包进度归一到 0~100：
+   微信 onProgressUpdate 的 progress 值域跨平台不一致——文档/模拟器是 0~100，
+   但 iOS 真机（基础库 2.1.x）实测返回 0~1，直接当百分比会让 0.5 显示成 1%、进度条几乎不动。
+   字节比 totalBytesWritten/totalBytesExpectedToWrite 在两端都是 0~1 的权威比例，优先用它；
+   拿不到字节数时再按 progress 值域兜底（<=1 视为 0~1 乘 100）。 */
+G.normSubpackageProgress = function normSubpackageProgress(res) {
+  if (!res) return null;
+  const p = Number(res.progress);
+  if (!isFinite(p) || p < 0) return null;
+  let v;
+  const written = Number(res.totalBytesWritten), total = Number(res.totalBytesExpectedToWrite);
+  if (isFinite(written) && isFinite(total) && total > 0 && written >= 0) {
+    v = written / total * 100;
+  } else {
+    v = p <= 1 ? p * 100 : p;
+  }
+  return Math.max(0, Math.min(100, v));
+};
+(function startAssetsSubpackage() {
+  let isDevtools = false;
+  try { isDevtools = typeof wx !== "undefined" && wx.getSystemInfoSync().platform === "devtools"; } catch (e) {}
+  if (typeof wx === "undefined" || typeof wx.loadSubpackage !== "function" || isDevtools) {
+    G.assetsReady = true;   // 浏览器垫片 / 开发者工具：资源走本地路径直接可用，无需分包下载
+    return;
+  }
+  let task = null;
+  let lastProgAt = Date.now();   // 进度最近一次真正变化的时刻（"进度停滞"判定基准）
+  let wdTimer = null;
+  const stopWd = () => { if (wdTimer) { clearInterval(wdTimer); wdTimer = null; } };
+  try {
+    task = wx.loadSubpackage({
+      name: "assets",
+      success: () => { G.assetsReady = true; G.assetsProgress = 100; stopWd(); },
+      fail: (err) => { G.assetsError = (err && (err.errMsg || err.errno)) || "unknown"; stopWd(); }
+    });
+  } catch (e) { G.assetsError = String((e && e.message) || e); }
+  if (task && typeof task.onProgressUpdate === "function") {
+    task.onProgressUpdate((res) => {
+      // 归一到 0~100（跨平台值域不一致，见 normSubpackageProgress）
+      // 单调不回退：回调可能乱序/重复推旧值，倒退会让进度条往回跳
+      const v = normSubpackageProgress(res);
+      if (v != null && v > G.assetsProgress) {
+        G.assetsProgress = v;
+        lastProgAt = Date.now();
+      }
+    });
+  }
+  // 看门狗：分包挂起（无回调、或进度停在某处不再推进）时兜底，避免永久卡在加载屏。
+  // 连续 30s 无进度变化才判停滞，慢网络不误报；success/fail 到来即释放计时器。
+  wdTimer = setInterval(() => {
+    if (G.assetsReady || G.assetsError) { stopWd(); return; }
+    if (Date.now() - lastProgAt > 30000) { G.assetsError = "加载超时"; stopWd(); }
+  }, 5000);
+})();
+
+/* 资源未就绪时的加载屏：暖砂 4 段渐变 + 玩法画面轮播卡（上半部分）
+   + 标题 + 进度条（小灰鼠跑在进度上、终点一块奶酪）+ 流光 + 百分比
+   + 每 2.6s 轮换一条实用小提示。整体走 uiScaleCtx，且在「虚拟手机尺寸」
+   (W/S × H/S，与 ui.js layout() 同一套约定) 里布局，由 ctx.scale(S) 放大铺满整窗——
+   否则平板/高分屏(S>1) 下内容会溢出屏幕。
+   进度用缓动跟随真实值（onProgressUpdate 常跳变，直接画会一顿一顿）。出错时显示错误文案。 */
+let _loadShownPct = 0, _loadLastT = 0;
+/* 轮播话术：平板体验 / 屏幕保护 / 猫咪心情判读（引导「猫咪状态」页）/ 陪伴建议。
+   文案短句优先（横屏窄虚拟宽也放得下），绘制时按可用宽度自适应缩字号。 */
+const _LOAD_TIPS = [
+  "用平板玩更过瘾，大屏捕猎更真实",
+  "记得给屏幕贴膜，别让猫爪划伤它",
+  "猫咪呼噜呼噜是开心，去「猫咪状态」听听心情",
+  "耳朵后贴、尾巴快甩，说明猫咪有点烦",
+  "瞳孔放大、身体压低，它要扑猎啦",
+  "猫咪打哈欠伸懒腰，是想休息了",
+  "「电子猫粮」定时投喂，猫咪干饭更规律",
+  "猫粮一次别放太多，新鲜才爱吃",
+  "录下你喊它的声音，「召唤猫咪」一喊就到",
+  "猫咪认得你的声音，走远了也能唤回来",
+  "每天陪玩十分钟，猫咪更健康亲近",
+  "轻轻晃动逗猫棒，比一直点屏更吸引猫"
+];
+/* 玩法画面轮播：用主包矢量图标（D.icon），不碰尚未加载的 assets 子包贴图。
+   每 3.6s 切一张、首尾 0.5s 淡入淡出，图标带轻微浮动，卡片用各玩法主题色。 */
+const _LOAD_SCENES = [
+  { icon: "fish", name: "逗小鱼", desc: "指尖轻点，看金鱼摆尾" },
+  { icon: "mouse", name: "小鼠迷宫", desc: "洞口探头，伏地冲刺" },
+  { icon: "butterfly", name: "花园彩蝶", desc: "扇翅起落，追着蝴蝶跑" },
+  { icon: "frog", name: "青蛙跳跳", desc: "荷叶之间，比谁跳得远" },
+  { icon: "tadpole", name: "蝌蚪快跑", desc: "一群小家伙摆尾冲刺" },
+  { icon: "ladybug", name: "昆虫乐园", desc: "瓢虫数星星，慢慢散步" },
+  { icon: "pool", name: "暗夜荧光", desc: "关灯之后，小虫会发光" },
+  { icon: "laser", name: "激光逗猫", desc: "红点飘啊飘，猫咪追不停" },
+  { icon: "bowl", name: "电子猫粮", desc: "一键出粮，猫咪来干饭" },
+  { icon: "cat", name: "召唤猫咪", desc: "录下叫声，把猫咪喊过来" },
+  { icon: "heart", name: "猫咪心情", desc: "听叫声，读懂猫咪心情" }
+];
+const _LOAD_SCENE_DUR = 3.6;
+function _drawLoadScene(W, H, t) {
+  const idx = Math.floor(t / _LOAD_SCENE_DUR) % _LOAD_SCENES.length;
+  const sc = _LOAD_SCENES[idx];
+  const f = t % _LOAD_SCENE_DUR;
+  const alpha = Math.max(0, Math.min(1, f / 0.5, (_LOAD_SCENE_DUR - f) / 0.5));
+  /* 轮播大卡做背景板：占据上半屏主体，图标+玩法名居中放大、置于底层；
+     「加载中…」与进度条作为前景叠在卡内下部——位置由返回值 LB 供
+     drawAssetsLoadingScreen 定位，两层同一张卡，视觉上轮播即背景。 */
+  const cw = Math.min(W * 0.86, 520), ch = Math.min(H * 0.60, 330);
+  const cx = (W - cw) / 2, cy = H * 0.055;
+  const icx = cx + cw / 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  // 白卡背景板（与游戏内面板同一套语言：白卡 + 浅青描边 + 柔和阴影）
+  ctx.save();
+  ctx.shadowColor = "rgba(20,49,58,.10)"; ctx.shadowBlur = 18; ctx.shadowOffsetY = 5;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(cx, cy, cw, ch, 18) : ctx.rect(cx, cy, cw, ch);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = "#dcebe6"; ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(cx, cy, cw, ch, 18) : ctx.rect(cx, cy, cw, ch);
+  ctx.stroke();
+  // 图标：大尺寸居中，轻微浮动；D.icon 自带 save/restore
+  ctx.save();
+  ctx.translate(icx, cy + ch * 0.24 + Math.sin(t * 2.4 + idx) * 3);
+  const s = ch / 270;
+  ctx.scale(s, s);
+  if (G.draw && G.draw.icon) G.draw.icon(ctx, sc.icon, 0, 0, 1, true);  // 强制矢量：子包未就绪
+  ctx.restore();
+  // 玩法名 + 描述（居中，按卡宽自适应缩字号）
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#14313a";
+  let nameFs = Math.min(26, Math.max(15, ch * 0.105));
+  ctx.font = "bold " + nameFs + "px sans-serif";
+  while (ctx.measureText(sc.name).width > cw - 40 && nameFs > 13) ctx.font = "bold " + (--nameFs) + "px sans-serif";
+  ctx.fillText(sc.name, icx, cy + ch * 0.575);
+  let descFs = Math.min(15, Math.max(11, ch * 0.055));
+  ctx.font = descFs + "px sans-serif";
+  ctx.globalAlpha = alpha * 0.8;
+  while (ctx.measureText(sc.desc).width > cw - 40 && descFs > 10) ctx.font = (--descFs) + "px sans-serif";
+  ctx.fillStyle = "#4a6b74";
+  ctx.fillText(sc.desc, icx, cy + ch * 0.66);
+  // 轮播指示点（卡正下方）：当前卡 teal 实心，其余浅青
+  ctx.globalAlpha = alpha * 0.75;
+  const dotR = 2.5, gapR = 9, totalW = (_LOAD_SCENES.length - 1) * gapR;
+  const dx0 = icx - totalW / 2, dy = cy + ch + 9;
+  for (let i = 0; i < _LOAD_SCENES.length; i++) {
+    ctx.beginPath();
+    ctx.arc(dx0 + i * gapR, dy, i === idx ? dotR + 0.8 : dotR, 0, Math.PI * 2);
+    ctx.fillStyle = i === idx ? "#159a8c" : "rgba(21,154,140,.32)";
+    ctx.fill();
+  }
+  ctx.restore();
+  return { cx, cy, cw, ch };
+}
+function _drawLoadMouse(x, y, t) {
+  // 面向右的小灰鼠（跑在进度条上）：身体 + 头 + 耳 + 眼鼻 + 尾巴 + 小短腿
+  const bob = Math.sin(t * 12) * 1.3;
+  const yy = y + bob;
+  ctx.strokeStyle = "rgba(74,107,116,.8)";
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x - 9, yy + 1);
+  ctx.quadraticCurveTo(x - 17, yy + 3, x - 15, yy - 4);
+  ctx.stroke();
+  const run = Math.sin(t * 15) * 1.6;
+  ctx.fillStyle = "#7f95a0";
+  ctx.beginPath();
+  ctx.ellipse(x - 7, yy + 3.4 + run * 0.4, 2.2, 2.6, 0, 0, Math.PI * 2);
+  ctx.ellipse(x + 2, yy + 3.4 - run * 0.4, 2.2, 2.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#93a8b2";
+  ctx.beginPath();
+  ctx.ellipse(x, yy, 10, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + 8.5, yy - 2.5, 5.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + 5.5, yy - 6.5, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#e5a8a0";
+  ctx.beginPath();
+  ctx.arc(x + 5.5, yy - 6.5, 1.7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#33302b";
+  ctx.beginPath();
+  ctx.arc(x + 10.5, yy - 3, 1.15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#e07a7a";
+  ctx.beginPath();
+  ctx.arc(x + 14, yy - 1, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+function _drawCheese(x, y) {
+  // 进度条终点的小奶酪块
+  ctx.fillStyle = "#f0bf52";
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y + 5);
+  ctx.lineTo(x + 8, y - 4);
+  ctx.lineTo(x + 8, y + 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = "#c8922f";
+  ctx.beginPath();
+  ctx.arc(x + 1, y + 2, 1.6, 0, Math.PI * 2);
+  ctx.arc(x + 5.4, y - 0.6, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+function drawAssetsLoadingScreen() {
+  const t = performance.now() / 1000;
+  // 与 ui.js layout() 一致：UI 在「虚拟手机尺寸」(W/S × H/S)里布局，外层 ctx.scale(S) 放大铺满整窗
+  const S = G.platform.S || 1;
+  const W = (G.platform.W || 390) / S, H = (G.platform.H || 844) / S;
+  uiScaleCtx(() => {
+  /* 与首页/全游戏同一主题：白 → 淡青 → 浅青背景（homeBg1/2/3），墨青文字（C.ink），
+     teal 主色进度条。加载页不再自成一套暖砂色。 */
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#ffffff");
+  g.addColorStop(0.45, "#e6f8f1");
+  g.addColorStop(1, "#cdefe4");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#14313a";
+  ctx.font = "bold 22px sans-serif";
+  // 玩法画面轮播大卡做背景（前景加载信息叠在卡上），错误态不展示
+  const LB = (!G.assetsError) ? _drawLoadScene(W, H, t) : null;
+  if (G.assetsError) {
+    ctx.fillText("资源加载失败", W / 2, H * 0.42);
+    ctx.font = "14px sans-serif";
+    ctx.fillStyle = "#4a6b74";
+    ctx.fillText("请退出后重新进入小游戏", W / 2, H * 0.50);
+    ctx.font = "11px sans-serif";
+    ctx.fillStyle = "rgba(74,107,116,.6)";
+    ctx.fillText(String(G.assetsError).slice(0, 40), W / 2, H * 0.545);
+    return;
+  }
+  // 前景层：加载中 + 进度条叠在轮播卡内下部（z 序在轮播之上），与描述留足呼吸空隙
+  ctx.fillText("加载中…", W / 2, LB.cy + LB.ch * 0.80);
+  // 进度条：宽随卡收窄，居中；小鼠跑在进度位置，终点一块奶酪
+  const bw = Math.min(LB.cw * 0.66, 300), bh = 10, bx = (W - bw) / 2, by = LB.cy + LB.ch - 26;
+  ctx.fillStyle = "rgba(21,154,140,.14)";
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(bx, by, bw, bh, 5) : ctx.rect(bx, by, bw, bh);
+  ctx.fill();
+  const target = Math.max(0, Math.min(1, G.assetsProgress / 100));
+  const dtL = _loadLastT ? Math.min(0.05, t - _loadLastT) : 0.016;
+  _loadLastT = t;
+  _loadShownPct += (target - _loadShownPct) * Math.min(1, dtL * 7);
+  if (Math.abs(target - _loadShownPct) < 0.002) _loadShownPct = target;
+  const pct = _loadShownPct;
+  if (pct > 0.004) {
+    const fw = Math.max(bh, bw * pct);
+    const fg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    fg.addColorStop(0, "#46d6c0"); fg.addColorStop(1, "#14a093");
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(bx, by, fw, bh, 5) : ctx.rect(bx, by, fw, bh);
+    ctx.fill();
+    // 流光：填充区里一道缓慢扫过的亮带
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect ? ctx.roundRect(bx, by, fw, bh, 5) : ctx.rect(bx, by, fw, bh);
+    ctx.clip();
+    const sw = 26, sx = bx + ((t * 90) % (fw + sw * 2)) - sw;
+    const sg = ctx.createLinearGradient(sx - sw, 0, sx + sw, 0);
+    sg.addColorStop(0, "rgba(255,255,255,0)");
+    sg.addColorStop(0.5, "rgba(255,255,255,.30)");
+    sg.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = sg;
+    ctx.fillRect(bx, by, fw + sw * 2, bh);
+    ctx.restore();
+  }
+  _drawCheese(bx + bw + 17, by + bh / 2 + 1);
+  // 注意必须传时间 t：缺参时 bob=Math.sin(NaN) 会让全部坐标变 NaN，canvas 静默跳过绘制
+  _drawLoadMouse(bx + 2 + bw * pct, by - 2, t);
+  ctx.fillStyle = "#4a6b74";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText(Math.round(G.assetsProgress) + "%", W / 2, LB.cy + LB.ch + 30);
+  // 轮换提示：2.6s 一条，首尾 0.25s 淡入淡出
+  const ti = Math.floor(t / 2.6) % _LOAD_TIPS.length;
+  const tf = t % 2.6;
+  const ta = Math.min(1, tf / 0.25, (2.6 - tf) / 0.25);
+  ctx.fillStyle = "rgba(74,107,116," + (0.9 * ta).toFixed(3) + ")";
+  let tipFs = 14;
+  ctx.font = tipFs + "px sans-serif";
+  while (ctx.measureText(_LOAD_TIPS[ti]).width > W * 0.9 && tipFs > 10) ctx.font = (--tipFs) + "px sans-serif";
+  ctx.fillText(_LOAD_TIPS[ti], W / 2, LB.cy + LB.ch + 56);
+  });
+}
 
 requestAnimationFrame(loop);
 

@@ -345,7 +345,7 @@ module.exports = function (G) {
     const baseF = 480 + Math.min(combo || 0, 10) * 40;
     tone("sine", baseF, 150, 0.16, 0.32); tone("triangle", baseF * 2, 340, 0.1, 0.1);
   };
-  /* 捕鼠室内房间：除老鼠叫声（出洞循环"唧唧" + 命中真实录音）外全部静音——
+  /* 捕鼠室内房间：除老鼠叫声（出洞循环单声短吱 + 命中真实录音）外全部静音——
      拍偏、连击成就、倒计时提示音都不播。群鼠乱窜（swarm）与其它玩法不受影响。 */
   G.quietMouseRoom = () => G.config.targetType === "mouse" &&
     G.scene && G.scene.type === "mouse" &&
@@ -378,8 +378,13 @@ module.exports = function (G) {
   /* 老鼠命中叫声：真实录音（用户提供的实拍视频 2.05–3.10s，连着 3 声"唧唧"，
      峰值已归一到 -3 dBFS）。素材不可用时退回原来的合成音。
      追击命中（double）只是播得更响一点——录音本身已连着 3 声，不用再叠一遍。 */
-  const MOUSE_SQUEAK = "assets/sfx/mouse-squeak.wav";
-  G.preloadMouseSfx = () => { if (G.platform.preloadSfx) G.platform.preloadSfx(MOUSE_SQUEAK); };
+  const MOUSE_SQUEAK = "assets/sfx/mouse-squeak.wav";  // 命中：3 声连叫（真实录音）
+  const MOUSE_SCURRY = "assets/sfx/mouse-scurry.wav";  // 移动：1 声短吱（同一录音裁切，tools/gen_mouse_scurry_sfx.py）
+  G.preloadMouseSfx = () => {
+    if (!G.platform.preloadSfx) return;
+    G.platform.preloadSfx(MOUSE_SQUEAK);
+    G.platform.preloadSfx(MOUSE_SCURRY);
+  };
   G.playSqueak = (double) => {
     if (!G.config.sound) return;
     if (G.platform.sfx && G.platform.sfx(MOUSE_SQUEAK, double ? 0.62 : 0.5)) return;
@@ -387,24 +392,24 @@ module.exports = function (G) {
     tone("square", 3300, 2400, 0.05, 0.08, 0.07);
     if (double) tone("square", 3600, 2600, 0.06, 0.09, 0.14);
   };
-  /* 老鼠出洞期间的循环“唧唧”声：只要有老鼠在 peek/dart 就一直叫，
+  /* 老鼠出洞期间的循环“吱”声：只要有老鼠在 peek/dart 就一直叫，
      全部回洞后停止。多只老鼠共用一个声部并按数量略微加快，
      避免 6~8 个洞口各自起一个循环叠成噪音。
-     音源与命中音同一段真实录音（连 3 声，约 1.05s）：每轮放一遍、
-     轮间隔必须 ≥ 录音长度（sfx 池每次调用起新实例，叠了会混成一片）；
-     出洞的鼠越多轮间隔越短，听感上就是“叫得更密”。素材不可用回退合成音。 */
+     ★ 与命中音分开：命中用 3 声连叫的 MOUSE_SQUEAK，移动用单声短吱 MOUSE_SCURRY。
+       两者必须不同文件——sfxPool 按 src 单例，共用会互相 stop 掐断，且听不出区别。
+       短吱只有 0.12s，轮间隔 0.42~0.72s 足够不叠音；出洞的鼠越多间隔越短，
+       听感上就是“叫得更密”。素材不可用回退单声合成音。 */
   let mouseSqueakOn = false, mouseSqueakTimer = null, mouseSqueakN = 0;
   function mouseSqueakTick() {
     if (!mouseSqueakOn) return;
     if (!G.config.sound) { G.stopMouseSqueak(); return; }
-    if (!(G.platform.sfx && G.platform.sfx(MOUSE_SQUEAK, 0.30))) {
+    if (!(G.platform.sfx && G.platform.sfx(MOUSE_SCURRY, 0.34))) {
       const f = 2300 + Math.random() * 900;
       tone("square", f, f * 0.72, 0.045, 0.055);
       tone("square", f * 1.16, f * 0.82, 0.040, 0.040, 0.060);
-      if (Math.random() < 0.30) tone("square", f * 1.05, f * 0.80, 0.035, 0.032, 0.140);
     }
-    const base = mouseSqueakN > 2 ? 1075 : mouseSqueakN > 1 ? 1120 : 1200;
-    mouseSqueakTimer = setTimeout(mouseSqueakTick, base + Math.random() * 260);
+    const base = mouseSqueakN > 2 ? 420 : mouseSqueakN > 1 ? 480 : 540;
+    mouseSqueakTimer = setTimeout(mouseSqueakTick, base + Math.random() * 180);
   }
   G.stopMouseSqueak = () => {
     mouseSqueakOn = false;

@@ -3,7 +3,7 @@
    验的六件事：
      ① 竖屏首页进页会建实例（G.AD_UNIT_ID 填了的前提下），style 落在猫图区右上、不压猫脸与面板
      ② 竖屏结算页进页会建实例，style 落在标题下方、四按钮上方
-     ③ 横屏首页建实例（猫图区右上），横屏结算页不出；两者都不盖面板与按钮
+     ③ 横屏首页建实例（贴顶、靠右窄卡），横屏结算页不出；两者都不盖面板与按钮
      ④ 切走页面即 destroy，不残留实例；切回再进重新创建
      ⑤ 对局页（playing/counting/paused）绝不建实例；竖屏召唤页、竖屏猫咪状态页不出
      ⑥ 横屏猫咪状态页：落在「标题右侧」空白带（tab 右缘↔胶囊之间、网格上沿之上），
@@ -198,7 +198,7 @@ const land = { windowWidth: 844, windowHeight: 390, pixelRatio: 2,
     ok(r.top + Math.round(r.width * 0.6) <= 180, "横屏结算：下缘不压数据卡（按 0.6 估高）", (r.top + Math.round(r.width * 0.6)) + " vs 数据卡 ~180");
   }
 
-  /* 横屏选场景页：场景卡左侧竖带（新落点） */
+  /* 横屏选场景页：贴顶靠右窄卡（上缘贴安全区顶、右缘止于胶囊左侧） */
   await p2.evaluate(() => { const G = window.G; G.switchScreen("home"); G.config.targetType = "fish"; G.openBgPick(); });
   await sleep(1100);
   s2 = await p2.evaluate(ADSTATE);
@@ -207,9 +207,11 @@ const land = { windowWidth: 844, windowHeight: 390, pixelRatio: 2,
   ok(!!s2.rectBgpick, "横屏选场景：bgpickAdRect 返回有效矩形", JSON.stringify(s2.rectBgpick));
   if (s2.rectBgpick && s2.rectBgpick.left != null) {
     const r = s2.rectBgpick;
-    ok(r.width >= 120, "横屏选场景：宽度足够（>=120）", r.width);
-    ok(r.left >= 40, "横屏选场景：在安全区内", r.left);
-    ok(r.left + r.width <= 280, "横屏选场景：右缘不压主卡", (r.left + r.width) + " vs 主卡左缘 ~262");
+    ok(r.width >= 120 && r.width <= 160, "横屏选场景：窄卡宽度（120~160）", r.width);
+    ok(r.top <= 16, "横屏选场景：贴顶（top<=16，旧落点胶囊下方 top≈53）", r.top);
+    ok(r.left >= 560, "横屏选场景：靠右（left>=560）", r.left);
+    ok(r.left + r.width >= 720 && r.left + r.width <= 750, "横屏选场景：右缘止于胶囊左侧（720~750）", r.left + r.width);
+    ok(r.top + 110 < 240, "横屏选场景：下缘不压底部设置面板（面板顶≈286）", r.top + 110);
   }
 
   /* 横屏猫粮机：应照常建（feederAdRect 横屏有落位） */

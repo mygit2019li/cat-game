@@ -55,6 +55,14 @@
       {
         "value": "assets/home-reference.png",
         "type": "file"
+      },
+      {
+        "value": "demo",
+        "type": "folder"
+      },
+      {
+        "value": "小程序项目档案.md",
+        "type": "file"
       }
     ],
     "include": []

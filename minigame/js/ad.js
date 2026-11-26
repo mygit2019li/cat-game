@@ -8,11 +8,13 @@
    按页面 key 区分广告位（七个页面，均只取页面自己的空白/装饰区）：
      feeder  电子猫粮机（G.screen === "feeder"）——机器人/按钮外侧空白带；横屏为右侧竖条
      home    首页（G.screen === "home"）——竖屏猫图区右上角浮一张窄卡，靠右不压猫脸；
-             横屏品牌行右侧↔胶囊左侧的顶部横带（浮在面板上沿之上），不碰胶囊与底部按钮
+             横屏品牌行右侧↔胶囊左侧的顶部横带（浮在面板上沿之上），不碰胶囊与底部按钮。
+             冷启动加载屏期间 G.screen 仍是 home，这张横带就是「加载页广告」——
+             尺寸纠正（横屏未生效的安卓机）后由 resizeCb 里的 ad.realign 统一拉回贴顶靠右
      result  结算页（G.screen === "result"）——竖屏标题下方窄带；
              横屏左上角「返回键下方 ↔ 数据卡上方」留白，居中标题左侧
-     bgpick  选场景页（G.screen === "bgpick"）——仅横屏「场景卡左侧」竖带；
-             竖屏主卡占满宽度、两侧无留白，不出
+     bgpick  选场景页（G.screen === "bgpick"）——仅横屏「贴顶靠右」窄卡；
+             上缘贴安全区顶部、右缘止于微信胶囊左侧（与首页横屏同一条基线）；竖屏主卡占满宽度、不出
      sound   猫咪状态 / 动物情绪页（G.screen === "sound"）——仅横屏「标题右侧」空白带
              （tab 行右缘 ↔ 微信胶囊之间，下缘贴网格上沿）；竖屏网格顶到 tab 行，不出
      summon  召唤猫咪（G.screen === "summon"）——仅横屏「卡牌左侧」那半屏留白；
@@ -91,7 +93,7 @@ module.exports = function (G) {
      feeder   → G.feederAdRect()   （feeder.js，机器/按钮外侧空白带）
      home     → G.homeAdRect()     （ui.js，竖屏猫图右上；横屏顶部横带）
      result   → G.resultAdRect()   （ui.js，竖屏标题下方；横屏左上留白）
-     bgpick   → G.bgpickAdRect()   （ui.js，横屏场景卡左侧竖带；竖屏 → 返回 null 不出）
+     bgpick   → G.bgpickAdRect()   （ui.js，横屏贴顶靠右窄卡；竖屏 → 返回 null 不出）
      sound    → G.soundAdRect()    （ui.js，横屏标题右侧空白带；竖屏网格顶到 tab 行 → 不出）
      summon   → G.summonAdRect()   （ui.js，横屏卡牌左侧留白；竖屏两侧无留白 → 返回 null 不出）
      counting → G.countdownAdRect()（ui.js，横屏顶部右侧留白；竖屏 → 返回 null 不出）
@@ -349,7 +351,6 @@ module.exports = function (G) {
       G.soundAdMeasuredH = 0;
       G.bgpickAdMeasuredH = 0;
       G.resultAdMeasuredH = 0;
-      G.soundAdMeasuredH = 0;
       if (!had) { if (from) info("leave：无实例", { page: from, reason: reason }); return; }
       /* 用户点关闭时组件已被系统收起，不必再 hide 一次（只销毁） */
       const userClosed = /closed-by-user/.test(String(reason || ""));

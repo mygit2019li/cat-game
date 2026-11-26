@@ -180,20 +180,21 @@ setConfig({ targetType: "frog", preyCount: 7 });
 ok(G.stageTargetCount() === Math.min(7, Math.max(1, G.scene.pads.filter(p => (p.sinkState || "float") === "float").length - 1)),
   "青蛙：preyCount=7 → 被荷叶数封顶（不超 pads-1）", String(G.stageTargetCount()));
 
-/* 10. tadpole：buildPreys 当前按 preyCount 生成；topUp 后被 session.tadCount/stage 覆盖。 */
+/* 10. tadpole：数量由二级卡页「蝌蚪数量」（config.tadCount 1 单条 / 3 多条）决定，
+    与全局 preyCount 解耦：buildPreys / topUp 都走 stageTargetCount 同源分支。 */
+resetScene(); resetSession(1);
+setConfig({ targetType: "tadpole", tadCount: 1, preyCount: 3 });
+ok(build("tadpole") === 1, "蝌蚪单条：开局 1 条（与 preyCount 无关）", String(G.preys.length));
+const tadS1 = countAfterTopUp("tadpole");
+ok(tadS1 === 1, "蝌蚪单条 stage1：topUp 后仍恒 1 条", String(tadS1));
 resetScene(); resetSession(1, { tadCount: 1 });
-setConfig({ targetType: "tadpole", preyCount: 1 });
-ok(build("tadpole") === 1, "蝌蚪：preyCount=1 → buildPreys 生成 1 只", String(G.preys.length));
-setConfig({ targetType: "tadpole", preyCount: 3 });
-ok(build("tadpole") === 3, "蝌蚪：preyCount=3 → buildPreys 生成 3 只（潜在问题：开局即多只）", String(G.preys.length));
-resetScene(); resetSession(1, { tadCount: 1 });
-setConfig({ targetType: "tadpole", preyCount: 3 });
-const tadTop1 = countAfterTopUp("tadpole");
-ok(tadTop1 === 3, "蝌蚪 stage1/tadCount=1：preyCount=3 → buildPreys 已生成 3 只，topUp 不会减少（潜在问题）", String(tadTop1));
+setConfig({ targetType: "tadpole", tadCount: 3, preyCount: 1 });
+const tadM1 = countAfterTopUp("tadpole");
+ok(tadM1 === 1, "蝌蚪多条 stage1：开局/补点 1 条（阶段基线）", String(tadM1));
 resetScene(); resetSession(3, { tadCount: 3 });
-setConfig({ targetType: "tadpole", preyCount: 1 });
-const tadTop3 = countAfterTopUp("tadpole");
-ok(tadTop3 === 3, "蝌蚪 stage3/tadCount=3：preyCount=1 → topUp 后被动态 tadCount 覆盖为 3 只", String(tadTop3));
+setConfig({ targetType: "tadpole", tadCount: 3, preyCount: 1 });
+const tadM3 = countAfterTopUp("tadpole");
+ok(tadM3 === 3, "蝌蚪多条 stage3/tadCount=3：补点到 3 条", String(tadM3));
 
 /* 11. pool 的 topUp 保持 ffCount，不被阶段覆盖。 */
 resetScene(); resetSession(2);

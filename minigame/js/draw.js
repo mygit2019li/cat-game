@@ -623,7 +623,9 @@ module.exports = function (G) {
   const _mouseSideHD = (ctx, p, t, v, tex) => {
     const sniff = Math.sin(t * 9 + (p.phase || 0)) * 1.2;
     const running = p.state === "dart";
-    const bob = running ? Math.abs(Math.sin(t * 20)) * 1.8 : Math.sin(t * 2.4 + (p.phase || 0)) * 0.6;
+    // 腿部/身体起伏：冲刺时更高频但更克制（20→13→9），慢速游移时用 t*1.8 的轻微起伏
+    // 让腿部动作与移动协调，消除"腿停死"的违和感，整体节奏放慢一档
+    const bob = running ? Math.abs(Math.sin(t * 4.5)) * 1.5 : Math.sin(t * 0.9 + (p.phase || 0)) * 0.7;
     const sx0 = 8, sy0 = 9, sw = 213, shh = 248;
     const dw = 104, dh = 78;
     ctx.save();
@@ -945,6 +947,7 @@ module.exports = function (G) {
              hold: "rgba(120,255,170,.7)" }
   };
   D.laser = (ctx, p, t) => {
+    ctx.save();   // 本函数会用 *= 改 globalAlpha（preTele 闪烁），save/restore 防止泄漏给调用方
     const panic = G.session.combo >= 5;
     // 瞬移预警：原地高频闪烁（0.3s 内明暗交替），给猫"要消失"的预判信号
     if (p.state === "preTele") ctx.globalAlpha *= 0.35 + 0.65 * Math.abs(Math.sin(t * 26));
@@ -974,6 +977,7 @@ module.exports = function (G) {
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(0, 0, r * 1.7 + Math.sin(t * 7) * 3, 0, Math.PI * 2); ctx.stroke();
     }
+    ctx.restore();
   };
 
   /* ---------- 暗夜荧光：发光小虫（俯视爬行：六足步态 + 鞘翅背线 + 荧光尾灯，头朝爬行方向） ---------- */
@@ -995,8 +999,8 @@ module.exports = function (G) {
     }
     const head = p._headAng == null ? 0 : p._headAng;
     // 步足摆动相位：爬行时快、停驻时慢颤
-    const gait = t * (moving ? 18 : 1.8) + ph * 4;
-    const gaitAmp = moving ? 1 : 0.18;
+    const gait = t * (moving ? 9 : 0.9) + ph * 4;
+    const gaitAmp = moving ? 0.6 : 0.15;
     const jitter = panic ? 1.2 * Math.sin(t * 40) : 0;
     ctx.save();
     ctx.translate(jitter, jitter * 0.6);
@@ -1113,10 +1117,111 @@ module.exports = function (G) {
     ctx.restore();
   };
 
+  /* ---------- vseq：视频提取的 3 段新动画（快跑 fast / 东张西望 look / 坐下 sit） ----------
+     只存"基准灰鼠" sprite sheet，运行时按花色亮度 LUT 着色成离屏画布（懒加载+节流缓存）。
+     6 花色离线表会超包体预算（~5.9MB），故采用"1 张基准表 × 运行时 LUT 着色"，
+     新表仅 1.1MB；着色画布取 base 的 0.5× 分辨率、按需生成，单张构建 ~5-20ms。
+     统一物理尺寸：各段按 run 帧单独校准 viewScale（见 _vseqScaleFor），脚线对齐 VSEQ_FEET_Y，
+     保证 dart(快跑)/scurry(慢跑)/peek(东张西望)/pause(坐下) 切换时鼠身不跳变。 */
+  const VSEQ_META = {
+    // mouseW = 实测帧内鼠身宽（px）：fast 320 / look 220 / sit 220。
+    // look/sit 帧内鼠身 ≈0.49× 原视频尺度（非 fast 的 0.7×），故三段比例必须分开校准。
+    fast: { frames: 10, cellW: 338.8, cellH: 127, ground: 0.9449, file: "fast_sheet.png", mouseW: 320 },
+    look: { frames: 14, cellW: 234.5, cellH: 144, ground: 0.9514, file: "look_sheet.png", mouseW: 220 },
+    sit:  { frames: 10, cellW: 235.2, cellH: 144, ground: 0.9514, file: "sit_sheet.png",  mouseW: 220 },
+  };
+  const VSEQ_KEYS = ["house", "charcoal", "albino", "deer", "pup", "smoky"];
+  const VSEQ_BASE = 495;          // 源 run 帧宽（原视频尺度 1.0×）
+  const VSEQ_RUN_W = 448;         // 实测 495px run 帧内鼠身宽（原视频尺度）
+  const VSEQ_CANVAS_SCALE = 0.5;  // 着色离屏画布相对 base sheet 的分辨率（省内存、提速）
+  const VSEQ_FEET_Y = 62;         // 设计空间脚线（对齐 run 帧脚线）
+  const VSEQ_BUILD_MS = 30;       // 着色构建节流：每 ~30ms 最多建 1 张 (段,花色) 画布，摊平启动开销
+  /* 分段 viewScale 校准：各 sheet 帧内鼠身尺度不同（实测 mouseW：fast 320 / look 220 / sit 220，
+     look/sit 帧 ≈0.49× 原视频尺度、非 fast 的 0.7×）。若全段共用一个比例，
+     peek/pause 鼠会比 dart/hole 鼠物理小 ~30%；故各段单独按 run 帧校准，
+     使屏上鼠身宽 = (448/495)×dw，与 run 帧完全一致。
+     这样 dart(快跑)/scurry(慢跑)/peek(东张西望)/pause(坐下) 切换时鼠身不跳变。 */
+  const _vseqScaleFor = (seg, dw) => ((VSEQ_RUN_W / VSEQ_BASE) * dw) / VSEQ_META[seg].mouseW;
+  // 侧视快跑 ≈0.3054×1.30≈0.397：fast sheet 的奔跑姿态矮平（实测鼠身 320×105，
+  // 渲染后 ≈97.7×32.1），与 look sheet 探头鼠（≈97.7×55.5）比视觉体量仅 ~58%。
+  // 放大 1.30 后 dart 鼠 ≈127×41.7，与 peek 鼠（97.7×55.5）等体量（面积 ≈98%），
+  // 满足"漏出的老鼠和移动的老鼠一样大"。加宽后的裁剪窗（def.w 132）可完整容纳。
+  const VSEQ_DRAW_SCALE_FAST = _vseqScaleFor("fast", 108) * 1.30;
+  const VSEQ_DRAW_SCALE_LOOK = _vseqScaleFor("look", 108);   // 侧视东张西望 ≈0.4443
+  const VSEQ_DRAW_SCALE_TOP = _vseqScaleFor("sit", 104);     // 俯视坐下 ≈0.4289
+  // 6 花色 × 3 通道 × 256 亮度 LUT（base64 打包，4608 字节）；中点(120)与现有 run 花色逐一对应
+  const VSEQ_LUT_B64 =
+  "AAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAgIyIkJiclKCkqKy4sLjAyMTQ2Nzg7QERDSktLS0tLS0xNTk9QUVNUVldYWVpbXV5gYWFjZGZmaGlqa21u" +
+  "b3Fyc3V2d3l6e3x9fn+AgoSFhoeIiYuMjY6QkZKUlpeYmZucnZ+goKGhoqSlp6enqaqsrK6urq+xs7O1s7S2tbW3ury9wb/CwcPDxMTFxsfHx8zRys/T0NHR" +
+  "0dfR3NHS0tbY3drY4Nfh3+Hh39zf4uDm4efp6+3v8fPw7ern8fPh7vz/7OHu+/z8/f7+///////////8+fbz8O3q5+Th4eHh4eHh4QABAQIDBAUGBwgJCgsM" +
+  "DQ4PEBESExUWFhcYGRobHRweHyAhIyQkJykpKSssLi8wMTQ1ODs+PkFCQkJCQkJDQ0RFRkdJSktNTU5PUFJSVFVVV1hZWltcXV5gYWJjZGVmZ2lqa2xtbm9w" +
+  "cXJ0dXZ2eHl6e3x8fn6AgoSFhoeIiYqLjIyMi42PkJGRkJOTlpWXlpWWmZyanJiXl5WUl5ufn6alpaenpqinqqmpq6uxt7C1uba2t7i8tr6zubm9t72/u7y+" +
+  "xsTGxsTCwcHDv8bAwcLCw8PExcbIycfNxsrNzMzGzdTW19jZ2tzd3uDh4uTl4t/c2dbSz8zJxsbGxsbGxsYAAQEBAgMEBQUGBwkKCgsMDQ4PDxESERIUFRUV" +
+  "FxcZGxwcHR0gISIkJCUmJyopLC4uMTAzNTY4ODg4ODg4OTk6Ozw8Pj9AQUFCQ0RFRkdISEpLTExNTk9QUlJTVFVWV1hZWltbXF1eX2BhYmNkZWZmaGlpa2tt" +
+  "bm9wcXJzdHR1d3d4eXp7fH19f4CBgoKEhIaGiIiJiouLjYyMi46RkpSUlZaXmJmam5ydoJ+ioaKlpaSoqKmpqq2qr66wr7KurrSwtKirqKivtri5tsCoyMnL" +
+  "zM3P0MvHwr7F1qjA2djBqMPe3+Dg4ePm6Orr7O7t7Obf2NHKw722r6ioqKioqKioAAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAgIyIkJiclJykpKSsr" +
+  "LC0tLjAwLzAvLSssKCcnJycnJycoKCkpKisrLC0tLi4vMDAxMjIzNDU1NjY3Nzk5Ojo7PDw9Pj8/QEBBQUNCRERFRkhHSElLS09NUVJPT09RUVJSUlNTWl5i" +
+  "YmFhYWduaWxmbmxzeXtzcXl4iY6SnaagmI6PgIeHiY2Uk5qWnZ+go5SGopWLmJyhoJWtkL2rrqC4n5u0qrN1g3V1jqautqrRdefp6+3v8fPi0sKxzfN1uPz/" +
+  "tnW4+/z8/f7+///////////x49bIuqyekYN1dXV1dXV1dQABAQIDBAUGBwgJCgsMDQ4PEBESExUWFhcYGRobHRweHyAhIyMkJScnKSoqKywsLS4uLiwqKyYl" +
+  "JSUlJSUlJiYnJygpKSorKyssLS4uLy8wMDEyMjMzNDU2Njc3ODg5Ojo7PDw9PT4/P0BBQUJDQ0RFRkdKSEtMSktLTExNTU1OT1NWWFlZWVldYl9hXWJhZmts" +
+  "aGZra3Z4e4KIhH96e3F3dnl8gYGFhImJi46Ee4+Gf4qMkJCHmYKjmpyRnYuNnpChb3pvb4OWmp6Yrm/AwcLCw8PEurGnnqrNb57NzKBvotTW19jZ2tzd3uDh" +
+  "4uTl2c3Ctqqekod7b29vb29vb28AAQEBAgMEBQUGBwkKCgsMDQ4PDxESERIUFRUVFxcZGxwcHR0fISIiIyQlJicnKisqLCkoJikkIyMjIyMjIyQkJCUmJico" +
+  "KCkpKiorKywtLS4uLy8wMTEyMzM0NDU1Njc3ODg5OTo7PDw9PT4/QD9AQUNDRkVISEdHR0hJSUlKSktPUlVWVVVVWV5bXllfXWRnamRiZ2hydnd+g4B9eHlu" +
+  "dHR2eX5+goCGiIiNgXaNg3qIiIyMhJh+pJebkJ+KiZ+Rn2l1aWmAl5ugl7RpyMnLzM3P0MS3qp6w1mmh2diiaaTe3+Dg4ePm6Orr7O7t7N/SxbirnpCDdmlp" +
+  "aWlpaWlpAAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAhIyIkJiclKSosLjEtMDM2NTg8P0FJVWFecXR0dHR0dXZ3eHp8foCChYeIiYuNkJGUlZaZm56e" +
+  "oaKkpqqrrK+xsrS2uLu8vsDCw8THyMzNz9DT1NbX2Nbb2dvk5unp7O7w8/X28e7p6u7w8erh6efw5+rj3Nrl6eLj09HQxr/H0NnZ6OHk4eDb3Nnb2NjY1uLt" +
+  "2OPs4uLf4Orb8dbd3OXh7uvi7+H/+f//9ezt7u7s/+fp6+3v8fP09PX2+/P//vz/+//9+/z8/f7+/////////////////////////////////wABAQIDBAUG" +
+  "BwgJCgsMDQ4PEBESExUWFhcYGRobHRweHyAhIyUlKCwtKi4wNDM1OT4/SFRfXG5xcXFxcXJzdHV3eXp9f4GDhIaHioyNkJKSlZeZmp2eoKGlpqiqrK6wsbO2" +
+  "t7m7vb6+wcLHyMnJzs7Q0NHO1NHU3eDj4uXn6u3v7+jk3uDm6ezk2OPf69/k2dHO3eLY2sK9uqyhrLnHx97V1tTSyszHzMXFxsPV5sjX5NbV0dPfyea9zszZ" +
+  "yN7hztjR//X//+/e29jgy//AwcLCw8PEzNXd5trN/+bNzOj/6tTW19jZ2tzd3uDh4uTl6Ort7/L19/r8//////////8AAQEBAgMEBQUGBwkKCgsMDQ4PDxES" +
+  "ERIUFRUVFxgZGxwcHR0hIiUnKSUpKzAuMzc5PUJPWllqbW1tbW1ub29xc3V2eHp9foCBg4WIiIuNjZCSlJSXmJqcn6CipKanqautsLGytLa4t7q8wMHCwsbH" +
+  "ycnKx83KzNbY29rd3+Lk5ufg3djZ3+Lk3tTg3ere49rRz9zi2NnBvbmqnam5x8je1dfU0srNxsvFxsXE1ebI1+PX1NHS4Mrnv87N2szf4dHc0f/2///w4t/c" +
+  "4tL/yMnLzM3P0Nbc4+ni1v/s2djs/+7e3+Dg4ePm6Orr7O7t7O7w8vT2+Pn7/f//////////AAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAgIyIkJicl" +
+  "KCkqKy8sLjAyMjU3ODo+REpJUVNTU1NTU1RVVldZWlxdX2BhYmNlZ2hqa2ttb3Fxc3R1dnl6e31+f4GChIaGiImKjI2OkJKTlJWXmJqbnJyen6Ckpqeoqqus" +
+  "rrCwsLCvsLO1trW0t7i8ur27urq+wsDCvL2+uri8wcbHz8zPzs/Nzs3Qz9DQz9jh09zj3N3c3ObZ7NXb2uLf6ujg7N/59Pn58ejq6+zr+efp6+3v8fPz8/Pz" +
+  "+fP5+vz/+Pn6+/z8/f7+///////////+/v39/Pv7+vr5+fn5+fn5+QABAQIDBAUGBwgJCgsMDQ4PEBESExUWFhcYGRobHRweHyAhIyQkJykpKSstLy8wMjQ1" +
+  "OT1AP0RFRUVFRUVGR0dISkpMTU9QUVFSVFZWWFlZW1xeXl9gYmJlZWZoaWprbG1vcHFyc3R1dnd5ent7fX6AgIGBg4SFiIqLjI2Oj5CSkpKSkZKUlZeWlZiY" +
+  "nJqcm5qanqGfoZubmpeVmZ2io6uqqqusqqyrrq2trq62vbO6v7u7u7zCucW0vbzBusLFvsDBz8zPz8vGxcTIwc/AwcLCw8PExsnLzsrNz87NzNDP0tTW19jZ" +
+  "2tzd3uDh4uTl4+He3NrY1tPRz8/Pz8/Pz88AAQEBAgMEBQUGBwkKCgsMDQ4PDxESERIUFRUVFxcZGxwcHR0fISIjJCUmJykpLC4uMC8xMjQ0NDQ0NDQ0NTU2" +
+  "Nzc4OTo7PD09Pj9AQUJDQ0RFRkZISElKTExNTk9QUVFSVFRVVlZXWFlaW1xdXl5fYWFiZGRmZ2hoaWprbGxtbm9xcnN0dXZ2eHl6e3t9fX+AgoGCg4SGiYiJ" +
+  "iouNjY+Mj4+RkpSVlpeZm5uem5qgnpyioqOko6mhraqsqa6np7CqsJyhnJymsLK0sL6cyMnLzM3P0MrEvrjB1py62di7nL3e3+Dg4ePm6Orr7O7t7OTc1MzE" +
+  "vLSspJycnJycnJycAAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAhIyIkJiclKCkrLDAsLzE0MzY5OjxBSlJQXF5eXl5eXmBgYWNkZmhpa21ub3FydXZ4" +
+  "eXp8foCAgoOFhomKjI6PkJKTlZeYmpudnp+hoqWmqKmrrK6vsK+zsrS5u72+v8HDxcfIxcTDxMfJzMnFy8vRzdHNysrR1tLVycnJwbzDzNTU493h39/a3Nnb" +
+  "2NjY1uLt2OPs4uLf4Orb8dbd3OXh7uvi7+H/+f//9ezt7u7s/+fp6+3v8fP09PX2+/P//vz/+//9+/z8/f7+/////////////////////////////////wAB" +
+  "AQIDBAUGBwgJCgsMDQ4PEBESExUWFhcYGRobHRweHyAhIyQlKCorKS0uMTEzNTk6QEhQTllbW1tbW1xdXV5gYmNlZmhqa2xtb3FydHV2eHp7e35/gYKFhoeJ" +
+  "i4yNj5GTlJWWmJmZnJ2goaKipaaoqKmnrKqss7W3t7m7vb/Awb27uLm9v8K9t8C+x8DFv7q5xMnDxrWysKaep7K+v9PMzs7NxsnEy8XFxcPV5sjX5NbV0dPf" +
+  "yea9zszZyN7hztjR//X//+/e29jgy//AwcLCw8PEzNXd5trN/+bNzOj/6tTW19jZ2tzd3uDh4uTl6Ort7/L19/r8//////////8AAQEBAgMEBQUGBwkKCgsM" +
+  "DQ4PDxESERIUFRUVFxgZGxwcHR0gISQmJyUoKi0sMDM1ODtDS0pVV1dXV1dXWFlaXF1eYGJkZWZnaGpsbW9wcXN0dnZ4eXt8f4CBg4SFh4iKjI2OkJGSk5WW" +
+  "mZqbnJ6foaGioaWjpautr6+xsrW2uLm1s7Gytri6t7G5t7+5vbm0tL3CvL+vrquhmKGuubvMxsjHx8HEv8XAwsLB0ePH1uLX1NHS4Mrnv87N2szf4dHc0f/2" +
+  "///w4t/c4tL/yMnLzM3P0Nbc4+ni1v/s2djs/+7e3+Dg4ePm6Orr7O7t7O7w8vT2+Pn7/f//////////AAIEBQYICAoKCwwODhAREhITFRYWFxkaGxwdHiAg" +
+  "IyIkJiclKCkpKi0sLS4vMDEyMjM0NTY2NjY2NjY2Njc3ODk6Ojs8Pj4/QEBCQ0NFRUZHSElJS0tMTU9PUFFSU1RVVVdYWFlaW1xcXl9fYWNiY2RmZ2lpbG1s" +
+  "bW1vb3BxcXNzd3p8fX1+foGFhIaDiIeMj5GNjZGSm56hp6yqpqGim5+goKOop6uqrq+wsqulsq2psLK1tLG8sMW7vrfFubXDwMKiqaKisL3DyMDaoufp6+3v" +
+  "8fPo3dLI3POiz/z/zKLO+/z8/f7+///////////27OPa0Me+tauioqKioqKiogABAQIDBAUGBwgJCgsMDQ4PEBESExUWFhcYGRobHRweHyAhIyQkJigoKSor" +
+  "LS4uLzExMzQ0NDQ0NDQ0NDQ1NTY3Nzg5Ojs8PT0+P0BBQkNDREVGRkhISUpMTE1OT1BRUVJUVFVWVldYWVpbXF1eXl9gYWJkZGZnZ2hpamtsbG1ub3Fyc3R0" +
+  "dXZ4eXp7enx9f4GCgYKDhIiIioyOjo2NjoyPj5GSlJWXmJqanJ2cmqCenaGipKWiqKGrqquoq6WnraewnKCcnKStrrCut5zAwcLCw8PEwLy4tLnNnLTNzLec" +
+  "uNTW19jZ2tzd3uDh4uTl3tbPyMC5squjnJycnJycnJwAAQEBAgMEBQUGBwkKCgsMDQ4PDxESERIUFRUVFxcZGxwcHR0gISMkJSUmKCoqLS8wMjI2OTo+Pj4+" +
+  "Pj4+Pz9AQUJDREVHSEhJSktNTU9QUFFTVFRWVlhYWltcXV5fYGFiZGRlZmdoaWprbW1vcHFxc3R0dXZ3eHt8fX5/gIGCg4SEhYWGh4iJiomMjI6Oj5CPkJKU" +
+  "k5WSk5KQjpGWmpuen5+goaGioqSkpqaoq6+rrrCxsLGytbO2s7W2uLe4uLq5urq7urq9wMDAwMS6yMnLzM3P0M7LycbL1rrK2djKusze3+Dg4ePm6Orr7O7t" +
+  "7Ofi3djTzsnEv7q6urq6urq6";
+  const _b64Decode = (s) => {
+    const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const M = {}; for (let i = 0; i < 64; i++) M[A.charAt(i)] = i;
+    const clean = s.replace(/[^A-Za-z0-9+/]/g, "");
+    const out = new Uint8Array((clean.length * 3) >> 2);
+    let j = 0;
+    for (let i = 0; i + 3 < clean.length; i += 4) {
+      const n = (M[clean.charAt(i)] << 18) | (M[clean.charAt(i + 1)] << 12) | (M[clean.charAt(i + 2)] << 6) | M[clean.charAt(i + 3)];
+      out[j++] = (n >> 16) & 255; out[j++] = (n >> 8) & 255; out[j++] = n & 255;
+    }
+    return out;
+  };
+  let _VSEQ_LUT = null;
+  const _vseqLut = () => (_VSEQ_LUT || (_VSEQ_LUT = _b64Decode(VSEQ_LUT_B64)));
+
   /* ---------- 小鼠 HD 贴图（AI 素材 6 花色着色版：俯视 / 侧视） ----------
      素材提供逼真外形、毛发纹理与表情；程序化叠加发光眼、柔光与状态驱动形变。
      贴图未加载时自动回退原有矢量绘制，保证零闪烁降级。 */
-  const MICEHD = { tried: false, top: {}, side: {}, back: {}, parts: {}, real: {}, video: {} };
+  const MICEHD = { tried: false, top: {}, side: {}, back: {}, parts: {}, real: {}, video: {}, vseq: {} };
   D.initMiceHD = () => {
     if (MICEHD.tried) return;
     MICEHD.tried = true;
@@ -1161,23 +1266,199 @@ module.exports = function (G) {
         } catch (e) { MICEHD.video[k].push(null); }
       }
     });
+    // vseq 3 段新动画的"基准灰鼠" sheet（运行时按花色 LUT 着色成离屏画布）
+    Object.keys(VSEQ_META).forEach(seg => {
+      MICEHD.vseq[seg] = { base: null, canv: {} };
+      try {
+        const img = (typeof wx !== "undefined" && wx.createImage) ? wx.createImage() : new Image();
+        img.ok = false;
+        img.onload = () => { img.ok = true; };
+        img.onerror = () => { img.ok = false; };
+        img.src = sub + "assets/mice/video/" + VSEQ_META[seg].file;
+        MICEHD.vseq[seg].base = img;
+      } catch (e) { MICEHD.vseq[seg].base = null; }
+    });
   };
   D.MICEHD = MICEHD;   // 测试钩子
+
+  /* ===== vseq 运行时着色：base 灰鼠 sheet → 按花色亮度 LUT 着色成 0.5× 离屏画布（缓存） =====
+     _vseqEnsure(seg, color, t)：返回该 (段,花色) 的彩色画布；未就绪时（节流窗口内）返回 null，
+     调用方据此回退到既有 run 帧/矢量渲染，避免构建期卡顿。每帧最多构建 1 张，摊平启动开销。 */
+  let _vseqLastBuild = -1e9;
+  const _mkOffCanvas = (w, h) => {
+    // 与代码库一致：wx.createCanvas()（首调已取上屏画布，后续返回离屏画布）
+    if (typeof wx !== "undefined" && wx.createCanvas) {
+      try { const cv = wx.createCanvas(); cv.width = w; cv.height = h; return cv; } catch (e) {}
+    }
+    const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
+  };
+  const _vseqRecolor = (baseImg, color) => {
+    const s = VSEQ_CANVAS_SCALE;
+    const w = Math.max(1, Math.round(baseImg.width * s));
+    const h = Math.max(1, Math.round(baseImg.height * s));
+    const cv = _mkOffCanvas(w, h);
+    const ctx = cv.getContext("2d");
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(baseImg, 0, 0, w, h);
+    let id;
+    try {
+      id = ctx.getImageData(0, 0, w, h);
+    } catch (e) {
+      /* Chromium 的 file:// 页（本地开发者工具预览）会把本地图片一律 taint 画布，
+         getImageData 直接抛 SecurityError——沿渲染主循环上抛会杀死 RAF 循环（表现为
+         「点开始游戏后页面卡死」）。此处吞掉：返回未着色的灰鼠画布，视觉与
+         onBase 回退一致，游戏照常运行。真机 wx.createImage 不受此限。 */
+      return cv;
+    }
+    const d = id.data;
+    const ci = VSEQ_KEYS.indexOf(color);
+    if (ci >= 0) {
+      const lut = _vseqLut();
+      const base = ci * 3 * 256;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] > 0) {
+          const lm = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+          d[i]     = lut[base + lm];
+          d[i + 1] = lut[base + 256 + lm];
+          d[i + 2] = lut[base + 512 + lm];
+        }
+      }
+      ctx.putImageData(id, 0, 0);
+    }
+    return cv;
+  };
+  const _vseqEnsure = (seg, color, t) => {
+    const vq = MICEHD.vseq[seg];
+    if (!vq || !vq.base || !vq.base.ok) return null;
+    if (vq.canv[color]) return vq.canv[color];
+    if (vq.tainted) return null;   // 该段已被 taint 熔断：恒走 onBase 灰鼠回退，不再每帧重试 getImageData
+    if (t * 1000 - _vseqLastBuild < VSEQ_BUILD_MS) return null;   // 节流：调用方本帧先画 base 灰表（见 _vseqFrame）
+    _vseqLastBuild = t * 1000;
+    try {
+      const cv = _vseqRecolor(vq.base, color);
+      vq.canv[color] = cv;
+      return cv;
+    } catch (e) {
+      vq.tainted = true;   // 熔断（防 30ms 节流窗口内反复抛错 + 构建抖动）
+      return null;
+    }
+  };
+  /* ===== vseq 预热队列：根治"探头彩色→冲刺中途变灰鼠" =====
+     花色着色画布原先完全懒加载：某 (段,花色) 首次被绘制时才构建，叠加 30ms 节流，
+     首现的那一两只鼠会走 onBase 灰鼠回退——同一只鼠探头时彩色、一冲刺变灰，
+     即"移动中途换颜色"。
+     做法：base sheet 加载完成后，借每次绘制调用为时钟，按同一 30ms 节流把
+     6 花色 × (fast, look, sit) 共 18 张画布逐张预热建好；队列每次清空后重建，
+     全部建完自动停（每帧仅剩 ~18 次属性检查，开销可忽略）。
+     内存 ≈ 18 张 0.5× 画布 ≈ 8MB。sit 是群鼠 pause 停驻用的段——必须预热，
+     否则群鼠首只停驻鼠要等懒加载，灰鼠回退 + 30ms 节流窗口更容易撞上。 */
+  let _vseqPreWarmQ = null;
+  const _vseqPreWarmTick = (t) => {
+    if (!_vseqPreWarmQ) {
+      const q = [];
+      const segs = ["fast", "look", "sit"];
+      for (let si = 0; si < segs.length; si++) {
+        const vq = MICEHD.vseq[segs[si]];
+        if (vq && vq.base && vq.base.ok && !vq.tainted)
+          for (let i = 0; i < VSEQ_KEYS.length; i++) if (!vq.canv[VSEQ_KEYS[i]]) q.push([segs[si], VSEQ_KEYS[i]]);
+      }
+      if (!q.length) return;
+      _vseqPreWarmQ = q;
+    }
+    if (t * 1000 - _vseqLastBuild < VSEQ_BUILD_MS) return;
+    const item = _vseqPreWarmQ.shift();
+    const vq = MICEHD.vseq[item[0]];
+    if (vq && vq.base && vq.base.ok && !vq.canv[item[1]]) {
+      _vseqLastBuild = t * 1000;
+      try {
+        vq.canv[item[1]] = _vseqRecolor(vq.base, item[1]);
+      } catch (e) {
+        vq.tainted = true;   // taint 熔断：停止该段后续构建，其余段不受影响
+      }
+    }
+    if (!_vseqPreWarmQ.length) _vseqPreWarmQ = null;
+  };
+  /* 取 (seg, 花色) 第 fi 帧的绘制参数；脚线对齐 VSEQ_FEET_Y、水平居中 x=60、按 viewScale 定尺寸。 */
+  const _vseqFrame = (seg, color, fi, t, viewScale) => {
+    _vseqPreWarmTick(t);   // 先走预热一拍（每 30ms 至多建 1 张），再取本帧 (seg,color)
+    const vq = MICEHD.vseq[seg];
+    if (!vq) return null;
+    let cv = vq.canv[color], onBase = false;
+    if (!cv) {
+      cv = _vseqEnsure(seg, color, t);
+      if (!cv) {
+        /* 未就绪（节流窗口 / 着色中）：直接绘制基准灰鼠 sheet——
+           同尺寸、同姿态，只是尚未按花色着色；避免回退 HD 贴图/矢量鼠
+           导致开局尺寸+画风双跳变（"有些老鼠特别大"现象的根源）。
+           仅当基准 sheet 本身尚未加载完成才返回 null 走旧回退。 */
+        if (!vq.base || !vq.base.ok) return null;
+        cv = vq.base; onBase = true;
+      }
+    }
+    const meta = VSEQ_META[seg];
+    const s = onBase ? 1 : VSEQ_CANVAS_SCALE;
+    const n = meta.frames;
+    const fi2 = ((fi % n) + n) % n;
+    const sx = fi2 * meta.cellW * s;
+    const srcW = meta.cellW * s, srcH = meta.cellH * s;
+    const dstW = meta.cellW * viewScale, dstH = meta.cellH * viewScale;
+    const groundYd = meta.ground * meta.cellH * viewScale;
+    const topY = VSEQ_FEET_Y - groundYd;
+    return { cv, sx, srcW, srcH, dstW, dstH, topY };
+  };
 
   /* ===== 视频关键帧鼠·俯视群鼠版：侧视序列帧始终以侧面朝向玩家（不随朝向旋转，
        避免侧视图旋转成仰躺），仅按行进方向的水平分量决定左右镜像，配合轻微上下起伏。
        抵消外层 rotate(_visAng+π/2) 后绘制。 ===== */
   const _mouseVideoTop = (ctx, p, t, v) => {
-    const frames = MICEHD.video[v.key];
+    const vk = v.key;
+    const vanish = p.vanishT > 0;
+    // pause（停驻嗅探 = 命中窗口）→ sit vseq 坐下序列（替代原"冻结帧0死站"）；scurry → 既有奔跑序列
+    if (p.state === "pause" && !vanish) {
+      const fi = Math.floor((t * 5 + (p.phase || 0) * 0.5) % VSEQ_META.sit.frames);
+      const info = _vseqFrame("sit", vk, fi, t, VSEQ_DRAW_SCALE_TOP);
+      if (!info) return false;
+      // 柔影（停驻更柔、更小）
+      const sh0 = ctx.createRadialGradient(60, 66, 4, 60, 66, 38);
+      sh0.addColorStop(0, "rgba(6,10,9,.34)");
+      sh0.addColorStop(0.55, "rgba(6,10,9,.13)");
+      sh0.addColorStop(1, "rgba(6,10,9,0)");
+      ctx.fillStyle = sh0;
+      ctx.beginPath(); ctx.ellipse(60, 66, 30, 22, 0, 0, Math.PI * 2); ctx.fill();
+      // 抵消外层旋转，鼠始终侧面朝向玩家；最后朝向朝左则镜像（坐定不动，沿用末次航向）
+      const outerRot0 = (p._visAng || 0) + Math.PI / 2;
+      const faceLeft0 = Math.cos(p._visAng || 0) < 0;
+      ctx.save();
+      ctx.translate(60, 48);
+      ctx.rotate(-outerRot0);
+      if (!faceLeft0) ctx.scale(-1, 1);
+      // sit 帧头朝左（同 run）。坐姿直立、帧比 run 高，不能整格居中于原点，
+      // 改为脚线对齐俯视 run 脚线（≈63）：原点在 translate(60,48)，
+      // 偏移 = 63 − 48 − groundYd = topY + 63 − 48 − 62 = topY − 47。
+      ctx.drawImage(info.cv, info.sx, 0, info.srcW, info.srcH, -info.dstW / 2, info.topY - 47, info.dstW, info.dstH);
+      ctx.restore();
+      return true;
+    }
+    const frames = MICEHD.video[vk];
     if (!frames || !frames.length || !frames[0] || !frames[0].ok) return false;
-    const running = p.state !== "pause" && !(p.vanishT > 0);
-    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
-    const fps = running ? 14 + spd * 3 : 5;
-    let fi = running ? Math.floor((t * fps + (p.phase || 0) * 0.5) % frames.length) : 0;
+    const running = p.state !== "pause" && !vanish;
+    // 腿部步频由真实移动速度驱动（px/s，prey.js 每帧暴露 _moveSp）：鼠移得越快腿越频。
+    // 注意 p.def.speed=125 是绝对 px/s 不是倍率——旧式 4.5+spd 会算出 ≈130fps（≈8 圈/秒频闪）。
+    // 16 帧循环目标 ≈5-16fps：100px/s→6（圈 1.6s 悠闲）、250→10.5、400+→16（圈 1s 急促）。
+    const realSp = p._moveSp || ((p.def && p.def.speed || 125) * (p.mSpeed || 1));
+    const fps = running ? Math.min(16, Math.max(5, 3 + realSp * 0.03)) : 0;
+    // 相位用 dt 积分累计（帧数）：速度/停驻切换时步频平滑过渡不跳帧；首现用 phase 播种错开群鼠同步。
+    if (p._mvPhTop == null) p._mvPhTop = (p.phase || 0) * 0.5;
+    if (p._mvLastTTop == null) p._mvLastTTop = t;
+    const dt = Math.min(0.1, Math.max(0, t - p._mvLastTTop));
+    p._mvLastTTop = t;
+    p._mvPhTop += dt * fps;
+    let fi = running ? Math.floor(p._mvPhTop) % frames.length : 0;
     const img = frames[fi];
     if (!img || !img.ok) return false;
 
-    const bob = running ? Math.abs(Math.sin(t * fps * 0.4)) * 1.4 : 0;
+    // 起伏与步频同相：|sin(0.4·帧相位)| 周期 ≈15.7 帧 ≈ 一个完整 16 帧循环，腿快起伏快
+    const bob = running ? Math.abs(Math.sin(p._mvPhTop * 0.4)) * 1.4 : 0;
     // 柔影（在世界坐标下，抵消旋转前画更简单：仍在外层坐标系画椭圆即可）
     const sh = ctx.createRadialGradient(60, 66, 4, 60, 66, 38);
     sh.addColorStop(0, "rgba(6,10,9,.38)");
@@ -1202,34 +1483,74 @@ module.exports = function (G) {
   /* ===== 视频关键帧鼠：16 帧奔跑序列（绿幕视频提取），按步态相位循环播放。
        侧视专用（室内模式）：序列帧头朝左，镜像为头朝右，外层 scale(faceDir) 处理朝向。 ===== */
   const _mouseVideo = (ctx, p, t, v) => {
-    const frames = MICEHD.video[v.key];
+    const vk = v.key;
+    const vanish = p.vanishT > 0;
+
+    // dart（快跑冲刺）→ fast vseq（视频提取的快跑序列）。步频由真实冲刺速度驱动，
+    // 0.3s 缓入；相位用 dt 积分累计帧数，速度/状态变化不跳帧。
+    if (p.state === "dart" && !vanish) {
+      const realSp = p._moveSp || 0;
+      const targetFps = Math.min(60, Math.max(10, realSp * 0.16));
+      if (p._mvState !== "dart") { p._mvState = "dart"; p._mvStateT = t; p._mvPh = 0; }
+      if (p._mvLastT == null) p._mvLastT = t;
+      const dt = Math.min(0.1, Math.max(0, t - p._mvLastT)); p._mvLastT = t;
+      const ramp = Math.min(1, (t - (p._mvStateT || t)) / 0.3);
+      p._mvPh = (p._mvPh || 0) + dt * targetFps * ramp;
+      const fi = Math.floor(p._mvPh) % VSEQ_META.fast.frames;
+      const info = _vseqFrame("fast", vk, fi, t, VSEQ_DRAW_SCALE_FAST);
+      if (!info) return false;
+      const bob = Math.abs(Math.sin(p._mvPh * 0.4)) * 1.0 * ramp;
+      const sh = ctx.createRadialGradient(60, 68, 4, 60, 68, 50);
+      sh.addColorStop(0, "rgba(6,10,9,.36)");
+      sh.addColorStop(0.55, "rgba(6,10,9,.14)");
+      sh.addColorStop(1, "rgba(6,10,9,0)");
+      ctx.fillStyle = sh;
+      // 阴影随放大后的鼠身加大（×1.30 后 dart 鼠身 ≈127 宽，比 peek 的 ~97.7 更宽）
+      ctx.beginPath(); ctx.ellipse(60, 68 + bob * 0.3, 42, 31, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.save();
+      ctx.translate(60, 0);
+      ctx.scale(-1, 1);                            // vseq 鼠头朝左 → 镜像为头朝右（匹配 D.mouse 约定）
+      ctx.drawImage(info.cv, info.sx, 0, info.srcW, info.srcH, -info.dstW / 2, info.topY + bob * 0.3, info.dstW, info.dstH);
+      ctx.restore();
+      return true;
+    }
+
+    // peek（洞口探头，东张西望）→ look vseq（视频提取的探头张望序列）。
+    // 外层 scale(faceDir) 左右交替翻转 → 头朝左/右交替 = "东张西望"；帧内 head-bob 补充活感。
+    if (p.state === "peek") {
+      const fi = Math.floor((t * 8 + (p.phase || 0) * 0.6) % VSEQ_META.look.frames);
+      const info = _vseqFrame("look", vk, fi, t, VSEQ_DRAW_SCALE_LOOK);
+      if (!info) return false;
+      const bob = Math.sin(t * 2.2 + (p.phase || 0)) * 0.4;
+      const sh = ctx.createRadialGradient(60, 68, 4, 60, 68, 38);
+      sh.addColorStop(0, "rgba(6,10,9,.30)");
+      sh.addColorStop(0.55, "rgba(6,10,9,.12)");
+      sh.addColorStop(1, "rgba(6,10,9,0)");
+      ctx.fillStyle = sh;
+      ctx.beginPath(); ctx.ellipse(60, 68, 32, 24, 0, 0, Math.PI * 2); ctx.fill();   // peek 鼠身 ~97.7 宽 → 阴影比 dart（127 宽，42×31）略小
+      ctx.save();
+      ctx.translate(60, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(info.cv, info.sx, 0, info.srcW, info.srcH, -info.dstW / 2, info.topY + bob, info.dstW, info.dstH);
+      ctx.restore();
+      return true;
+    }
+
+    // hole（缩回洞内）/ 其余：冻结 run 帧 0。0.15s 后 fade→0，render 层不再绘制。
+    const frames = MICEHD.video[vk];
     if (!frames || !frames.length || !frames[0] || !frames[0].ok) return false;
-
-    const running = p.state !== "pause" && !(p.vanishT > 0);
-    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
-    // 步频：随速度；16 帧序列，按相位取帧
-    const fps = running ? 14 + spd * 3 : 4;   // 帧/秒
-    const phase = (t * fps + (p.phase || 0) * 0.5) % frames.length;
-    let fi = Math.floor(phase);
-    // 停顿时定格在站立感最强的帧（0）
-    if (!running) fi = 0;
-    const img = frames[fi];
-    if (!img || !img.ok) return false;
-
-    // 触地柔影
-    const bob = running ? Math.abs(Math.sin(t * fps * 0.4)) * 1.2 : 0;
+    const img = frames[0];
+    const dw = 108, dh = 108 * 195 / 495;
+    const bob = Math.sin(t * 0.8 + (p.phase || 0)) * 0.12;
     const sh = ctx.createRadialGradient(60, 70, 4, 60, 70, 40);
-    sh.addColorStop(0, "rgba(6,10,9,.38)");
-    sh.addColorStop(0.55, "rgba(6,10,9,.15)");
+    sh.addColorStop(0, "rgba(6,10,9,.32)");
+    sh.addColorStop(0.55, "rgba(6,10,9,.13)");
     sh.addColorStop(1, "rgba(6,10,9,0)");
     ctx.fillStyle = sh;
-    ctx.beginPath(); ctx.ellipse(60, 70 + bob * 0.3, 32, 25, 0, 0, Math.PI * 2); ctx.fill();
-
-    // 侧视渲染：序列帧鼠身长轴水平（495×195）。设计空间 120×78，鼠身目标宽 ~104、高 ~41
-    const dw = 108, dh = 108 * 195 / 495;
+    ctx.beginPath(); ctx.ellipse(60, 70 + bob * 0.3, 30, 23, 0, 0, Math.PI * 2); ctx.fill();
     ctx.save();
     ctx.translate(60, 44 + bob * 0.3);
-    ctx.scale(-1, 1);                            // 视频鼠头朝左 → 镜像为头朝右（匹配 D.mouse 约定）
+    ctx.scale(-1, 1);
     ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
     return true;
@@ -1248,10 +1569,11 @@ module.exports = function (G) {
     if (!tex || !tex.ok) return false;
 
     const running = p.state !== "pause" && !(p.vanishT > 0);
-    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
-    const freq = running ? 9 + spd * 1.5 : 2.4;
+    // 起伏步频随真实移动速度（px/s）线性变化：125→≈3.2Hz、250→≈4.9、400+→≈6.9（封顶 7.5）
+    const realSp = p._moveSp || ((p.def && p.def.speed || 125) * (p.mSpeed || 1));
+    const freq = running ? Math.min(7.5, Math.max(2.5, 1.5 + realSp * 0.0135)) : 1.1;
     const phase = t * freq + (p.phase || 0);
-    const amp = running ? Math.min(1.2, 0.7 + spd * 0.3) : 0.3;
+    const amp = running ? Math.min(1.2, 0.55 + realSp * 0.003) : 0.3;
     const bob = running ? Math.abs(Math.sin(phase)) * 1.6 : Math.sin(t * 2) * 0.4;
     const squash = 1 + (running ? Math.sin(phase * 2) * 0.035 * amp : 0);  // 步频挤压
     const crouch = p.vanishT > 0 ? 0.9 : 1;
@@ -1289,10 +1611,11 @@ module.exports = function (G) {
     const tailCol = v.tail || "#eaa99f";
 
     // ---- 运动信号 ----
-    const spd = (p.def && p.def.speed || 1) * (p.mSpeed || 1);
+    // 四腿摆动步频随真实移动速度（px/s）线性变化：125→≈3.2Hz、250→≈4.9、400+→≈6.9（封顶 7.5）
+    const realSp = p._moveSp || ((p.def && p.def.speed || 125) * (p.mSpeed || 1));
     const running = p.state !== "pause" && !(p.vanishT > 0);
-    const freq = running ? 8.5 + spd * 1.6 : 2.2;             // 步频随速度
-    const amp = running ? Math.min(1.25, 0.75 + spd * 0.28) : 0.35;
+    const freq = running ? Math.min(7.5, Math.max(2.5, 1.5 + realSp * 0.0135)) : 1;
+    const amp = running ? Math.min(1.2, 0.55 + realSp * 0.003) : 0.35;
     const phase = t * freq + (p.phase || 0);
     // 转向角速度：用可见角的变化率，驱动侧倾/耳外展
     let turn = 0;
@@ -1345,7 +1668,7 @@ module.exports = function (G) {
     const leg = (px, py, ph) => {
       ctx.save();
       ctx.translate(px, py);
-      ctx.rotate(Math.sin(ph) * 0.36 * amp + turn * 0.08);
+      ctx.rotate(Math.sin(ph) * 0.24 * amp + turn * 0.08);   // 腿旋转幅 0.36→0.32→0.24，摆动更收敛
       ctx.fillStyle = legC;
       ctx.beginPath(); ctx.ellipse(0, 6, 5.2, 8, 0, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = pawC;
@@ -1420,11 +1743,13 @@ module.exports = function (G) {
   const _mouseTopHD = (ctx, p, t, v, tex) => {
     const isRedEye = v.key === "albino";
     const tailCol = v.tail || "#c99f85";
-    const gait = t * 9.2 + (p.phase || 0);
     const running = p.state !== "pause" && !(p.vanishT > 0);
-    const speedK = Math.min(1.45, Math.max(0.6, (p.def && p.def.speed || 1) * (p.mSpeed || 1)));
-    const stride = running ? Math.sin(gait) : Math.sin(t * 2.2 + (p.phase || 0)) * 0.25;
-    const bob = running ? Math.abs(Math.sin(gait)) * 2 : Math.sin(t * 2 + (p.phase || 0)) * 0.6;
+    // speedK 按真实移动速度（px/s）归一：100→0.6 下限 … 242+→1.45 上限；起伏/扭腰/摆尾随之随速快慢
+    const realSp = p._moveSp || ((p.def && p.def.speed || 125) * (p.mSpeed || 1));
+    const speedK = Math.min(1.45, Math.max(0.6, realSp / 150));
+    const gait = t * 3.1 * speedK + (p.phase || 0);
+    const stride = running ? Math.sin(gait) : Math.sin(t * 0.9 + (p.phase || 0)) * 0.25;
+    const bob = running ? Math.abs(Math.sin(gait)) * 2 : Math.sin(t * 0.8 + (p.phase || 0)) * 0.6;
     const lean = running ? Math.sin(gait * 0.5) * 0.045 * speedK : 0;
     const crouch = p.vanishT > 0 ? 0.9 : (p.state === "pause" ? 0.98 : 1);
     const wag = Math.sin(t * 3.1 + (p.phase || 0)) * (running ? 9 : 5);   // 尾巴摆动
@@ -1501,8 +1826,8 @@ module.exports = function (G) {
     if (tex && tex.ok) return _mouseTopHD(ctx, p, t, v, tex);
     const isRedEye = (v.key === "albino");              // 霜尖红眼：眼珠用 v.eye
     const wag = Math.sin(t * 2.4 + (p.phase || 0)) * 10;
-    const gaitT = t * 8.6 + (p.phase || 0);           // 爬行步态相位（对角步）
-    const bob = Math.sin(gaitT * 2) * 0.9;            // 身体随步频轻颠
+    const gaitT = t * 4.3 + (p.phase || 0);           // 爬行步态相位（对角步）再慢 50%
+    const bob = Math.sin(gaitT * 2) * 0.55;           // 身体随步频轻颠，幅度同步收敛
 
     // ---- 触地柔影（鼠身下方椭圆暗影，越靠中心越深）----
     const sh = ctx.createRadialGradient(60, 72, 4, 60, 72, 54);
@@ -1823,24 +2148,48 @@ module.exports = function (G) {
     ctx.beginPath(); ctx.arc(57, 37, 1.2, 0, Math.PI * 2); ctx.fill();
   };
 
-  /* ============ 蝌蚪快跑 · 四种黑白造型 ============
-     几何只算一次（D.tadGeom），四种画法共用同一套头/尾坐标（tailPoints），
-     所以切换造型不会改变命中判定。四种都只用黑/灰，保证纯白底上的对比层级一致：
-       墨影 ink   实心剪影 + 白眼睛（默认，远距离最稳）
-       线条 line  空心勾边 + 黑点眼（简笔画）
-       水墨 brush 不规则墨团 + 飞白尾（手绘）
-       一笔 dash  头尾连成一个逗号（极简） */
+  /* ============ 蝌蚪快跑 · 两种黑白造型 ============
+     几何只算一次（D.tadGeom），两种画法共用同一套头/尾坐标（tailPoints），
+     所以切换造型不会改变命中判定。两种都只用黑/灰，保证纯白底上的对比层级一致：
+       墨影 ink   圆头大眼 · 细尾（按手绘参考图重制，默认，远距离最稳）
+       线条 line  空心勾边 + 黑点眼（简笔画） */
   D.tadGeom = (p, t) => {
     const T = G.TADPOLE || {};
     const inK = (p.tadIn || 0) > 0 ? 1 - p.tadIn / (T.entryT || 0.26) : 1;
-    const vanishK = p.vanishT > 0 ? Math.max(0, p.vanishT / 0.26) : 1;
+    /* 离场时 fade 由 prey.js 按游出距离算（前 62% 全速不淡，后 38% 线性淡出），
+       直接取 p.fade 即可；被拍命中仍走时间归一化 0.26 短窗口。 */
+    const vanishK = p.vanishT > 0 ? (p.tadOut ? Math.max(0, p.fade || 0) : Math.max(0, p.vanishT / 0.26)) : 1;
+    /* 眨眼：自然、慢速、平滑——绝不允许「闪烁」。
+       · 睁眼保持为主（每次只闭一次，占整周期的极小一段），闭眼窗口 0.22s，
+         用余弦缓动（cos）收-放，开合都柔，没有硬切角，读起来是「眨一下」而非「闪」。
+       · 间隔 3.4–5.6s（每只按种子错开，同屏几只节奏不同步），停顿期（探头/悬停）
+         稍微勤一点（2.6–4.6s）但不加速到发闪——睁-闭-睁对猫是高信号，
+         猫最容易在目标静止的窗口里盯住脸，所以停顿期多眨但仍从容。 */
+    const seed = p.tadBlinkSeed == null ? 0 : p.tadBlinkSeed;
+    const paused = (p.tState === "peek") || ((p.tadHoverK || 1) < 0.5);
+    const cyc = (paused ? 2.6 : 3.4) + (seed % 2.2);   // 3.4–5.6s / 2.6–4.6s
+    const bd = 0.22;                                    // 闭眼 0.22s，余弦缓动
+    const bt = ((t || 0) + seed) % cyc;
+    /* 挣扎时眼睛瞪圆不眨（blink 恒 1） */
+    const struggling = (p.tadStruggle || 0) > 0;
+    let blink = 1;
+    if (!struggling && bt > cyc - bd) {
+      const u = (bt - (cyc - bd)) / bd;                 // 0→1
+      blink = 0.5 + 0.5 * Math.cos(u * 2 * Math.PI);    // 1→0→1：余弦下凹，窗口中点全闭，两端斜率为 0（开-闭-睁全程无跳变）
+    }
     return {
       x: p.x, y: p.y,
       ang: p.tadAng == null ? (p.driftAng || 0) : p.tadAng,
-      sc: (p.sc || 1) * (0.72 + 0.28 * Math.min(1, inK)) * (0.88 + 0.12 * vanishK),
+      sc: (p.sc || 1) * (0.72 + 0.28 * Math.min(1, inK)) * (0.88 + 0.12 * vanishK) * 1.18,
       tail: p.tailPoints ? p.tailPoints(t) : [],
       turnGlow: p.tadTurnGlow || 0,
-      vanishK: vanishK
+      vanishK: vanishK,
+      blink: blink,
+      /* 长按挣扎：头部扭动角（wob），位置不动 */
+      struggle: struggling ? 1 : 0,
+      wob: struggling ? (p.tadStruggleW || 0) : 0,
+      /* 探头张望：头部缓慢左右转，像在扫一眼屏幕里有没有动静（仅露头停驻期） */
+      look: p.tState === "peek" ? Math.sin((t || 0) * 1.6 + seed) * 0.2 : 0
     };
   };
 
@@ -1868,11 +2217,13 @@ module.exports = function (G) {
     return true;
   }
 
-  /* 头部坐标系：平移到头心、旋转到行进方向、缩放到 g.sc；局部 -y 为前进方向 */
+  /* 头部坐标系：平移到头心、旋转到行进方向、缩放到 g.sc；局部 -y 为前进方向。
+     g.look：探头张望角（±0.2rad），仅露头停驻期非零。
+     g.wob：长按挣扎时的头部扭动角（位置不动，只有头在扭）。 */
   function tadHead(ctx, g, fn) {
     ctx.save();
     ctx.translate(g.x, g.y);
-    ctx.rotate(g.ang + Math.PI / 2);
+    ctx.rotate(g.ang + Math.PI / 2 + (g.look || 0) + (g.wob || 0));
     ctx.scale(g.sc, g.sc);
     fn(ctx);
     ctx.restore();
@@ -1886,7 +2237,7 @@ module.exports = function (G) {
       const q = g.tail[Math.min(g.tail.length - 1, i * 2)];
       ctx.globalAlpha = (0.055 - i * 0.018) * g.vanishK;
       ctx.fillStyle = "#0b0c0e";
-      ctx.beginPath(); ctx.ellipse(q.x, q.y, 11 * g.sc, 7 * g.sc, g.ang, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(q.x, q.y, 6.5 * g.sc, 2.8 * g.sc, g.ang, 0, Math.PI * 2); ctx.fill();
     }
     ctx.restore();
   }
@@ -1902,36 +2253,40 @@ module.exports = function (G) {
     ctx.restore();
   }
 
-  /* ---- 墨影：实心剪影 + 白眼睛 ---- */
+  /* ---- 墨影：圆头大眼 · 细尾（按手绘参考图重制） ----
+     局部坐标：-y 为行进方向，+x 为朝屏幕下（朝右游时）。参考图实测比例（头半径≈15 时）：
+     头近正圆、略朝行进方向拉长，光照在头上方（亮）→ 下方（暗）；
+     两只大白眼沿横向（游动时的上/下侧）叠放，各自略朝行进方向拉长、黑瞳居中；
+     尾是细而几乎等宽的弧线，梢部轻微收细。 */
   function tadInk(ctx, g) {
     tadGhost(ctx, g);
-    if (tadBandPath(ctx, g, (i, n) => 5.1 * Math.pow(1 - i / n, 1.05) + 0.55)) {
+    if (tadBandPath(ctx, g, (i, n) => 0.55 + 0.8 * Math.pow(1 - i / n, 1.1))) {
       const end = g.tail[g.tail.length - 1] || { x: g.x, y: g.y };
       const tg = ctx.createLinearGradient(g.x, g.y, end.x, end.y);
-      tg.addColorStop(0, "rgba(11,12,14,.98)");
-      tg.addColorStop(1, "rgba(11,12,14,.78)");
+      tg.addColorStop(0, "rgba(16,17,19,.96)");
+      tg.addColorStop(1, "rgba(16,17,19,.7)");
       ctx.fillStyle = tg; ctx.fill();
     }
     tadHead(ctx, g, c => {
-      const bg = c.createRadialGradient(-4, -6, 1.5, 0, 0, 19);
-      bg.addColorStop(0, "#2b2e33");
-      bg.addColorStop(0.55, "#14161a");
-      bg.addColorStop(1, "#08090b");
+      /* 头：上方（局部 -x）亮、下方暗——径向渐变中心偏上后，还原参考图的明暗 */
+      const bg = c.createRadialGradient(-5, -4, 2, 1, 1, 24);
+      bg.addColorStop(0, "#454a4f");
+      bg.addColorStop(0.55, "#26292d");
+      bg.addColorStop(1, "#121417");
       c.fillStyle = bg;
-      c.beginPath(); c.ellipse(0, 0, 15.2, 11.2, 0, 0, Math.PI * 2); c.fill();
-      c.beginPath(); c.ellipse(0, 6.2, 7.2, 4.8, 0, 0, Math.PI * 2); c.fill();
-      const eyes = [[-5.0, -3.8], [5.0, -3.8]];
+      c.beginPath(); c.ellipse(0, 0, 14.4, 15.5, 0, 0, Math.PI * 2); c.fill();
+      /* 眨眼：压横向（x）眼宽——闭眼成一条横向细缝，猫对「睁-闭-睁」变化最敏感 */
+      const b = g.blink == null ? 1 : Math.max(0, Math.min(1, g.blink));
+      const k = 0.08 + 0.92 * b;
+      /* [x, y, 横向半宽]；行进方向半高 ≈ 1.36×横向（参考图眼 46×34px） */
+      const eyes = [[-5.3, 2.0, 3.7], [5.7, -0.9, 3.9]];
       c.fillStyle = "#ffffff";
       c.beginPath();
-      eyes.forEach(e => { c.moveTo(e[0] + 3.4, e[1]); c.arc(e[0], e[1], 3.4, 0, Math.PI * 2); });
+      eyes.forEach(e => { c.moveTo(e[0] + Math.max(0.25, e[2] * k), e[1]); c.ellipse(e[0], e[1], Math.max(0.25, e[2] * k), e[2] * 1.36, 0, 0, Math.PI * 2); });
       c.fill();
-      c.fillStyle = "#0a0b0d";
+      c.fillStyle = "#15181c";
       c.beginPath();
-      eyes.forEach(e => { c.moveTo(e[0] + 1.55, e[1] - 0.25); c.arc(e[0], e[1] - 0.25, 1.55, 0, Math.PI * 2); });
-      c.fill();
-      c.fillStyle = "rgba(255,255,255,.95)";
-      c.beginPath();
-      eyes.forEach(e => { c.moveTo(e[0] - 0.25 + 0.55, e[1] - 0.85); c.arc(e[0] - 0.25, e[1] - 0.85, 0.55, 0, Math.PI * 2); });
+      eyes.forEach(e => { c.moveTo(e[0] + Math.max(0.18, 1.25 * k), e[1]); c.ellipse(e[0], e[1], Math.max(0.18, 1.25 * k), 1.25, 0, 0, Math.PI * 2); });
       c.fill();
     });
   }
@@ -1946,8 +2301,8 @@ module.exports = function (G) {
       let prev = { x: g.x, y: g.y };
       for (let i = 0; i < pts.length; i++) {
         const q = pts[i];
-        /* 每段单独设线宽，才能从根部 4.6 收到尾梢 0.6 —— 单一 stroke 做不出笔锋 */
-        ctx.lineWidth = Math.max(1.1, 5.2 * Math.pow(1 - i / pts.length, 1.05) + 0.6) * g.sc;
+        /* 每段单独设线宽，才能从根部收到尾梢 —— 单一 stroke 做不出笔锋（细尾版：梢收得更细） */
+        ctx.lineWidth = Math.max(0.8, 3.1 * Math.pow(1 - i / pts.length, 1.5) + 0.38) * g.sc;
         ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(q.x, q.y); ctx.stroke();
         prev = q;
       }
@@ -1955,87 +2310,44 @@ module.exports = function (G) {
     }
     tadHead(ctx, g, c => {
       c.fillStyle = "#ffffff";
-      c.beginPath(); c.ellipse(0, 0, 15.2, 11.2, 0, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.ellipse(0, 0, 16.2, 12.0, 0, 0, Math.PI * 2); c.fill();
       c.strokeStyle = "#111214"; c.lineWidth = 2.6;
       c.stroke();
+      /* 黑点眼随眨眼压扁（多弧共路径前必须 moveTo，否则出现连接线） */
+      const b = g.blink == null ? 1 : Math.max(0, Math.min(1, g.blink));
+      const ey = 0.08 + 0.92 * b;
       c.fillStyle = "#111214";
-      c.beginPath(); c.arc(-4.8, -3.6, 2.05, 0, Math.PI * 2); c.arc(4.8, -3.6, 2.05, 0, Math.PI * 2); c.fill();
+      c.beginPath();
+      c.moveTo(-4.8 + 2.05, -3.6); c.ellipse(-4.8, -3.6, 2.05, Math.max(0.25, 2.05 * ey), 0, 0, Math.PI * 2);
+      c.moveTo(4.8 + 2.05, -3.6); c.ellipse(4.8, -3.6, 2.05, Math.max(0.25, 2.05 * ey), 0, 0, Math.PI * 2);
+      c.fill();
       // 一条很短的嘴弧：线稿没有实心块，这点细节能让"脸"成立
       c.strokeStyle = "rgba(17,18,20,.55)"; c.lineWidth = 1.2; c.lineCap = "round";
       c.beginPath(); c.arc(0, 1.6, 3.6, 0.22 * Math.PI, 0.78 * Math.PI); c.stroke();
     });
   }
 
-  /* ---- 水墨：不规则墨团 + 飞白尾 ---- */
-  function tadBrush(ctx, g) {
-    tadGhost(ctx, g);
-    // 主笔
-    if (tadBandPath(ctx, g, (i, n) => 5.6 * Math.pow(1 - i / n, 0.95) + 0.6)) {
-      ctx.fillStyle = "rgba(12,13,16,.94)"; ctx.fill();
-    }
-    // 副笔：偏细、偏淡，同一路径再叠一层，边缘就有了浓淡
-    if (tadBandPath(ctx, g, (i, n) => 3.6 * Math.pow(1 - i / n, 1.1) + 0.3)) {
-      ctx.fillStyle = "rgba(12,13,16,.34)"; ctx.fill();
-    }
-    // 尾部干笔：三粒飞白
-    const tip = g.tail[g.tail.length - 1];
-    if (tip) {
-      ctx.save();
-      ctx.fillStyle = "rgba(12,13,16,.55)";
-      for (let i = 0; i < 3; i++) {
-        const a = (g.ang || 0) + Math.PI + (i - 1) * 0.5;
-        const d = (2 + i * 3.2) * g.sc;
-        ctx.beginPath();
-        ctx.arc(tip.x + Math.cos(a) * d, tip.y + Math.sin(a) * d, (0.9 + (i % 2) * 0.5) * g.sc, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-    // 头：六个控制点的不规则墨团（固定形状，不逐帧随机，避免抖动）
-    tadHead(ctx, g, c => {
-      c.beginPath();
-      c.moveTo(0, -11.6);
-      c.bezierCurveTo(9.8, -11.2, 15.6, -6.0, 14.6, 1.0);
-      c.bezierCurveTo(13.8, 7.8, 6.6, 11.6, -0.8, 11.2);
-      c.bezierCurveTo(-8.4, 10.9, -15.0, 6.2, -14.6, -0.8);
-      c.bezierCurveTo(-14.2, -7.4, -8.6, -11.7, 0, -11.6);
-      c.closePath();
-      c.fillStyle = "#0b0c0e"; c.fill();
-      c.fillStyle = "#ffffff";
-      c.beginPath(); c.arc(-4.8, -3.8, 2.7, 0, Math.PI * 2); c.arc(4.8, -3.8, 2.7, 0, Math.PI * 2); c.fill();
-      c.fillStyle = "rgba(10,11,13,.9)";
-      c.beginPath(); c.arc(-4.6, -4.2, 1.2, 0, Math.PI * 2); c.arc(5.0, -4.2, 1.2, 0, Math.PI * 2); c.fill();
-    });
-  }
-
-  /* ---- 一笔：头尾连成一个逗号 ---- */
-  function tadDash(ctx, g) {
-    tadGhost(ctx, g);
-    if (tadBandPath(ctx, g, (i, n) => 10.4 * Math.pow(1 - i / n, 1.35) + 0.5)) {
-      ctx.fillStyle = "rgba(11,12,14,.97)"; ctx.fill();
-    }
-    tadHead(ctx, g, c => {
-      c.fillStyle = "#0b0c0e";
-      c.beginPath(); c.ellipse(0, 0, 12.4, 11.6, 0, 0, Math.PI * 2); c.fill();
-      c.fillStyle = "#ffffff";
-      c.beginPath(); c.arc(-4.2, -3.4, 2.5, 0, Math.PI * 2); c.arc(4.2, -3.4, 2.5, 0, Math.PI * 2); c.fill();
-      c.fillStyle = "rgba(10,11,13,.88)";
-      c.beginPath(); c.arc(-4.0, -3.8, 1.05, 0, Math.PI * 2); c.arc(4.4, -3.8, 1.05, 0, Math.PI * 2); c.fill();
-    });
-  }
-
   D.tadDraw = (ctx, g, style) => {
     if (style === "line") return tadLine(ctx, g);
-    if (style === "brush") return tadBrush(ctx, g);
-    if (style === "dash") return tadDash(ctx, g);
     return tadInk(ctx, g);
   };
 
   D.tadpole = (ctx, p, t) => {
     const style = (G.config && G.config.tadStyle) || "ink";
     const g = D.tadGeom(p, t);
+    /* 离场淡出：vanishK 同步驱动整体透明度（游出边框的同时轻轻淡掉，柔和的"穿走"收尾）。
+       被拍命中仍是 0.26 短窗口，fade 手感不变；露头/巡游期 vanishK=1 完全不受影响。 */
+    ctx.save();
+    ctx.globalAlpha = g.vanishK;
+    /* 裁剪到活动区：蝌蚪游出边框时身体被"画框"遮住，像从纸面后面穿走，
+       而不是在边界外继续可见。入场/巡游期头尾都在界内，裁剪不影响正常绘制。 */
+    const bb = G.bounds();
+    ctx.beginPath();
+    ctx.rect(bb.x, bb.y, bb.w, bb.h);
+    ctx.clip();
     D.tadDraw(ctx, g, style);
     tadFoldHint(ctx, g);
+    ctx.restore();
   };
 
   /* 造型预览：二级卡、首页图标、样式条共用。len = 全身长度（含头），朝右、轻微 S 形尾。 */
@@ -2050,7 +2362,8 @@ module.exports = function (G) {
     D.tadDraw(ctx, { x: headX, y: cy, ang: 0, sc: sc, tail: tail, turnGlow: 0, vanishK: 1 }, style || "ink");
   };
 
-  D.icon = (ctx, type, x, y, s) => {
+  /* noHD=true 强制矢量（加载屏用：assets 子包尚未就绪，HD 贴图不可用） */
+  D.icon = (ctx, type, x, y, s, noHD) => {
     ctx.save();
     ctx.translate(x, y); ctx.scale(s, s);
     if (type === "tadpole") {
@@ -2064,10 +2377,19 @@ module.exports = function (G) {
       D.fish(ctx, fake, 1.2);
     } else if (type === "butterfly") {
       // HD 贴图落点 y 56..168，内容中心 (60,112)；矢量回退内容中心 (60,53)。分别补偿使图标居中
-      const mslot = BFHD.map && BFHD.map.monarch;
+      const mslot = noHD ? null : (BFHD.map && BFHD.map.monarch);
       ctx.translate(-60, mslot && mslot.nOk && mslot.dOk ? -112 : -53);
       const fake = { state: "GLIDE", flapDur: 0.28, phase: 0 };
-      D.butterfly(ctx, fake, 0.3);
+      if (noHD) {
+        // 强制矢量：直接画矢量蝶（D.butterfly 内部会按 BFHD 状态选贴图，这里绕开）
+        const vd = BFHD.map && BFHD.map.monarch;
+        const savedN = vd && vd.nOk, savedD = vd && vd.dOk;
+        if (vd) { vd.nOk = false; vd.dOk = false; }
+        D.butterfly(ctx, fake, 0.3);
+        if (vd) { vd.nOk = savedN; vd.dOk = savedD; }
+      } else {
+        D.butterfly(ctx, fake, 0.3);
+      }
     } else if (type === "mouse") {
       ctx.translate(-60, -44);
       const fake = { state: "peek", phase: 0 };
@@ -2125,6 +2447,83 @@ module.exports = function (G) {
       ctx.translate(-48, -39);
       const fake = { fState: "settle", phase: 0 };
       D.frog(ctx, fake, 0.4);
+    } else if (type === "cat") {
+      /* 召唤猫咪：橘猫头（加载屏 assets 子包未就绪，纯矢量，不依赖召唤页大猫贴图） */
+      ctx.save();
+      const fur = ctx.createLinearGradient(0, -46, 0, 36);
+      fur.addColorStop(0, "#f7c27d"); fur.addColorStop(1, "#e89a4e");
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.moveTo(-40, -14); ctx.lineTo(-34, -48); ctx.lineTo(-8, -30); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(40, -14); ctx.lineTo(34, -48); ctx.lineTo(8, -30); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#f7b3ae";
+      ctx.beginPath(); ctx.moveTo(-34, -20); ctx.lineTo(-31, -41); ctx.lineTo(-14, -29); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(34, -20); ctx.lineTo(31, -41); ctx.lineTo(14, -29); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = fur;
+      ctx.beginPath(); ctx.ellipse(0, 2, 38, 33, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(170,96,42,.42)"; ctx.lineWidth = 3; ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-8, -25); ctx.lineTo(-11, -14); ctx.moveTo(0, -28); ctx.lineTo(0, -15);
+      ctx.moveTo(8, -25); ctx.lineTo(11, -14); ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.ellipse(-15, -2, 9, 11, 0, 0, Math.PI * 2); ctx.ellipse(15, -2, 9, 11, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#24302c";
+      ctx.beginPath(); ctx.ellipse(-14, 0, 4.2, 6.5, 0, 0, Math.PI * 2); ctx.ellipse(14, 0, 4.2, 6.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.9)";
+      ctx.beginPath(); ctx.arc(-15.5, -3, 1.8, 0, Math.PI * 2); ctx.arc(12.5, -3, 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#f28f9a";
+      ctx.beginPath(); ctx.moveTo(0, 12); ctx.lineTo(-5, 6); ctx.lineTo(5, 6); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#8a5a3a"; ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(0, 12); ctx.quadraticCurveTo(-5, 19, -11, 14);
+      ctx.moveTo(0, 12); ctx.quadraticCurveTo(5, 19, 11, 14); ctx.stroke();
+      ctx.strokeStyle = "rgba(100,70,50,.55)"; ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(-20, 10); ctx.lineTo(-44, 6); ctx.moveTo(-20, 15); ctx.lineTo(-45, 17);
+      ctx.moveTo(20, 10); ctx.lineTo(44, 6); ctx.moveTo(20, 15); ctx.lineTo(45, 17); ctx.stroke();
+      ctx.restore();
+    } else if (type === "bowl") {
+      /* 电子猫粮：上方落下的干粮 + 不锈钢猫粮盆（矢量，配色与饭盆页一致） */
+      ctx.save();
+      ctx.fillStyle = "#9a6238";
+      [[-13, -42, 3.6], [10, -36, 3.2], [0, -25, 4.2]].forEach(([dx, dy, r]) => {
+        ctx.beginPath(); ctx.arc(dx, dy, r, 0, Math.PI * 2); ctx.fill();
+      });
+      ctx.fillStyle = "rgba(154,98,56,.35)";
+      ctx.beginPath(); ctx.arc(-13, -50, 1.6, 0, Math.PI * 2); ctx.arc(10, -44, 1.4, 0, Math.PI * 2); ctx.fill();
+      const metal = ctx.createLinearGradient(0, -8, 0, 42);
+      metal.addColorStop(0, "#e9d4b6"); metal.addColorStop(.5, "#cdb08a"); metal.addColorStop(1, "#a88762");
+      ctx.fillStyle = metal;
+      ctx.beginPath(); ctx.moveTo(-42, -4); ctx.quadraticCurveTo(-36, 38, 0, 38);
+      ctx.quadraticCurveTo(36, 38, 42, -4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#8a562f";
+      ctx.beginPath(); ctx.ellipse(0, -7, 38, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#9c7b57"; ctx.lineWidth = 4; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(-46, -6); ctx.lineTo(46, -6); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-26, 6); ctx.quadraticCurveTo(-20, 26, -4, 30); ctx.stroke();
+      ctx.restore();
+    } else if (type === "heart") {
+      /* 猫咪心情：粉心 + 双音符（呼噜/叫声 → 引导「猫咪状态」页） */
+      ctx.save();
+      const hgd = ctx.createLinearGradient(0, -40, 0, 40);
+      hgd.addColorStop(0, "#ffa8b4"); hgd.addColorStop(1, "#ef6d84");
+      ctx.fillStyle = hgd;
+      ctx.beginPath();
+      ctx.moveTo(0, 38);
+      ctx.bezierCurveTo(-58, -2, -32, -46, 0, -18);
+      ctx.bezierCurveTo(32, -46, 58, -2, 0, 38);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.35)";
+      ctx.beginPath(); ctx.ellipse(-17, -18, 8, 4.5, -.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.ellipse(-5, 12, 7, 5, -.35, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 3.2; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(2, 11); ctx.lineTo(2, -16); ctx.quadraticCurveTo(14, -12, 17, -3); ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.ellipse(14, 12, 6, 4.5, -.35, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.6;
+      ctx.beginPath(); ctx.moveTo(20, 11); ctx.lineTo(20, -9); ctx.stroke();
+      ctx.restore();
     }
     ctx.restore();
   };

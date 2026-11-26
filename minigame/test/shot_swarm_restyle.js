@@ -100,8 +100,8 @@ fs.mkdirSync(OUT, { recursive: true });
     const G = window.G;
     return G.preys.map(p => ({ k: p.mouseVar && p.mouseVar.key, x: p.x, y: p.y }));
   });
-  if (decodePNG) {
-    const png = decodePNG(fs.readFileSync(path.join(OUT, "ref-restyle-2-grid6.png")));
+  const png = decodePNG(fs.readFileSync(path.join(OUT, "ref-restyle-2-grid6.png")));
+  if (png) {
     // 截图是 844x390，但 dpr 可能 2x —— 用 png 尺寸比例换算
     const scale = png.width / 844;
     const sample = (x, y) => {

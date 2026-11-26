@@ -2,6 +2,12 @@
   "deviceOrientation": "landscape",
   "showStatusBar": false,
   "openDataContext": "openDataContext",
+  "subpackages": [
+    {
+      "name": "assets",
+      "root": "assets/"
+    }
+  ],
   "networkTimeout": {
     "request": 10000
   }

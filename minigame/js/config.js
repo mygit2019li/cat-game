@@ -20,7 +20,8 @@ module.exports = function (G) {
     bg_mouse: "room",        // 捕鼠可选背景（≥2 套时开始前弹选择层）
     bg_fish: "kelp",         // 捕鱼可选海域（小河戏鱼 / 水草森林 / 鱼群巡游）
     bg_tadpole: "paper",     // 蝌蚪快跑：纯白纸面（唯一场景，不再做场景选择）
-    tadStyle: "ink",         // 蝌蚪造型：ink 墨影 / line 线条 / brush 水墨 / dash 一笔
+    tadStyle: "ink",         // 蝌蚪造型：ink 墨影（圆头大眼） / line 线条
+    tadCount: 1,             // 蝌蚪数量：单条=1 固定单条 / 多条=3 按阶段 1→2→3 动态增减（二级卡页两档）
     frogMode: "frog",        // 青蛙卡内的玩法切换：frog=青蛙跳跳 / tadpole=蝌蚪快跑
     ffMode: "ff-walk",       // 暗夜荧光卡内节奏：ff-walk=荧光漫步 / ff-dash=急爬追光
     ffCount: 1,              // 暗夜荧光数量：二级页面可增减（1–7 只，默认 1）
@@ -176,13 +177,12 @@ module.exports = function (G) {
     { key: "frog",    name: "青蛙跳跳", desc: "荷叶之间来回跳" },
     { key: "tadpole", name: "蝌蚪快跑", desc: "白纸黑蝌蚪 · 触边折返" }
   ];
-  /* 蝌蚪造型（白纸上的黑白表达）。四种都只用黑/灰，切换只改画法，不改命中判定。
-     key 存 config.tadStyle，跨局记忆；二级卡页的「蝌蚪造型」一排可点选。 */
+  /* 蝌蚪造型（白纸上的黑白表达）。两种都只用黑/灰，切换只改画法，不改命中判定。
+     key 存 config.tadStyle，跨局记忆；二级卡页的「蝌蚪造型」一排可点选。
+     旧存档里若存了已下架的 brush/dash，白名单校验会自动回落到 ink。 */
   G.TAD_STYLES = [
-    { key: "ink",   name: "墨影", desc: "实心剪影 · 最远可读" },
-    { key: "line",  name: "线条", desc: "简笔线稿 · 空心勾边" },
-    { key: "brush", name: "水墨", desc: "笔锋飞白 · 手绘感" },
-    { key: "dash",  name: "一笔", desc: "极简逗号 · 一个笔触" }
+    { key: "ink",  name: "墨影", desc: "圆头大眼 · 细尾" },
+    { key: "line", name: "线条", desc: "简笔线稿 · 空心勾边" }
   ];
   /* 首页六张卡不变；青蛙/暗夜荧光/蝴蝶/激光各有自己的二级玩法卡。
      卡片不只换文字，分别落到 configKey 指定的真实玩法参数。
@@ -228,6 +228,20 @@ module.exports = function (G) {
     const k = G.config["bg_" + type];
     return arr.some(b => b.key === k) ? k : arr[0].key;
   };
+  /* 二级卡页（ui.drawBgPick 底部面板）的「猎物数量」控件形态，按「当前展示卡」判定：
+     auto   —— 数量由引擎自动决定（群鼠乱窜：阶段固定 4/5/6；group.count === "fixed"：固定 1），
+               只显示只读徽章，不展示任何增减控件；
+     tad    —— 蝌蚪快跑专属：二级卡页「蝌蚪数量」两档（单条=固定 1 条 / 多条=阶段 1→2→3 动态），
+               写 config.tadCount（1/3），跨局记忆；
+     binary —— 局内只区分单只/多只（preyCount 是否为 1，多只按阶段自动 3→5→7），展示两档切换；
+     exact  —— 设定值即同屏实际数量（青蛙跳跳：受荷叶数封顶；暗夜荧光：独立 ffCount 1–7），展示 ± 步进。
+     这张表必须与 prey.js stageTargetCount 的分支保持同步——局内真实数量只认这三种形态。 */
+  G.countModeFor = (type, bgKey) => {
+    if (type === "tadpole") return "tad";
+    if (type === "mouse" && bgKey === "swarm") return "auto";
+    if (type === "frog" || type === "pool") return "exact";
+    return "binary";   // 室内房间捕鼠 / 钓鱼（含鱼群巡游）/ 蝴蝶花园 / 激光暗室
+  };
   const DURS = [60, 120, 180, 300];
   function loadConfig() {
     let saved = {};
@@ -251,6 +265,8 @@ module.exports = function (G) {
     if (["easy", "normal", "hard"].indexOf(c.difficulty) < 0) c.difficulty = DEFAULTS.difficulty;
     /* 蝌蚪造型白名单：旧存档/脏数据回落到墨影，避免画成空气。 */
     if (!G.TAD_STYLES.some(st => st.key === c.tadStyle)) c.tadStyle = DEFAULTS.tadStyle;
+    /* 蝌蚪数量两档：只认 1（单条）/3（多条），其余值一律回落单条，与 preyCount 同口径。 */
+    c.tadCount = Number(c.tadCount) === 3 ? 3 : 1;
     /* 二级玩法卡选择的脏数据收敛：旧存档/脏值一律回到各卡第一项。 */
     const MODE_GROUP_KEYS = { frog: "frogMode", pool: "ffMode", butterfly: "bflyMode", laser: "laserMode" };
     Object.keys(MODE_GROUP_KEYS).forEach(k => {
@@ -483,8 +499,17 @@ module.exports = function (G) {
   G.TADPOLE = {
     segs: 7, segGap: 11,        // 尾链 7 节 × 11px ≈ 77px：细长尾，摆幅小也能看出游动
     entryPad: 30,            // 出生点在边界外 30px：身体从画外游入，不是凭空出现
-    entryT: 0.26,            // 入场淡入 + 1.16× 冲入提速
+    entryT: 0.26,            // 冲入提速窗口（0.72→1 蓄力弹出 + 1.16× 提速）
     entryBoost: 1.16,
+    peekEmerge: [0.8, 1.3],   // 露头：从画外缓缓把头探进来的时长
+    peekHold: [0.9, 1.6],     // 露头后在边缘停驻观察（眨眼 + 张望 + 慢摆尾），稍长更从容
+    /* 停驻时探头量：头（近正圆，渲染半径 15.5×1.18≈18.3）伸进边界的比例 5%–10%（越小越贴边）。
+       探头时航向垂直于边，四边同半径，prey.js 统一换算：头心 = 边内 18.3×(1−peekIn) − 2（2px 安全边距），
+       整颗头完整落在框内（头后缘距边 2px），身体（尾链）全部留在画外，尾部不露出。 */
+    peekIn: [0.05, 0.10],   // 头伸进边界比例（越小越贴边）。0.05–0.10 → 头心偏移 16.5–17.4px，整颗头（含 2px 安全边距）完整落在框内，尾部不露出
+    hoverP: 0.2,              // 兼容旧字段：悬停频率现由"无命中时长"档位决定（见 updateTadpole）
+    hoverK: 0.05,             // 悬停时的速度保留比例（≈原地扭尾）
+    holdMs: 300,              // 长按尾巴：满 300ms 触发挣扎（位置冻结），松手 = 抓住
     waveAmp: [2.5, 5.5], waveLen: [180, 280], // 身体正弦摆幅 ±2.5–5.5px（细长尾只需轻微摆动）
     foldDur: 0.22, foldSlow: 0.62,           // 折返弧：0.22s，速度降到 62%
     headPad: 1.5, tailPad: 1.3, foldPad: 1.15,   // 触控命中区（≈ 60×45 设计像素）
@@ -545,9 +570,9 @@ module.exports = function (G) {
   ];
   /* 老鼠三阶段行为表（台球桌布局：任意洞进出，路线横穿台面供拦截；速度快慢分档） */
   G.MOUSE_STAGE = {
-    1: { peek: 2.2,  dartSpeed: 260, fakeP: 0,    adjacent: false, dartP: 0.6 },
-    2: { peek: 1.4,  dartSpeed: 380, fakeP: 0.35, adjacent: false, dartP: 0.85 },
-    3: { peek: 0.85, dartSpeed: 500, fakeP: 0.55, adjacent: false, dartP: 1 }
+    1: { peek: 2.2,  dartSpeed: 230, fakeP: 0,    adjacent: false, dartP: 0.6 },
+    2: { peek: 1.4,  dartSpeed: 300, fakeP: 0.35, adjacent: false, dartP: 0.85 },
+    3: { peek: 0.85, dartSpeed: 420, fakeP: 0.55, adjacent: false, dartP: 1 }
   };
   /* 青蛙跳三阶段：一次循环 = 蓄力 → 腾空 → 落水 → 静坐，循环结束换一片荷叶。
      crouch/leap/land/settle = 各状态基准时长（秒，按速度倍率缩放）
@@ -638,7 +663,7 @@ module.exports = function (G) {
   /* 猎物基础定义 */
   G.PREY_DEF = {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
-    mouse:     { w: 116, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
+    mouse:     { w: 132, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
     /* 暗夜荧光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用荧光黄绿 */
