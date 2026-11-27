@@ -21,7 +21,7 @@ const ROOT = "/Users/lipeng/www/myproject/cat-game/minigame";
   page.on("console", msg => { if (msg.type() === "error") errors.push("console: " + msg.text()); });
 
   const mods = {};
-  for (const n of ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js",
+  for (const n of ["./js/platform.js", "./js/config.js","./js/rank.js", "./js/audio.js", "./js/draw.js",
     "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./js/sharecard.js",
     "./js/ad.js", "./js/feeder.js", "./game.js"]) {
     mods[n] = fs.readFileSync(path.join(ROOT, n), "utf8");

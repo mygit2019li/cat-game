@@ -15,7 +15,7 @@ const ROOT = path.resolve(__dirname, "..");
 const OUT = "/tmp/creek-shots";
 fs.mkdirSync(OUT, { recursive: true });
 
-const MODS = ["./js/platform.js", "./js/config.js", "./js/audio.js", "./js/draw.js",
+const MODS = ["./js/platform.js", "./js/config.js","./js/rank.js", "./js/audio.js", "./js/draw.js",
   "./js/scenery.js", "./js/prey.js", "./js/ui.js", "./js/sharecard.js", "./js/ad.js", "./js/feeder.js", "./game.js"];
 const modules = {};
 for (const n of MODS) modules[n] = fs.readFileSync(path.join(ROOT, n), "utf8");

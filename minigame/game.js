@@ -5,6 +5,7 @@ if (typeof globalThis !== "undefined") globalThis.G = G;   // 暴露给测试垫
 
 require("./js/platform.js")(G);
 require("./js/config.js")(G);
+require("./js/rank.js")(G);       // 好友榜「猎手分」算法（时长/玩法/难度归一化）
 require("./js/audio.js")(G);
 require("./js/draw.js")(G);
 require("./js/scenery.js")(G);
@@ -49,6 +50,17 @@ G.openModal = (key) => {
   /* 打开「本周记录」弹窗时触发一次插屏广告（仅 records，不含好友排行 lb）。
      show 由 ad.js 内部兜底：实例未就绪 / 无填充 / 环境不支持都只记日志，不挡弹窗。 */
   if (key === "records" && G.ad && G.ad.showInterstitial) G.ad.showInterstitial();
+  /* 三个系统弹窗（好友信息 / 订阅提醒 / 微信昵称）无法合并成一个。收口成榜单里一个按钮：
+     进页面不主动弹窗，由玩家点「开启完整好友榜」在同一次手势里触发能一起发的项目。 */
+  if (key === "lb") {
+    G.nickStepReady = false;
+    /* 静默回读，不弹窗；已授权的玩家进榜直接出数据，没授权过的等玩家点合并入口。 */
+    G.platform.friendAuthSilent((st) => {
+      const ok = st === "ok" || st === "unsupported";
+      G.friendAuthState = ok ? "ok" : (st === "denied" ? "denied" : "unknown");
+      if (G.modal) { G.modal.lbShown = false; G.modal.lbHidden = false; }
+    });
+  }
 };
 
 /* ================= 好友排行授权 =================
@@ -74,9 +86,141 @@ G.grantFriendAuth = () => {
     G.askFriendAuth(true);
   });
 };
+
+/* ================= 好友超越提醒（系统订阅消息）=================
+   微信的关系链系统订阅消息只需订阅一次、永久有效，且由平台判定"好友超越"后自动下发，
+   不需要服务器调发送接口。这里只管状态：冷启动读一次，榜单里点按钮时再申请。
+   状态：unknown / ok / need / denied / ban / off / checking / unsupported。 */
+G.rankNoticeState = "unknown";
+G._rankNoticeTimer = null;   // checking 超时兜底：回调丢失时不能永久卡死
+/* 基础库不支持订阅（开发者工具 / 老版本）时按"已订阅"处理，别让按钮空转——
+   反正这种环境也拿不到服务通知，卡一个永远点不动的按钮比没有更糟。 */
+const noticeDone = (st) => (st === "unsupported" ? "ok" : st);
+G.checkRankNotice = () => {
+  G.platform.rankNoticeState((st) => { G.rankNoticeState = noticeDone(st); });
+};
+/* 必须定义在调用之前——game.js 里这些是赋值表达式，不会函数提升。 */
+G.checkRankNotice();
+G.subscribeRankNotice = () => {
+  if (G.rankNoticeState === "ok" || G.rankNoticeState === "checking") return;
+  G.rankNoticeState = "checking";
+  /* 微信订阅面板可能挂起、回调丢失（切后台 / 系统面板异常）。8 秒没回来就退回 need，
+     否则 state 永久停在 checking，后续点击全被吞——表现就是"按钮点了没反应"。 */
+  clearTimeout(G._rankNoticeTimer);
+  G._rankNoticeTimer = setTimeout(() => {
+    if (G.rankNoticeState === "checking") {
+      G.rankNoticeState = "need";
+      if (G.track) G.track("rank_notice", { state: "timeout" });
+    }
+  }, 8000);
+  G.platform.subscribeRankNotice((st) => {
+    clearTimeout(G._rankNoticeTimer);
+    G.rankNoticeState = noticeDone(st);
+    if (G.track) G.track("rank_notice", { state: st });
+  });
+};
+
+/* 订阅被拒 / 关了总开关：微信不会再弹订阅面板，只能去设置页手动开。
+   回来后重新读状态，成功则按钮文案自动变回"邀猫友比一比"。 */
+G.grantNoticeAuth = () => {
+  G.platform.openFriendSetting(() => G.checkRankNotice());
+};
+/* 榜单底部唯一入口：在同一次点击手势里把能一起弹的系统面板都发出去。
+   wx.authorize 和 requestSubscribeSystemMessage 都要求点击行为，延后到回调里就失效，
+   所以这里同步连发；微信昵称必须走原生 createUserInfoButton，要点完这一步再显示按钮。 */
+G.nickStepReady = false;                 // 点过合并入口后才放出原生昵称按钮
+G.enableLbFeatures = () => {
+  if (G.friendAuthState === "denied") G.grantFriendAuth();        // 拒绝过只能去设置页
+  else if (G.friendAuthState !== "ok") G.askFriendAuth();
+  const ns = G.rankNoticeState;
+  if (ns === "denied" || ns === "ban" || ns === "off") G.grantNoticeAuth();
+  else if (ns !== "ok" && ns !== "checking") G.subscribeRankNotice();
+  G.nickStepReady = true;
+  if (G.track) G.track("lb_enable", {
+    friend: G.friendAuthState === "ok" ? 0 : 1,
+    notice: G.rankNoticeState === "ok" ? 0 : 1
+  });
+};
+
+/* ================= 微信昵称头像授权（昵称进榜）=================
+   微信关系链的 nickName 一律是"微信用户"，头像却是真的。要显示微信昵称，
+   只能让玩家点原生按钮授权 userInfo，再把昵称写进自己的关系链 KV。
+   状态：unknown / ok / denied / needButton。已授权且写过 KV 就不再打扰。 */
+G.nickAuthState = "unknown";
+G.nickBtn = null;
+G.nickBtnRect = null;      // 上次创建按钮时的逻辑像素矩形（窗口变化时重建）
+/* 真昵称头像由主域原生按钮拿到，缓存在本机：开放数据域的 wx.getUserInfo
+   在真机常退化成匿名"微信用户"，只靠它会导致自己那行显示假名字。
+   每次进榜把这份资料随 show 消息带进 ODC，优先级高于关系链/ODC 自身读取。 */
+const PROFILE_KEY = "myWxProfile";
+try {
+  const cached = wx.getStorageSync && wx.getStorageSync(PROFILE_KEY);
+  if (cached && cached.name) G.myProfile = cached;
+} catch (e) {}
+G.saveMyProfile = (name, avatar) => {
+  if (!name) return;
+  G.myProfile = { name: String(name).slice(0, 60), avatar: String(avatar || "").slice(0, 900) };
+  try { wx.setStorageSync && wx.setStorageSync(PROFILE_KEY, G.myProfile); } catch (e) {}
+};
+G.checkNickAuth = () => {
+  G.platform.userInfoAuth((st) => {
+    G.nickAuthState = st;
+    /* 老版本升级上来：已授权但本地没缓存资料，再向主域要一次。
+       注意主域 wx.getUserInfo 只用于补齐展示，不会弹窗。 */
+    if (st === "ok" && !(G.myProfile && G.myProfile.name)) {
+      try {
+        wx.getUserInfo({
+          success: (res) => {
+            const u = res && res.userInfo;
+            if (u && u.nickName && u.nickName !== "微信用户") G.saveMyProfile(u.nickName, u.avatarUrl);
+          },
+          fail: () => {}
+        });
+      } catch (e) {}
+    }
+  });
+};
+/* 冷启动查一次昵称授权状态：已授权玩家不再弹原生按钮；未授权/没问过的
+   等进排行榜时按需创建（createUserInfoButton 要在可见界面上创建）。 */
+G.checkNickAuth();
+G.dropNickButton = () => {
+  if (G.nickBtn) { try { G.nickBtn.destroy(); } catch (e) {} G.nickBtn = null; }
+  G.nickBtnRect = null;
+};
+/* 排行榜弹窗每帧调用：需要授权且按钮位置没变就复用，变了就重建。
+   rect 是虚拟布局坐标，乘 P.S 换成逻辑屏幕像素给原生按钮。 */
+G.syncNickButton = (rect, show) => {
+  const P = G.platform;
+  if (!show || G.screen !== "leaderboard" || G.nickAuthState !== "needButton") {
+    G.dropNickButton(); return;
+  }
+  const S = P.S || 1;
+  const r = { x: rect.x * S, y: rect.y * S, w: rect.w * S, h: rect.h * S };
+  const changed = !G.nickBtn || !G.nickBtnRect ||
+    Math.abs(r.x - G.nickBtnRect.x) > 1 || Math.abs(r.y - G.nickBtnRect.y) > 1 ||
+    Math.abs(r.w - G.nickBtnRect.w) > 1 || Math.abs(r.h - G.nickBtnRect.h) > 1;
+  if (!changed) return;
+  G.dropNickButton();
+  G.nickBtnRect = r;
+  const btn = P.createUserInfoButton(r, (st, info) => {
+    G.dropNickButton();
+    if (st === "unsupported") return;                    // 环境不支持：保持 needButton，别误判成拒绝
+    G.nickAuthState = st === "ok" ? "ok" : "denied";
+    if (st === "ok" && info) {
+      G.saveMyProfile(info.nickName, info.avatarUrl);    // 本地缓存：自己那行立刻显示真昵称头像
+      P.reportProfile(info.nickName, info.avatarUrl);   // 微信昵称写进关系链 KV
+      if (G.screen === "leaderboard" && G.ui.showLB) G.ui.showLB();  // 重发 refresh+show，带上新资料
+      if (G.track) G.track("nick_auth", { state: "ok" });
+    }
+  });
+  if (btn) G.nickBtn = btn;
+  else G.nickBtnRect = r;                                // 不支持时也记位置，避免每帧重试
+};
 G.closeModal = () => {
   if (!G.modal) { G.screen = "home"; return; }
   if (G.modal.closing) return;                 // 已在关闭动画中
+  G.dropNickButton();                          // 原生按钮不随 canvas 一起淡出，立即销毁
+  G.nickStepReady = false;                     // 下次进榜重新从合并入口开始
   G.modal.closing = { t0: performance.now() };
   if (G.playTick) G.playTick();
 };
@@ -591,6 +735,15 @@ G.endGame = (fromPause) => {
   try { best = Number(G.platform.storage.get("catToyBest")) || 0; } catch (e) {}
   if (totalHits > best) { best = totalHits; G.platform.storage.set("catToyBest", String(best)); }
   G.platform.reportBest(best);
+  // 好友榜猎手分：时长/玩法/难度归一化后取近 30 天最高，另写一组 KV（bestHits 保留兼容旧数据）
+  try {
+    const rank = G.computeRankScore({
+      hits: totalHits, playSec: S.time, type: G.config.targetType,
+      difficulty: G.config.difficulty, done: !fromPause
+    });
+    if (rank.valid) G.updateRankBest(rank);
+    G.track("rank_update", { score: rank.score, mode: rank.mode, diff: rank.diff, valid: rank.valid ? 1 : 0 });
+  } catch (e) {}
   // 评级（与原型同阈值）
   // 真实游玩时长（S.time 在 playing 累加、不含倒计时与暂停）= 累计秒数
   const playSec = Math.max(S.time, 1 / 60);
@@ -1227,6 +1380,16 @@ function loop() {
     if (G.screen === "counting") uiScaleCtx(() => G.ui.drawCountdown(Math.max(countT, 0)));
     else uiScaleCtx(() => G.ui.drawHud(t, dt));
     if (G.screen === "paused") uiScaleCtx(() => G.ui.drawPause());
+  }
+
+  /* 开放数据域（好友榜）画在离屏 sharedCanvas 上，官方要求主域每帧 drawImage 到上屏画布。
+     不画 = 数据拉取正常但界面永远空白——这正是之前"榜单没数据"的根因。
+     只在榜单弹窗打开且授权通过时贴上来，避免无谓的离屏纹理上传。 */
+  if (G.screen === "leaderboard" && G.modal && G.modal.lbShown && !G.modal.closing &&
+      G.platform.odcCanvas && G.platform.odcCanvas.width > 0) {
+    try {
+      ctx.drawImage(G.platform.odcCanvas, 0, 0, G.platform.W, G.platform.H);
+    } catch (e) {}
   }
   ctx.globalAlpha = 1;
   requestAnimationFrame(loop);

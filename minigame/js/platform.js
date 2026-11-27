@@ -120,11 +120,99 @@ module.exports = function (G) {
         });
       } catch (e) { run(); }
     },
-    /* 好友排行榜：把单局最高捕获写入关系链 KV（仅开放数据域可读） */
+    /* 好友排行榜旧字段：单局最高捕获数（保留兼容，开放数据域优先读猎手分） */
     reportBest(v) {
       try {
         wx.setUserCloudStorage({ KVDataList: [{ key: "bestHits", value: String(Math.max(0, Math.floor(Number(v) || 0))) }] });
       } catch (e) {}
+    },
+    /* 好友排行榜猎手分：一次写入 4 个 KV（排名分 / 时间戳 / 玩法 / 难度档），
+       开放数据域靠时间戳做 30 天滚动窗口；wx.setUserCloudStorage 单次最多 10 个 KV，这里远低于上限。 */
+    reportRank(r) {
+      try {
+        const d = r || {};
+        wx.setUserCloudStorage({
+          KVDataList: [
+            { key: "rankScore", value: String(Math.max(0, Math.floor(Number(d.score) || 0))) },
+            { key: "rankTs",    value: String(Math.max(0, Math.floor(Number(d.ts) || 0))) },
+            { key: "rankMode",  value: String(d.mode || "fish") },
+            { key: "rankDiff",  value: String(d.diff || "easy") }
+          ]
+        });
+      } catch (e) {}
+    },
+    /* 微信排行榜（MP 后台「微信排行榜配置」）要求的标准上报格式：
+       value 必须是 JSON 字符串，顶层含 wxgame.score(Int32) 与 wxgame.update_time(Int64, 秒)。
+       只有按这个格式上报、且 MP 后台配置了同一个 key，平台才会判定"好友超越"并下发
+       关系链系统订阅消息。和游戏内自绘榜单用的 rankScore/rankTs 是两套数据，互不影响。
+       用前端 wx.setUserCloudStorage 即可，不需要后台 access_token / 签名。 */
+    reportOfficialRank(score, ts) {
+      try {
+        const sc = Math.floor(Number(score) || 0);
+        if (!sc) return false;
+        let sec = Number(ts);
+        if (!isFinite(sec) || sec <= 0) sec = Date.now();
+        if (sec > 1e12) sec = Math.floor(sec / 1000);   // 本地存档是毫秒，微信要秒
+        wx.setUserCloudStorage({
+          KVDataList: [{
+            key: "doumao",
+            value: JSON.stringify({ wxgame: { score: sc, update_time: Math.floor(sec) } })
+          }]
+        });
+        return true;
+      } catch (e) { return false; }
+    },
+    /* 系统订阅消息「排行榜超越提醒」：订阅一次永久有效，平台自动下发，不需要服务端。
+       状态：ok=已订阅 / ban=被封 / off=用户关了订阅总开关 / need=需要引导订阅 /
+       unsupported=基础库或垫片不支持（按已订阅处理，别阻塞游戏）。 */
+    rankNoticeState(cb) {
+      const done = (s) => { try { cb && cb(s); } catch (e) {} };
+      try {
+        if (typeof wx === "undefined" || typeof wx.getSetting !== "function") return done("unsupported");
+        wx.getSetting({
+          withSubscriptions: true,
+          success(res) {
+            const ss = res && res.subscriptionsSetting;
+            if (ss && ss.mainSwitch === false) return done("off");
+            const v = ss && ss.itemSettings && ss.itemSettings.SYS_MSG_TYPE_RANK;
+            done(v === "accept" ? "ok" : v === "ban" ? "ban" : "need");
+          },
+          fail() { done("unsupported"); }
+        });
+      } catch (e) { done("unsupported"); }
+    },
+    /* 必须在用户点击手势里调用（官方限制），否则不弹订阅面板。
+       success 的返回键就是 msgTypeList 里的类型值，不读 errMsg。 */
+    subscribeRankNotice(cb) {
+      const done = (s) => { try { cb && cb(s); } catch (e) {} };
+      try {
+        if (typeof wx === "undefined" || typeof wx.requestSubscribeSystemMessage !== "function") {
+          return done("unsupported");
+        }
+        wx.requestSubscribeSystemMessage({
+          msgTypeList: ["SYS_MSG_TYPE_RANK"],
+          success(res) {
+            const v = res && res.SYS_MSG_TYPE_RANK;
+            done(v === "accept" ? "ok" : v === "ban" ? "ban" : "denied");
+          },
+          fail() { done("unsupported"); }
+        });
+      } catch (e) { done("unsupported"); }
+    },
+    /* 静默回读好友授权状态：只读 getSetting，不弹 authorize 窗。
+       进排行榜时用它区分「已授权直接出榜 / 拒绝过去设置 / 没问过等玩家点按钮」。 */
+    friendAuthSilent(cb) {
+      const done = (s) => { try { cb && cb(s); } catch (e) {} };
+      try {
+        if (typeof wx === "undefined" || typeof wx.getSetting !== "function") return done("unsupported");
+        wx.getSetting({
+          success(res) {
+            const v = res && res.authSetting && res.authSetting["scope.WxFriendInteraction"];
+            done(v === true ? "ok" : v === false ? "denied" : "unknown");
+          },
+          fail() { done("unsupported"); }
+        });
+      } catch (e) { done("unsupported"); }
     },
     /* 好友关系链授权（scope.WxFriendInteraction）——读好友成绩的前提。
        返回四种状态：
@@ -170,10 +258,68 @@ module.exports = function (G) {
         wx.openSetting({ success: run, fail: run, complete: run });
       } catch (e) { run(); }
     },
+    /* ===== 玩家微信昵称头像授权（微信昵称进榜）=====
+       微信 2021 后关系链 nickName 一律匿名化成"微信用户"，avatarUrl 仍是真 URL。
+       要显示微信昵称只能让玩家主动授权 scope.userInfo，再把自己的微信昵称写进关系链 KV，
+       好友的 getFriendCloudStorage 才能读到。
+       注意：scope.userInfo 不能靠 wx.authorize 弹窗（官方明确无效），必须用 createUserInfoButton。 */
+    userInfoAuth(cb) {
+      const done = (s) => { try { cb && cb(s); } catch (e) {} };
+      try {
+        if (typeof wx === "undefined" || typeof wx.getSetting !== "function") return done("unsupported");
+        wx.getSetting({
+          success: (res) => {
+            const st = (res && res.authSetting) || {};
+            if (st["scope.userInfo"] === true) return done("ok");
+            if (st["scope.userInfo"] === false) return done("denied");
+            done("needButton");                 // 从没问过：需要玩家点原生按钮触发
+          },
+          fail: () => done("unsupported")
+        });
+      } catch (e) { done("unsupported"); }
+    },
+    /* 创建原生「获取微信昵称」按钮：位置用逻辑像素（wx 原生按钮坐标系 = 屏幕逻辑像素，
+       与 canvas 的 setTransform(dpr) 后坐标系一致）。返回句柄，调用方负责 destroy。
+       必须在用户手势创建的同一帧附近调用，且微信要求已同意隐私协议。 */
+    createUserInfoButton(rect, cb) {
+      try {
+        if (typeof wx.createUserInfoButton !== "function") { cb && cb("unsupported", null); return null; }
+        const btn = wx.createUserInfoButton({
+          type: "text",
+          text: " 获取微信昵称 ",
+          style: {
+            left: Math.round(rect.x), top: Math.round(rect.y),
+            width: Math.round(rect.w), height: Math.round(rect.h),
+            lineHeight: Math.round(rect.h),
+            backgroundColor: "#0c7d72", color: "#ffffff",
+            textAlign: "center", fontSize: 14, borderRadius: Math.round(rect.h / 2)
+          }
+        });
+        btn.onTap((res) => {
+          const info = res && res.userInfo;
+          const ok = info && res.errMsg && res.errMsg.indexOf(":ok") >= 0;
+          try { btn.destroy(); } catch (e) {}
+          if (ok) cb && cb("ok", info);
+          else cb && cb("denied", null);
+        });
+        return btn;
+      } catch (e) { cb && cb("unsupported", null); return null; }
+    },
+    /* 把微信昵称/头像写进自己的关系链 KV：好友榜读好友 KV 里的这两个字段显示昵称。
+       与 reportRank 分开调用，避免未授权时把 avatarUrl 覆盖成空串。 */
+    reportProfile(name, avatar) {
+      try {
+        const list = [];
+        if (name) list.push({ key: "rankName", value: String(name).slice(0, 60) });
+        if (avatar) list.push({ key: "rankAvatar", value: String(avatar).slice(0, 900) });
+        if (list.length) wx.setUserCloudStorage({ KVDataList: list });
+      } catch (e) {}
+    },
     /* 向开放数据域发消息（show/hide/refresh） */
     odcPost(msg) {
       try {
-        if (typeof wx.getOpenDataContext === "function") wx.getOpenDataContext().postMessage(msg);
+        const ctxOdc = P.odc || (typeof wx.getOpenDataContext === "function" ? wx.getOpenDataContext() : null);
+        if (ctxOdc && ctxOdc.postMessage) ctxOdc.postMessage(msg);
       } catch (e) {}
     },
     /* 资源图缓存：loadImage(src) 异步加载并存入 assets[src]（onload 后可直接 drawImage） */
@@ -569,10 +715,33 @@ module.exports = function (G) {
     }
   };
 
+  /* 开放数据域：sharedCanvas 是离屏画布，官方规定宽高只能在主域设置，
+     且必须由主域每帧 drawImage 到上屏画布，否则 ODC 画了东西也看不见。 */
+  let odc = null, odcCanvas = null;
+  try {
+    if (typeof wx.getOpenDataContext === "function") {
+      odc = wx.getOpenDataContext();
+      odcCanvas = (odc && odc.canvas) || null;
+    }
+  } catch (e) {}
+  P.odc = odc;
+  P.odcCanvas = odcCanvas;
+  let odcW = 0, odcH = 0;
+
   function applySize() {
     canvas.width = P.W * dpr;
     canvas.height = P.H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    /* 重设 sharedCanvas 宽高会清空内容 → 尺寸真变了才改，并通知 ODC 重绘。
+       基础库无 getOpenDataContext（浏览器垫片/极旧版本）时静默跳过。 */
+    if (odcCanvas && (odcW !== P.W || odcH !== P.H)) {
+      try {
+        odcCanvas.width = P.W * dpr;
+        odcCanvas.height = P.H * dpr;
+        odcW = P.W; odcH = P.H;
+        if (odc && odc.postMessage) odc.postMessage({ type: "resize" });
+      } catch (e) {}
+    }
   }
   /* 大屏适配：以典型手机(390×844)为基准，按屏幕面积等比推算 UI 缩放因子 S，封顶 2.0。
      手机 S≈1 不变；iPad 横屏(1024×768)≈1.55，iPad Pro 12.9≈2.0。UI 在「虚拟手机尺寸」布局后被 ctx.scale(S) 放大。 */

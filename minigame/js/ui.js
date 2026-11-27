@@ -1292,7 +1292,8 @@ module.exports = function (G) {
       { label: "召唤猫咪", icon: "cat", cb: () => { G.ensureAudio(); G.stopSummonMusic(); G.summonKindIdx = 0; G.switchScreen("summon"); } },
       { label: "电子猫粮", icon: "bowl", cb: () => G.feederEnter() },
       { label: "猫咪状态", icon: "heart", key: "home-sound", cb: () => G.openSound() },
-      { label: "捕猎记录", icon: "chart", cb: () => G.openModal("records") }
+      { label: "捕猎记录", icon: "chart", cb: () => G.openModal("records") },
+      { label: "好友排行", icon: "trophy", cb: () => G.openModal("lb") }
     ];
     const rowX = edgeL + (land ? availW * .11 : 0), rowW = land ? availW * .78 : availW;
     /* 底栏：落在照片底上的半透明白胶囊（带柔和投影，不用描边青绿） */
@@ -1304,14 +1305,22 @@ module.exports = function (G) {
     ctx.strokeStyle = "rgba(255,255,255,.78)"; ctx.lineWidth = 1.2;
     rrPath(rowX + .6, bottomY + .6, rowW - 1.2, bottomH - 1.2, Math.min(22, bottomH * .44)); ctx.stroke();
     const cellW = rowW / rowBtns.length;
-    const homeIconColor = { cat: "#2a6f63", bowl: "#2a6f63", heart: "#2a6f63", chart: "#2a6f63" };
+    const homeIconColor = { cat: "#2a6f63", bowl: "#2a6f63", heart: "#2a6f63", chart: "#2a6f63", trophy: "#b8791a" };
     rowBtns.forEach((item, i) => {
       const x = rowX + i * cellW;
       if (i > 0) { ctx.strokeStyle = "rgba(122,108,88,.20)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, bottomY + 14); ctx.lineTo(x, bottomY + bottomH - 14); ctx.stroke(); }
       const compact = cellW < 116;
-      drawVecIcon(item.icon, x + cellW * (compact ? .2 : .27), bottomY + bottomH / 2, F(compact ? 22 : 26), homeIconColor[item.icon] || C.ink2);
-      const cellFs = fitFont(item.label, Math.min(F(compact ? 13 : 15), bottomH * .36), cellW * .62, "normal");
-      text(item.label, x + cellW * (compact ? .68 : .62), bottomY + bottomH / 2, cellFs + "px sans-serif", "#2b3230");
+      if (compact) {
+        /* 竖屏 / 窄横屏 5 格：图标在上、文字在下，各自整格居中。
+           旧版横排（图标 .2w + 文字 .68w）在 5 格下必然撞字，必须竖排。 */
+        drawVecIcon(item.icon, x + cellW / 2, bottomY + bottomH * .33, F(20), homeIconColor[item.icon] || C.ink2);
+        const cellFs = fitFont(item.label, Math.min(F(12), bottomH * .26), cellW * .92, "normal");
+        text(item.label, x + cellW / 2, bottomY + bottomH * .73, cellFs + "px sans-serif", "#2b3230");
+      } else {
+        drawVecIcon(item.icon, x + cellW * .27, bottomY + bottomH / 2, F(26), homeIconColor[item.icon] || C.ink2);
+        const cellFs = fitFont(item.label, Math.min(F(15), bottomH * .36), cellW * .62, "normal");
+        text(item.label, x + cellW * .62, bottomY + bottomH / 2, cellFs + "px sans-serif", "#2b3230");
+      }
       btn(x, bottomY, cellW, bottomH, item.cb);
     });
   };
@@ -2671,8 +2680,25 @@ module.exports = function (G) {
     const r = (G.modal && G.modal.lbRect) || null;
     if (!r) return;
     const S = G.platform.S || 1;   // ODC 覆盖层用真实坐标，需把虚拟布局换算回真实尺寸
+    /* 把自己的最好成绩带进开放数据域：关系链 getUserCloudStorage 在真机/开发者工具
+       常返回空或延迟，仅靠它会导致「自己那行」消失。主域本地存档是可靠来源，
+       作为兜底传过去，ODC 与关系链结果取较大值。名字/头像仍由 ODC 自己读。 */
+    let self = null;
+    try {
+      const b = G.readRankBest && G.readRankBest();
+      if (b && b.score > 0) self = { score: b.score, ts: b.ts, mode: b.mode, diff: b.diff };
+    } catch (e) {}
+    /* 自己那行显示真昵称头像，不用"我"占位。主域原生按钮授权过的资料优先，
+       ODC 里的关系链 / getUserInfo 只作为没授权过时的兜底。 */
+    try {
+      const p = G.myProfile;
+      if (p && p.name) {
+        if (!self) self = {};
+        self.name = p.name; self.avatar = p.avatar;
+      }
+    } catch (e) {}
     G.platform.odcPost({ type: "refresh" });   // 每次进排行榜先拉最新好友成绩，避免显示旧缓存
-    G.platform.odcPost({ type: "show", x: r.x * S, y: r.y * S, w: r.w * S, h: r.h * S });
+    G.platform.odcPost({ type: "show", x: r.x * S, y: r.y * S, w: r.w * S, h: r.h * S, self: self });
   };
   ui.hideLB = () => { G.platform.odcPost({ type: "hide" }); };
 
@@ -2689,15 +2715,22 @@ module.exports = function (G) {
     chipIcon("trophy", px + 35, py + 28, 30, DK.chipAmber, C.amberDeep);
     text("好友排行", px + 56, py + 27, "19px sans-serif", C.ink, "left");
     text(
-      authed ? "同玩好友的单局最佳捕获" : "需要「微信朋友信息」权限",
-      px + 56, py + 49, "11px sans-serif", authed ? C.ink3 : C.amberDeep, "left"
+      authed ? "近 30 天最高猎手分 · 按玩法难度校准"
+        : (auth === "denied" ? "需要「微信朋友信息」权限" : "点下方按钮一次开启"),
+      px + 56, py + 49, "11px sans-serif",
+      authed || auth !== "denied" ? C.ink3 : C.amberDeep, "left"
     );
     const hit = modalX(M);
 
     // 列表区（开放数据域按这块矩形绘制）+ 下方说明与按钮
-    const btnH = 40, hintY = py + ph - 14 - btnH - 20;
+    // 需要微信昵称授权时多留一行给原生按钮（微信要求用 createUserInfoButton，画出来的假按钮点不动）
+    const nickNeeded = authed && (G.nickAuthState === "needButton" || G.nickAuthState === "unknown");
+    const needNick = nickNeeded && !!G.nickStepReady;   // 点过合并入口才放出原生按钮
+    const nickRowH = nickNeeded ? 34 : 0, nickGap = nickNeeded ? 8 : 0;
+    const btnH = 40, hintY = py + ph - 14 - btnH - nickRowH - nickGap - 20;
     const rect = { x: px + 14, y: py + 64, w: pw - 28, h: Math.max(90, hintY - 20 - (py + 64)) };
     G.modal.lbRect = rect;
+    const nickBy = py + ph - 14 - btnH - nickGap - nickRowH;
 
     const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
     if (!authed) {
@@ -2715,7 +2748,7 @@ module.exports = function (G) {
       /* ---- 拒绝过授权：这里必须给出可执行动作，而不是让用户看空榜 ---- */
       text("还看不到好友成绩", cx, cy - 34, "16px sans-serif", C.ink);
       text("微信需要你允许「使用你的微信朋友信息」，", cx, cy - 6, "12px sans-serif", C.ink3);
-      text("才能读取好友的单局成绩（不含通讯录）。", cx, cy + 14, "12px sans-serif", C.ink3);
+      text("才能读取好友的猎手分（不含通讯录）。", cx, cy + 14, "12px sans-serif", C.ink3);
       // 小锁：锁梁 + 锁体
       const ly = cy + 62;
       ctx.strokeStyle = "rgba(232,137,12,.6)"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
@@ -2723,10 +2756,14 @@ module.exports = function (G) {
       ctx.lineCap = "butt";
       ctx.fillStyle = "rgba(232,137,12,.6)";
       G.rr(ctx, cx - 13, ly - 1, 26, 18, 5);
-    } else if (!authed) {
+    } else if (auth === "asking") {
       // 正在弹授权框 / 还没回来：别写"加载中"，否则用户以为数据在等
       text("正在请求好友权限…", cx, cy - 6, "14px sans-serif", C.ink3);
       text("（只读同玩好友的成绩，不含通讯录）", cx, cy + 18, "11px sans-serif", C.ink3);
+    } else if (!authed) {
+      // 还没授权过：明确告诉玩家要做一次开启，而不是显示假的"正在请求"
+      text("点下方按钮开启好友榜", cx, cy - 6, "14px sans-serif", C.ink2);
+      text("一次开启：好友榜 · 超越提醒 · 微信昵称", cx, cy + 18, "11px sans-serif", C.ink3);
     } else {
       // 占位底：覆盖层还没画上来时（真机首帧 / 浏览器调试）不至于是一片空白
       text("正在加载好友排行…", cx, cy, "12px sans-serif", C.ink3);
@@ -2734,14 +2771,43 @@ module.exports = function (G) {
 
     // 说明文案随状态变
     text(
-      auth === "denied" ? "开启后好友成绩会自动出现在这里" : "玩过本游戏的好友自动进榜，无需授权通讯录",
+      auth === "denied" ? "开启后好友成绩会自动出现在这里" : "猎手分 = 每分钟命中 × 玩法/难度系数，取近 30 天最高",
       px + pw / 2, hintY, "11px sans-serif", C.ink3
     );
 
-    // 主按钮：未授权=去开启；已授权=邀猫友
+    // 微信昵称授权行：canvas 只画提示，真正的按钮由微信原生层盖在这里（假按钮点不出授权框）
+    if (nickNeeded) {
+      ctx.fillStyle = needNick ? "rgba(12,125,114,.16)" : "rgba(12,125,114,.06)";
+      G.rr(ctx, px + 14, nickBy, pw - 28, nickRowH, nickRowH / 2); ctx.fill();
+      text(
+        needNick ? "点这里获取微信昵称（好友可见）" : "先点下方按钮，再在这里获取微信昵称",
+        px + pw / 2, nickBy + nickRowH / 2, "10px sans-serif", needNick ? C.ink2 : C.ink3
+      );
+    }
+
+    // 底部只有一个入口：微信不允许把三种授权合成一个弹窗，但可以让玩家只认一个按钮。
+    // 点一次在同一次手势里触发好友授权 + 提醒订阅，再引导点上面的原生昵称按钮。
     const bx = px + 14, bw = pw - 28, by = py + ph - 14 - btnH;
+    const ns = G.rankNoticeState;
+    const noticeNeed = ns !== "ok";
+    const noticeBlocked = ns === "denied" || ns === "ban" || ns === "off";
+    const allReady = authed && !nickNeeded && !noticeNeed;
+    let mainLabel;
+    if (!authed) mainLabel = auth === "denied" ? "去设置开启好友榜" : "开启好友榜";
+    else if (nickNeeded && noticeNeed) mainLabel = "开启完整好友榜";
+    else if (nickNeeded) mainLabel = "下一步：获取微信昵称";
+    else if (noticeBlocked) mainLabel = "去设置开启提醒";
+    else if (noticeNeed) mainLabel = "开启超越提醒";
+    else mainLabel = "邀猫友比一比";
     orangePill(bx, by, bw, btnH, { dy: 4, blur: 14, ring: false });
-    text(auth === "denied" ? "去设置开启" : "邀猫友比一比", bx + bw / 2, by + btnH / 2, "16px sans-serif", "#fff");
+    text(mainLabel, bx + bw / 2, by + btnH / 2, "16px sans-serif", "#fff");
+
+    // 同步原生授权按钮位置（展开后才创建，关闭/切屏时销毁）
+    if (M.open && !M.closing && G.syncNickButton) {
+      G.syncNickButton({ x: px + 14, y: nickBy, w: pw - 28, h: nickRowH }, needNick);
+    } else if (G.syncNickButton) {
+      G.syncNickButton(null, false);
+    }
 
     // 覆盖层时序：只有已授权才拉起子域；完全展开后 show（避免列表在缩放中"贴死"），开始关闭立刻 hide
     if (!authed && !G.modal.lbHidden) { G.modal.lbHidden = true; ui.hideLB(); }
@@ -2750,8 +2816,8 @@ module.exports = function (G) {
 
     modalEnd(M, hit, () => { ui.hideLB(); });
     if (M.open) {
-      if (auth === "denied") btn(bx, by, bw, btnH, () => G.grantFriendAuth());
-      else btn(bx, by, bw, btnH, () => G.shareInvite("lb"));
+      if (allReady) btn(bx, by, bw, btnH, () => G.shareInvite("lb"));
+      else if (G.enableLbFeatures) btn(bx, by, bw, btnH, G.enableLbFeatures);
     }
   };
 

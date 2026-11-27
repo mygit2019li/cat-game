@@ -1,8 +1,8 @@
 /* 插屏广告探针：验证提前创建、只在本周记录弹窗 show、其他入口不触发、无 API 静默跳过 */
 const fs=require("fs"),path=require("path");
 const {chromium}=require("playwright-core");
-const ROOT="/Users/lipeng/www/weixin/cat-game/minigame";
-const MODS=["./js/platform.js","./js/config.js","./js/audio.js","./js/draw.js","./js/scenery.js","./js/prey.js","./js/ui.js","./js/sharecard.js","./js/ad.js","./js/feeder.js","./game.js"];
+const ROOT="/Users/lipeng/www/myproject/cat-game/minigame";
+const MODS=["./js/platform.js","./js/config.js","./js/rank.js","./js/audio.js","./js/draw.js","./js/scenery.js","./js/prey.js","./js/ui.js","./js/sharecard.js","./js/ad.js","./js/feeder.js","./game.js"];
 const modules={}; for(const n of MODS) modules[n]=fs.readFileSync(path.join(ROOT,n),"utf8");
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const A=[];

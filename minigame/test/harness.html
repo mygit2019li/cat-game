@@ -38,15 +38,43 @@
     getStorageSync: (k) => localStorage.getItem(k) || "",
     setStorageSync: (k, v) => localStorage.setItem(k, v),
     /* 关系链：主域上报成绩 + 开放数据域消息通道（记录到 window 供测试断言） */
-    setUserCloudStorage: () => {},
-    getOpenDataContext: () => ({
-      postMessage: (msg) => { (window.__odcMsgs = window.__odcMsgs || []).push(msg); }
-    }),
+    setUserCloudStorage: (o) => {
+      (window.__cloudWrites = window.__cloudWrites || []).push(o && o.KVDataList || []);
+    },
+    getOpenDataContext: () => {
+      if (!window.__odcStub) {
+        // 独立于主屏 canvas 的离屏画布：主域每帧 drawImage 它到上屏（官方 offscreenCanvas 模式）
+        const c = document.createElement("canvas");
+        window.__odcStub = {
+          canvas: c,
+          postMessage: (msg) => { (window.__odcMsgs = window.__odcMsgs || []).push(msg); }
+        };
+      }
+      return window.__odcStub;
+    },
     /* 好友关系链授权（scope.WxFriendInteraction）的模拟：
        window.__authSetting  = { "scope.WxFriendInteraction": true|false } 当前授权表
        window.__authStub     = "grant"（默认）| "deny" | "invalid"    authorize 的行为
        window.__openSettingGrant = false 可让“去设置”也开不出来 */
-    getSetting: (o) => { o && o.success && o.success({ authSetting: window.__authSetting || {} }); },
+    /* getSetting 同时模拟订阅状态：window.__rankSubState = accept|reject|ban（默认未订阅）
+       window.__rankSubMainSwitch = false 可模拟用户关掉订阅消息总开关。 */
+    getSetting: (o) => {
+      const sub = window.__rankSubState || "";
+      o && o.success && o.success({
+        authSetting: window.__authSetting || {},
+        subscriptionsSetting: {
+          mainSwitch: window.__rankSubMainSwitch !== false,
+          itemSettings: sub ? { SYS_MSG_TYPE_RANK: sub } : {}
+        }
+      });
+    },
+    /* 系统订阅消息垫片：记录调用参数，点击结果由 window.__rankSubTap 控制，默认同意。 */
+    requestSubscribeSystemMessage: (o) => {
+      (window.__rankSubCalls = window.__rankSubCalls || []).push(JSON.parse(JSON.stringify((o && o.msgTypeList) || [])));
+      const st = window.__rankSubTap || "accept";
+      window.__rankSubState = st;
+      o && o.success && o.success({ errMsg: "requestSubscribeSystemMessage:ok", SYS_MSG_TYPE_RANK: st });
+    },
     authorize: (o) => {
       window.__authCalls = (window.__authCalls || 0) + 1;
       const st = (window.__authSetting = window.__authSetting || {});
@@ -61,6 +89,26 @@
       if (window.__openSettingGrant !== false) st["scope.WxFriendInteraction"] = true;
       o && o.success && o.success({ authSetting: st });
       o && o.complete && o.complete({ authSetting: st });
+    },
+    /* 原生用户信息按钮垫片：记录创建/销毁，暴露 __tapNickBtn() 模拟点击授权。
+       window.__nickBtnTap = "ok"|"deny" 控制授权结果，默认 ok。 */
+    createUserInfoButton: (opt) => {
+      window.__nickBtnCreated = (window.__nickBtnCreated || 0) + 1;
+      window.__nickBtnStyle = opt.style;
+      let tapCb = null;
+      const btn = {
+        onTap: (cb) => { tapCb = cb; },
+        destroy: () => { window.__nickBtnDestroyed = (window.__nickBtnDestroyed || 0) + 1; }
+      };
+      window.__tapNickBtn = () => {
+        if (!tapCb) return;
+        if ((window.__nickBtnTap || "ok") === "ok") {
+          tapCb({ errMsg: "getUserInfo:ok", userInfo: { nickName: "真名猫主", avatarUrl: "http://thirdwx.qlogo.cn/me" } });
+        } else {
+          tapCb({ errMsg: "getUserInfo:fail auth deny", userInfo: null });
+        }
+      };
+      return btn;
     },
     createWebAudioContext: () => new (window.AudioContext || window.webkitAudioContext)(),
     /* ===== 原生模板广告（wx.createCustomAd）垫片 =====
