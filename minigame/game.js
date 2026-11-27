@@ -276,6 +276,7 @@ G.startGame = () => {
   G.fx.clear();
   G.buildPreys();
   G.topUpPreys();   // 开局即补足到当前阶段的目标数量（鱼群模式开局就该是一大群，而非 3 条等阶段②）
+  if (G.waveReset) G.waveReset();   // 波次制：新一局所有猎物在场
   if (G.config.keepScreen) { G.platform.keepScreen(true); S._keepOn = true; }
   const beginGame = () => {
     countT = 3; lastInt = -1;
@@ -540,6 +541,7 @@ function changeStage(st) {
     (G.preys || []).forEach(p => { if (p.type === "frog" && p.spawnOnPad) p.spawnOnPad(); });
   }
   G.topUpPreys();
+  if (G.waveReset) G.waveReset();   // 波次制：阶段加员后放行待命个体，避免被永久卡住
 }
 function tickSecond() {
   const S = G.session;
@@ -1084,6 +1086,7 @@ function loop() {
   const S = G.session;
   const t = S.time;
 
+
   // 集中收尾：离开游戏态（counting/playing/paused 之外）时关闭屏幕常亮，
   // 覆盖所有直接 G.screen="home" 的返回路径，避免回首页后仍常亮耗电
   if (S._keepOn && G.screen !== "counting" && G.screen !== "playing" && G.screen !== "paused") {
@@ -1110,7 +1113,10 @@ function loop() {
     while (S.secAcc >= 1) { S.secAcc -= 1; tickSecond(); }
     // 蝌蚪快跑：数量按击中能力动态调节（每 8s 评估，1–7 只）
     if (G.tadpoleTick) G.tadpoleTick(dt);
+    if (G.waveArm) G.waveArm();   // 对局运行帧：打开波次门闸（多只玩法才真正拦截）
     G.preys.forEach(p => p.update(dt, S.time));
+    // 多只波次制（鼠/蛙/蝌蚪/激光/萤火虫）：全灭→空场 0.6s→统一补下一波
+    if (G.waveTick) G.waveTick(dt);
     /* 蝌蚪长按尾巴：按住满 300ms 且目标仍存活 → 挣扎（位置冻结、尾巴快摆、头扭动、瞪眼）；
        目标已不在（被另一只爪子拍走/离场）→ 静默丢弃，不结算 */
     const holds = S.tadHolds;
@@ -1233,6 +1239,7 @@ G.platform.resizeCb.push(() => {
     G.buildPreys();
     G.preys.forEach(p => { if (p.stage) p.stage = 0; });   // 触发下帧重进阶段
     G.topUpPreys();   // 旋转屏幕等重建于 3 点后，按当前阶段补足
+    if (G.waveReset) G.waveReset();   // 波次制：重建后放行待命个体
   }
   if (G.screen === "leaderboard") G.ui.showLB();           // 排行榜卡片区域随屏重发
   /* 尺寸/安全区/胶囊变化后，重算已挂载广告的落点。冷启动瞬间部分安卓机横屏尚未生效，

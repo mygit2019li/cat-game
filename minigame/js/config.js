@@ -570,10 +570,10 @@ module.exports = function (G) {
   ];
   /* 老鼠三阶段行为表（台球桌布局：任意洞进出，路线横穿台面供拦截；速度快慢分档） */
   G.MOUSE_STAGE = {
-    1: { peek: 2.2,  dartSpeed: 230, fakeP: 0,    adjacent: false, dartP: 0.6 },
-    2: { peek: 1.4,  dartSpeed: 300, fakeP: 0.35, adjacent: false, dartP: 0.85 },
-    3: { peek: 0.85, dartSpeed: 420, fakeP: 0.55, adjacent: false, dartP: 1 }
-  };
+    1: { peek: 2.2,  dartSpeed: 190, fakeP: 0,    adjacent: false, dartP: 0.6 },
+    2: { peek: 1.4,  dartSpeed: 250, fakeP: 0.35, adjacent: false, dartP: 0.85 },
+    3: { peek: 0.85, dartSpeed: 350, fakeP: 0.55, adjacent: false, dartP: 1 }
+  };   // 11-26：室内捕鼠冲洞速度整体 -17%（230/300/420→190/250/350），探头 peek 时长不变
   /* 青蛙跳三阶段：一次循环 = 蓄力 → 腾空 → 落水 → 静坐，循环结束换一片荷叶。
      crouch/leap/land/settle = 各状态基准时长（秒，按速度倍率缩放）
      prep   = 起跳前落点光圈提前量（猫唯一的预判依据，三个段位都保留）
@@ -663,7 +663,7 @@ module.exports = function (G) {
   /* 猎物基础定义 */
   G.PREY_DEF = {
     fish:      { w: 116, h: 70, speed: 95,  wobF: 2.0, wobA: 0.55, dartMin: 2.2, dartMax: 4.2, yMin: 0.02, yMax: 0.9,  face: true,  sparkColor: "#ffb02e" },
-    mouse:     { w: 132, h: 58, speed: 125, wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },
+    mouse:     { w: 132, h: 58, speed: 80,  wobF: 3.2, wobA: 0.35, dartMin: 1.4, dartMax: 2.8, yMin: 0.45, yMax: 0.98, face: true,  sparkColor: "#e8d9bd" },   // 群鼠乱窜基准（11-26：125→80，整体 -36%；室内捕鼠冲洞走 MOUSE_STAGE.dartSpeed 不受影响）
     butterfly: { w: 92,  h: 80, speed: 52,  wobF: 4.2, wobA: 0.9,  dartMin: 2.8, dartMax: 4.8, yMin: 0.02, yMax: 0.6,  face: true,  sparkColor: "#ffd94d" },
     laser:     { w: 54,  h: 54, speed: 265, wobF: 5.5, wobA: 0.85, dartMin: 0.5, dartMax: 1.2, yMin: 0.02, yMax: 0.92, face: false, sparkColor: "#ff6b6b" },
     /* 暗夜荧光：发光玩具命中盒比激光略大（高速目标宽容些），spark 用荧光黄绿 */

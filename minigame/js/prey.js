@@ -39,6 +39,86 @@ module.exports = function (G) {
     return pool.length ? pool[Math.floor(rand(0, pool.length))] : -1;
   };
 
+  /* ===================== 波次制补充（多只模式）=====================
+     需求：多只模式下，当前轮猎物被清空后再统一补下一波（"清场→短暂空场→新一波"），
+     而不是消失一只立刻补一只，强化"整窝端掉"的成就感。
+     做法：猎物对象仍常驻复用，被拍/漏走后不各自立即重生，而是进入 waveHold 待命；
+     G.waveTick 每帧检测——本类猎物全部待命后空场 0.6s，再统一放行重生。
+     单只模式（preyCount===1 / 单条蝌蚪 / 萤火虫 ffCount===1）完全不启用，行为照旧。 */
+  const WAVE_TYPES = { mouse: 1, frog: 1, tadpole: 1, laser: 1, pool: 1 };
+  const WAVE_GAP = 0.6;
+  let waveGapT = 0;
+  /* 运行门闸：只有真实对局主循环在驱动波次协调（每帧先 G.waveArm() 再 update）时才拦截
+     猎物的自行重生。裸调单只 p.update()（单元测试/结算页背景等）门闸关闭，行为与原来一致。 */
+  let waveArmed = false;
+  G.waveArm = () => { waveArmed = G.waveModeOn(); };
+  G.waveDisarm = () => { waveArmed = false; waveGapT = 0; };
+  /* 该玩法当前是否走波次制：多只 + 属于 5 种目标猎物 */
+  G.waveModeOn = () => {
+    const tp = G.config && G.config.targetType;
+    if (!WAVE_TYPES[tp]) return false;
+    if (tp === "tadpole") return Number(G.config.tadCount) === 3;
+    if (tp === "pool") return Number(G.config.ffCount) > 1;
+    if (tp === "mouse" && G.scene && G.scene.mouseBg === "swarm") return true;   // 群鼠固定多只
+    return Number(G.config.preyCount) !== 1;
+  };
+  /* 单只猎物"待命"判定：只有显式进入波次待命才算这一轮被清空。
+     不含 vanishT>0（还在播消失动画）——纯空场从最后一只完全消失起算。 */
+  const isHeld = (p) => !!p.waveHold;
+  /* 放行一只待命猎物：调用各自现成的重生路径（与原冷却结束时同一入口） */
+  const releaseWavePrey = (p) => {
+    p.waveHold = false; p.fade = 0;
+    if (p.type === "frog") { p.rspT = 0; p._waveHit = false; p.spawnOnPad(); }
+    else if (p.type === "pool") { p.darkT = 0; p.tp = { phase: "in", t: 0 }; p.relocate(true); }
+    else if (p.type === "laser") {
+      p.vanishT = 0;
+      const s0 = p.laserSpot();
+      p.x = s0.x; p.y = s0.y;
+      p.state = "dart"; p.stateT = 0;
+      p.laserNewWaypoint();
+    }
+    else if (p.type === "tadpole") { p.darkT = 0; p.tadSpawn(); }
+    else if (p.type === "mouse") {
+      if (G.scene && G.scene.mouseBg === "swarm") {
+        // 群鼠：随机换个落点（沿用原 updateSwarmMouse 的重生落位）
+        const b = G.bounds();
+        for (let attempt = 0; attempt < 5; attempt++) {
+          p.x = b.x + rand(0.1, 0.9) * b.w;
+          p.y = b.y + rand(0.14, 0.86) * b.h;
+          if (!preys.some(q => q !== p && q.vanishT <= 0 && Math.hypot(q.x - p.x, q.y - p.y) < 100)) break;
+        }
+        p.swimAng = rand(0, Math.PI * 2); p._visAng = p.swimAng;
+        p.state = "scurry"; p.stateT = 0; p.stateDur = rand(p._scDur ? p._scDur[0] : 1.4, p._scDur ? p._scDur[1] : 2.8);
+        p.fade = 1;
+      } else {
+        // 室内捕鼠：放行即探头出洞（新一波"冒头"），由正常 peek→dart 循环接管
+        p.state = "peek"; p.mT = 0; p.mState = null; p.scared = false; p.fade = 1; p.lift = 64;
+      }
+    }
+  };
+  /* 每帧（在所有猎物 update 之后）调用，驱动"全灭→空场→新一波" */
+  G.waveTick = (dt) => {
+    if (!waveArmed || !G.session || G.session.stage == null || !G.waveModeOn()) { waveGapT = 0; return; }
+    const tp = G.config.targetType;
+    const list = preys.filter(p => p.type === tp && p.despawn == null);
+    if (!list.length) { waveGapT = 0; return; }
+    if (list.every(isHeld)) {
+      waveGapT += dt;
+      if (waveGapT >= WAVE_GAP) {
+        waveGapT = 0;
+        list.forEach(releaseWavePrey);
+      }
+    } else {
+      waveGapT = 0;
+    }
+  };
+  /* 开局 / 重建 / 阶段切换：放行所有待命猎物（数量可能随阶段增加，
+     否则新补的活猎物会让"全灭"永不成立，上一波待命个体会被永久卡住） */
+  G.waveReset = () => {
+    waveGapT = 0;
+    preys.forEach(p => { if (p.waveHold) releaseWavePrey(p); });
+  };
+
   class Prey {
     constructor(type, forcedSpecies) {
       this.type = type;
@@ -420,14 +500,21 @@ module.exports = function (G) {
       // 被拍中：先淡出（0.3s），再等 0.9s 从另一片荷叶水波里重生
       if (this.vanishT > 0) {
         this.vanishT -= dt;
-        if (this.vanishT <= 0) { this.vanishT = 0; this.fade = 0; this.jumpH = 0; this.rspT = 0.9; }
+        if (this.vanishT <= 0) { this.vanishT = 0; this.fade = 0; this.jumpH = 0; this.rspT = 0.9; this._waveHit = true; }
         return;
       }
       if (this.rspT > 0) {
         this.rspT -= dt;
-        if (this.rspT <= 0) { this.rspT = 0; this.spawnOnPad(); }
+        if (this.rspT <= 0) {
+          this.rspT = 0;
+          // 被拍中→多只波次待命；压沉荷叶落水（_waveHit 未置）是物理副作用，照常自行换叶回场
+          if (waveArmed && this._waveHit) this.waveHold = true;
+          else this.spawnOnPad();
+          this._waveHit = false;
+        }
         return;
       }
+      if (this.waveHold) return;   // 波次待命中，不游动不出叶
       // 荷叶被三只青蛙压沉：跟着一起落水（沉下去 → 缩小淡出 → 换叶重生）
       if (this.fState === "drown") {
         this.fT += dt;
@@ -1040,17 +1127,21 @@ module.exports = function (G) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
           this.vanishT = 0;
-          for (let attempt = 0; attempt < 5; attempt++) {
-            this.x = b.x + rand(0.1, 0.9) * b.w;
-            this.y = b.y + rand(0.14, 0.86) * b.h;
-            if (!preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
+          if (waveArmed) { this.waveHold = true; this.fade = 0; }   // 多只波次：等全窝清空再统一窜出
+          else {
+            for (let attempt = 0; attempt < 5; attempt++) {
+              this.x = b.x + rand(0.1, 0.9) * b.w;
+              this.y = b.y + rand(0.14, 0.86) * b.h;
+              if (!preys.some(q => q !== this && q.vanishT <= 0 && Math.hypot(q.x - this.x, q.y - this.y) < 100)) break;
+            }
+            this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng;
+            this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]);
+            this.fade = 1;
           }
-          this.swimAng = rand(0, Math.PI * 2); this._visAng = this.swimAng;
-          this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]);
-          this.fade = 1;
         }
         return;                                   // 消失期间不移动
       }
+      if (this.waveHold) { this.fade = 0; return; }   // 波次待命中，原地隐藏不动
       if (this.state == null) { this.state = "scurry"; this.stateT = 0; this.stateDur = rand(this._scDur[0], this._scDur[1]); }
 
       const pad = 20 * MS;
@@ -1109,9 +1200,14 @@ module.exports = function (G) {
         const p = 1 - Math.max(this.vanishT, 0) / 0.3;
         this.lift = p * p * 64;
         this.fade = 1;   // 受惊滑回洞里全程可见
-        if (this.vanishT <= 0) { this.vanishT = 0; this.state = "hole"; this.lift = 64; this.mT = 0; this.mState = null; }
+        if (this.vanishT <= 0) {
+          this.vanishT = 0; this.state = "hole"; this.lift = 64; this.mT = 0; this.mState = null;
+          // 多只波次：被拍受惊回洞即转入待命（自己跑回洞的 scared=false，不算被清空）
+          if (this.scared && waveArmed) this.waveHold = true;
+        }
         return;
       }
+      if (this.waveHold) { this.lift = 64; this.fade = 0; this.state = "hole"; return; }   // 波次待命：留洞隐藏
       if (this.mState !== this.state) {
         this.mState = this.state; this.mT = 0;
         if (this.state === "hole") {
@@ -1503,12 +1599,12 @@ module.exports = function (G) {
         this.fade = 0;
         if (this.darkT <= 0) {
           this.darkT = 0;
-          this.tp = { phase: "in", t: 0 };
-          this.relocate(true);
+          if (waveArmed) this.waveHold = true;   // 多只波次：等全灭统一亮起
+          else { this.tp = { phase: "in", t: 0 }; this.relocate(true); }
         }
         return;
       }
-
+      if (this.waveHold) return;   // 波次待命中，保持熄灭不换位
       /* ---------- 自发换位：罕见（视频 24 秒只有 2 次）。0.18s 暗下去 → 别处亮起来 ---------- */
       if (this.tp) {
         this.tp.t += dt;
@@ -1799,9 +1895,14 @@ module.exports = function (G) {
       }
       if (this.darkT > 0) {
         this.darkT -= dt; this.fade = 0;
-        if (this.darkT <= 0) { this.darkT = 0; this.tadSpawn(); }
+        if (this.darkT <= 0) {
+          this.darkT = 0;
+          if (waveArmed) this.waveHold = true;   // 多条波次：等全部离场统一进场
+          else this.tadSpawn();
+        }
         return;
       }
+      if (this.waveHold) { this.fade = 0; return; }   // 波次待命中，在场外隐身不动
       /* 长按尾巴·挣扎：整体位置冻结（头与尾链都停住），只有尾巴快摆 + 头部扭动，
          像"被抓住在挣"——位置不动，猫的爪子不会跟丢。 */
       if ((this.tadStruggle || 0) > 0) {
@@ -2093,13 +2194,17 @@ module.exports = function (G) {
         this.vanishT -= dt;
         if (this.vanishT <= 0) {
           this.vanishT = 0;
-          const s0 = this.laserSpot();
-          this.x = s0.x; this.y = s0.y;
-          this.state = "dart"; this.stateT = 0;
-          this.laserNewWaypoint();
+          if (waveArmed) { this.waveHold = true; this.fade = 0; }   // 多只波次：等全灭统一出现
+          else {
+            const s0 = this.laserSpot();
+            this.x = s0.x; this.y = s0.y;
+            this.state = "dart"; this.stateT = 0;
+            this.laserNewWaypoint();
+          }
         }
         return;
       }
+      if (this.waveHold) { this.fade = 0; return; }   // 波次待命中，红点隐藏不动
       this.stateT += dt;
       // 瞬移预警：原地高频闪烁 0.3s（渲染层按 preTele 处理闪烁），结束后瞬移
       if (this.state === "preTele") {
@@ -2181,7 +2286,7 @@ module.exports = function (G) {
 
     /* ============ 命中判定（对齐 DOM 包围盒点击语义） ============ */
     hittable(x, y) {
-      if (this.vanishT > 0 || this.despawn != null) return false;
+      if (this.vanishT > 0 || this.despawn != null || this.waveHold) return false;
       if (this.type === "tadpole") {
         /* 头部 ≈ 62×46 设计像素（×1.55），尾节再 +8px 手指余量；
            折返弧中额外放宽 15%——这是唯一的速度低谷，也是 +2 窗口。 */
@@ -2549,6 +2654,9 @@ module.exports = function (G) {
     const S = G.session, T = G.TADPOLE || {};
     /* 单条模式：数量恒 1，不做动态增减（tadCount 字段恒 1，stageTargetCount 直接按档返回）。 */
     if (Number(G.config.tadCount) !== 3) { S.tadCount = 1; S.tadEval = 0; S.tadDown = 0; return; }
+    /* 多只波次制：冻结动态增减——数量完全跟随阶段（changeStage 抬基线 + topUpPreys 补员），
+       不在一波进行中插新蝌蚪/抽走蝌蚪，保证"整波清空再补下一波"的节奏不被打断。 */
+    if (waveArmed) { S.tadEval = 0; return; }
     const base = Math.min(3, Math.max(1, S.stage || 1));       // 阶段基线：1→2→3
     const max = Math.min(3, T.countMax || 3);
     S.tadEval = (S.tadEval || 0) + dt;
